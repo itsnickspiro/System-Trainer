@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>OneSignal_API</key>
+	<string>os_v2_app_h47lav52dnax5kwltgzeapdgqoywvs2leegupwudcrkjsrzmxvnqwygrda754svtnkgcojt7wjlv7gdt6mividsn6icnj5cudjgpn5q</string>
+	<key>AIAPIKey</key>
+	<string>YOUR_OPENAI_API_KEY_HERE</string>
+	<key>API_NINJAS_KEY</key>
+	<string>IIIBmDmTltT3vx/lRjHRNw==F2hkiByjXjvHtWNR</string>
+	<key>WeatherStack_API</key>
+	<string>686a002465af0f052831ea4aa89b7a22</string>
+	<key>Wger_API</key>
+	<string>0f8deaa2fa1136fa5226a2b1fce8314ba900b12b</string>
+	<key>Chomp_API</key>
+	<string>Azq6SdV7BYW783jpI</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string></string>
+		</dict>
+	</array>
+</dict>
+</plist>

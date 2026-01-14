@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		013B6C8C2EAB0B39000E203E /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 013B6C8B2EAB0B39000E203E /* GoogleService-Info.plist */; };
+		013B6C8D2EAB0B39000E203E /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 013B6C8B2EAB0B39000E203E /* GoogleService-Info.plist */; };
+		013B6C8E2EAB0B39000E203E /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 013B6C8B2EAB0B39000E203E /* GoogleService-Info.plist */; };
 		013B6C902EAB0C49000E203E /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 013B6C8F2EAB0C49000E203E /* FirebaseAI */; };
 		013B6C922EAB0C49000E203E /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 013B6C912EAB0C49000E203E /* FirebaseAnalytics */; };
 		013B6C942EAB0C49000E203E /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 013B6C932EAB0C49000E203E /* FirebaseAnalyticsCore */; };
@@ -49,6 +52,12 @@
 		0176B6D62EAC6D5400ADF2A8 /* WorkoutKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; };
 		0176B6D72EAC6D5400ADF2A8 /* WorkoutKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		0176B6EF2EAC714A00ADF2A8 /* BarcodeScanner in Frameworks */ = {isa = PBXBuildFile; productRef = 0176B6EE2EAC714A00ADF2A8 /* BarcodeScanner */; };
+		01BC56A42ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
+		01BC56A52ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
+		01BC56A62ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
+		01BC56A82ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */; };
+		01BC56A92ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */; };
+		01BC56AA2ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,17 +95,43 @@
 		011D8F8E2EA40A0100609E51 /* RPT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RPT.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		011D8F9D2EA40A0200609E51 /* RPTTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		011D8FA72EA40A0200609E51 /* RPTUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		013B6C8B2EAB0B39000E203E /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WorkoutKit.framework; path = System/Library/Frameworks/WorkoutKit.framework; sourceTree = SDKROOT; };
 		0176B6DD2EAC6D8600ADF2A8 /* HealthKitUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKitUI.framework; path = System/Library/Frameworks/HealthKitUI.framework; sourceTree = SDKROOT; };
 		0176B6DE2EAC6D8600ADF2A8 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		0176B6E52EAC6DCC00ADF2A8 /* PhotosUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PhotosUI.framework; path = System/Library/Frameworks/PhotosUI.framework; sourceTree = SDKROOT; };
 		0176B6E62EAC6DCC00ADF2A8 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
+		01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE_AND_DATA_FLOW.md; sourceTree = "<group>"; };
+		01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = IMMEDIATE_ACTION_PLAN.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0176B5EE2EABF59C00ADF2A8 /* Exceptions for "RPT" folder in "RPT" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 011D8F8D2EA40A0100609E51 /* RPT */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		011D8F902EA40A0100609E51 /* RPT */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0176B5EE2EABF59C00ADF2A8 /* Exceptions for "RPT" folder in "RPT" target */,
+			);
 			path = RPT;
+			sourceTree = "<group>";
+		};
+		011D8FA02EA40A0200609E51 /* RPTTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RPTTests;
+			sourceTree = "<group>";
+		};
+		011D8FAA2EA40A0200609E51 /* RPTUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RPTUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -171,8 +206,12 @@
 			isa = PBXGroup;
 			children = (
 				011D8F902EA40A0100609E51 /* RPT */,
+				011D8FA02EA40A0200609E51 /* RPTTests */,
+				011D8FAA2EA40A0200609E51 /* RPTUITests */,
 				0176B6D12EAC6D2900ADF2A8 /* Frameworks */,
 				011D8F8F2EA40A0100609E51 /* Products */,
+				01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */,
+				01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */,
 			);
 			sourceTree = "<group>";
 		};
@@ -261,6 +300,9 @@
 			dependencies = (
 				011D8F9F2EA40A0200609E51 /* PBXTargetDependency */,
 			);
+			fileSystemSynchronizedGroups = (
+				011D8FA02EA40A0200609E51 /* RPTTests */,
+			);
 			name = RPTTests;
 			packageProductDependencies = (
 				013B6C992EAB0C5B000E203E /* FirebaseAI */,
@@ -286,6 +328,9 @@
 			);
 			dependencies = (
 				011D8FA92EA40A0200609E51 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				011D8FAA2EA40A0200609E51 /* RPTUITests */,
 			);
 			name = RPTUITests;
 			packageProductDependencies = (
@@ -357,6 +402,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				01BC56A62ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */,
+				01BC56AA2ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */,
+				013B6C8C2EAB0B39000E203E /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -364,6 +412,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				013B6C8D2EAB0B39000E203E /* GoogleService-Info.plist in Resources */,
+				01BC56A42ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */,
+				01BC56A82ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -371,6 +422,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				013B6C8E2EAB0B39000E203E /* GoogleService-Info.plist in Resources */,
+				01BC56A52ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */,
+				01BC56A92ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

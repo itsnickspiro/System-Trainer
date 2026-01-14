@@ -1,0 +1,14 @@
+
+# Secrets
+Secrets.swift
+GoogleService-Info.plist
+
+# Xcode
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+DerivedData/
+xcuserdata/
+.DS_Store
