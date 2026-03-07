@@ -6,8 +6,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
-    // AI Coach disabled for now - can be re-enabled in future update
-    // @State private var showingCoach = false
+
     @State private var selectedTab = 0
     @StateObject private var dataManager = DataManager.shared
     @State private var now = Date()
@@ -46,6 +45,14 @@ struct ContentView: View {
                 LeaderboardView()
                     .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
                     .tag(4)
+
+                InventoryAndShopView()
+                    .tabItem { Label("Inventory", systemImage: "bag.fill") }
+                    .tag(5)
+
+                CoachView()
+                    .tabItem { Label("System", systemImage: "waveform.badge.magnifyingglass") }
+                    .tag(6)
             }
             .background(
                 (colorScheme == .dark ? Color.black : Color.white)
@@ -54,22 +61,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
         .background(colorScheme == .dark ? Color.black : Color.white)
-        // AI Coach disabled for now - can be re-enabled in future update
-        // .sheet(isPresented: $showingCoach) {
-        //     CoachView()
-        //         .presentationDetents([.large])
-        //         .presentationDragIndicator(.visible)
-        // }
-        #if DEBUG
-        .onLongPressGesture(minimumDuration: 3.0) {
-            // Long press for 3 seconds to show API test (Debug only)
-            let testView = UIHostingController<APITestView>(rootView: APITestView())
-            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-               let rootViewController = windowScene.windows.first?.rootViewController {
-                rootViewController.present(testView, animated: true)
-            }
-        }
-        #endif
+
         .onAppear {
             // Configure DataManager with SwiftData context
             dataManager.configure(with: modelContext)

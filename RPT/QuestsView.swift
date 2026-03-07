@@ -5,6 +5,7 @@ struct QuestsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \Quest.createdAt, order: .reverse) private var quests: [Quest]
+    @StateObject private var dataManager = DataManager.shared
     @State private var selectedDay = Date()
     
     private var todaysQuests: [Quest] {
@@ -126,11 +127,14 @@ struct QuestsView: View {
     }
     
     private func toggleQuestCompletion(_ quest: Quest) {
-        quest.isCompleted.toggle()
         if quest.isCompleted {
-            quest.completedAt = Date()
-        } else {
+            // Un-complete: clear flag and remove completion date only
+            quest.isCompleted = false
             quest.completedAt = nil
+            try? context.save()
+        } else {
+            // Complete via DataManager so XP is awarded and Firebase is synced
+            dataManager.completeQuest(quest)
         }
     }
     

@@ -1,5 +1,38 @@
 import SwiftUI
 
+// MARK: - WorkoutType view extensions (top-level WorkoutType from Models.swift)
+extension WorkoutType {
+    /// SF Symbol icon with fill variant for workout type cards
+    var filledIcon: String {
+        switch self {
+        case .strength:   return "dumbbell.fill"
+        case .cardio:     return "heart.circle.fill"
+        case .flexibility: return "figure.yoga"
+        case .mixed:      return "figure.mixed.cardio"
+        }
+    }
+
+    /// Accent color used in the Training tab UI
+    var uiColor: Color {
+        switch self {
+        case .strength:   return .orange
+        case .cardio:     return .red
+        case .flexibility: return .purple
+        case .mixed:      return .cyan
+        }
+    }
+
+    /// API query string for the exercises endpoint
+    var apiType: String {
+        switch self {
+        case .strength:   return "strength"
+        case .cardio:     return "cardio"
+        case .flexibility: return "stretching"
+        case .mixed:      return ""
+        }
+    }
+}
+
 struct WorkoutView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var dataManager = DataManager.shared
@@ -9,40 +42,6 @@ struct WorkoutView: View {
     @State private var isSearching = false
     @State private var showingWorkoutLogger = false
     @State private var workoutDuration = 30 // minutes
-
-    enum WorkoutType: String, CaseIterable {
-        case strength = "Strength"
-        case cardio = "Cardio"
-        case flexibility = "Flexibility"
-        case mixed = "Mixed"
-
-        var icon: String {
-            switch self {
-            case .strength: return "dumbbell.fill"
-            case .cardio: return "heart.circle.fill"
-            case .flexibility: return "figure.yoga"
-            case .mixed: return "figure.mixed.cardio"
-            }
-        }
-
-        var color: Color {
-            switch self {
-            case .strength: return .orange
-            case .cardio: return .red
-            case .flexibility: return .purple
-            case .mixed: return .cyan
-            }
-        }
-
-        var apiType: String {
-            switch self {
-            case .strength: return "strength"
-            case .cardio: return "cardio"
-            case .flexibility: return "stretching"
-            case .mixed: return ""
-            }
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -100,11 +99,11 @@ struct WorkoutView: View {
             searchExercises(type: type.apiType)
         }) {
             VStack(spacing: 8) {
-                Image(systemName: type.icon)
+                Image(systemName: type.filledIcon)
                     .font(.system(size: 32))
-                    .foregroundColor(selectedWorkoutType == type ? .white : type.color)
+                    .foregroundColor(selectedWorkoutType == type ? .white : type.uiColor)
 
-                Text(type.rawValue)
+                Text(type.displayName)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(selectedWorkoutType == type ? .white : .primary)
             }
@@ -113,7 +112,7 @@ struct WorkoutView: View {
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(selectedWorkoutType == type ?
-                          LinearGradient(colors: [type.color, type.color.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing) :
+                          LinearGradient(colors: [type.uiColor, type.uiColor.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing) :
                           LinearGradient(colors: [Color(.systemGray6), Color(.systemGray6)], startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
             )
@@ -135,7 +134,7 @@ struct WorkoutView: View {
                         .font(.system(size: 24))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Log \(selectedWorkoutType.rawValue) Workout")
+                        Text("Log \(selectedWorkoutType.displayName) Workout")
                             .font(.headline)
                         Text("Track your session and earn XP")
                             .font(.caption)
@@ -153,7 +152,7 @@ struct WorkoutView: View {
                         .fill(.ultraThinMaterial)
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .stroke(selectedWorkoutType.color, lineWidth: 2)
+                                .stroke(selectedWorkoutType.uiColor, lineWidth: 2)
                         )
                 )
             }
@@ -202,7 +201,7 @@ struct WorkoutView: View {
                 .foregroundColor(.secondary)
 
             ForEach(exercises) { exercise in
-                ExerciseCard(exercise: exercise, typeColor: selectedWorkoutType.color)
+                ExerciseCard(exercise: exercise, typeColor: selectedWorkoutType.uiColor)
             }
         }
     }
@@ -286,7 +285,7 @@ struct ExerciseCard: View {
 struct WorkoutLoggerView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var dataManager = DataManager.shared
-    let workoutType: WorkoutView.WorkoutType
+    let workoutType: WorkoutType
     @Binding var duration: Int
     @State private var notes = ""
 
@@ -295,9 +294,9 @@ struct WorkoutLoggerView: View {
             Form {
                 Section("Workout Details") {
                     HStack {
-                        Image(systemName: workoutType.icon)
-                            .foregroundColor(workoutType.color)
-                        Text(workoutType.rawValue)
+                        Image(systemName: workoutType.filledIcon)
+                            .foregroundColor(workoutType.uiColor)
+                        Text(workoutType.displayName)
                             .font(.headline)
                     }
 
@@ -319,7 +318,7 @@ struct WorkoutLoggerView: View {
                             Spacer()
                         }
                     }
-                    .listRowBackground(workoutType.color)
+                    .listRowBackground(workoutType.uiColor)
                 }
             }
             .navigationTitle("Log Workout")
@@ -335,26 +334,9 @@ struct WorkoutLoggerView: View {
     }
 
     private func logWorkout() {
-        // Update profile stats based on workout
         dataManager.updateProfile { profile in
-            // Increase stats based on workout type
-            switch workoutType {
-            case .strength:
-                profile.strength = min(100, profile.strength + Double(duration) / 10)
-            case .cardio:
-                profile.endurance = min(100, profile.endurance + Double(duration) / 10)
-                profile.energy = min(100, profile.energy + Double(duration) / 15)
-            case .flexibility:
-                profile.health = min(100, profile.health + Double(duration) / 15)
-            case .mixed:
-                profile.strength = min(100, profile.strength + Double(duration) / 20)
-                profile.endurance = min(100, profile.endurance + Double(duration) / 20)
-            }
-
-            // Record workout completion
-            profile.updateDailyStats()
+            profile.recordWorkout(type: workoutType, duration: duration)
         }
-
         dismiss()
     }
 }

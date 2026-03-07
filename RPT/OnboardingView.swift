@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct OnboardingView: View {
     @State private var currentPage = 0
@@ -165,7 +166,7 @@ struct OnboardingPage {
     
     static let allPages = [
         OnboardingPage(
-            title: "Welcome to RPG Life",
+            title: "Welcome to RPT",
             description: "Transform your daily life into an epic adventure. Complete real-world quests, level up, and become the hero of your own story.",
             icon: "star.fill",
             accentColor: .yellow,
@@ -236,6 +237,7 @@ struct OnboardingPage {
 
 struct PermissionRequestView: View {
     @Binding var isOnboardingComplete: Bool
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var healthManager = HealthManager()
     @StateObject private var notificationManager = NotificationManager()
     @State private var currentStep = 0
@@ -332,17 +334,36 @@ struct PermissionRequestView: View {
     }
     
     private func completeOnboarding() {
-        // Save profile if name was entered
-        if !profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            UserDefaults.standard.set(profileName, forKey: "userProfileName")
+        let trimmedName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Write the profile into SwiftData so every view that reads Profile.name
+        // shows the player's real name instead of the default "Player".
+        // Fetch any existing profile first to avoid creating duplicates on re-runs.
+        let existing = try? modelContext.fetch(FetchDescriptor<Profile>())
+        if let profile = existing?.first {
+            if !trimmedName.isEmpty {
+                profile.name = trimmedName
+            }
+        } else {
+            let profile = Profile()
+            if !trimmedName.isEmpty {
+                profile.name = trimmedName
+            }
+            modelContext.insert(profile)
         }
-        
+        try? modelContext.save()
+
+        // Keep UserDefaults in sync for any legacy reads
+        if !trimmedName.isEmpty {
+            UserDefaults.standard.set(trimmedName, forKey: "userProfileName")
+        }
+
         // Configure notifications if authorized
         if notificationManager.isAuthorized {
             notificationManager.configureRecurringNotifications()
             notificationManager.setupNotificationCategories()
         }
-        
+
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         isOnboardingComplete = true
     }

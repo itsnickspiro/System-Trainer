@@ -1,12 +1,12 @@
 import SwiftUI
 import SwiftData
-import Firebase
 
 @main
 @MainActor
 struct RPTApp: App {
     @AppStorage("colorScheme") private var colorScheme = "dark"
     @State private var isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+    @State private var hasBootedUp = false
     
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -15,46 +15,71 @@ struct RPTApp: App {
             FoodItem.self,
             FoodEntry.self,
             CustomMeal.self,
+            CustomMealItem.self,
+            ExerciseItem.self,
+            // New models — Part 2 & 4
+            WorkoutSession.self,
+            ExerciseSet.self,
+            ActiveRoutine.self,
+            PersonalRecord.self,
+            PatrolRoute.self,
+            InventoryItem.self,
         ])
-        let diskConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
+        // CloudKit private database sync is enabled by passing a cloudKitDatabase
+        // argument to ModelConfiguration. SwiftData bridges to
+        // NSPersistentCloudKitContainer automatically.
+        //
+        // Requirements:
+        //   • The bundle's iCloud container (iCloud.<bundleID>) must be created in
+        //     the Apple Developer portal and added under Signing & Capabilities →
+        //     iCloud → CloudKit Containers in Xcode.
+        //   • All @Model properties must be optional or have defaults (done above).
+        //   • All @Relationship targets must be optional (done above).
+        //
+        // The container identifier must exactly match what is registered in the
+        // Developer portal. By convention it mirrors the bundle ID.
+        // Must match exactly what is in RPT.entitlements and the Apple Developer portal.
+        let cloudKitContainerID = "iCloud.com.SpiroTechnologies.RPT"
+
+        let cloudConfig = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .private(cloudKitContainerID)
+        )
+
         do {
-            // Try creating a persistent (on-disk) container first
-            return try ModelContainer(for: schema, configurations: [diskConfig])
+            return try ModelContainer(for: schema, configurations: [cloudConfig])
         } catch {
-            // Fall back to an in-memory store to keep the app running during development
-            // Common causes: incompatible/corrupted store or schema changes without migration.
-            // You can reset the simulator’s data or delete the app to clear the old store.
-            print("[SwiftData] Failed to create persistent container: \(error). Falling back to in-memory store.")
-            let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            // CloudKit config can fail in the Simulator (no iCloud account) or when
+            // the entitlement isn't set up yet. Fall back to a local-only store so
+            // development remains unblocked.
+            print("[SwiftData] CloudKit container failed (\(error)). Falling back to local store.")
+            let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             do {
-                return try ModelContainer(for: schema, configurations: [memoryConfig])
+                return try ModelContainer(for: schema, configurations: [localConfig])
             } catch {
-                fatalError("Could not create even an in-memory ModelContainer: \(error)")
+                fatalError("Could not create ModelContainer: \(error)")
             }
         }
     }()
 
     init() {
-        // Ensure Firebase is configured exactly once and on the main actor.
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-            print("[Firebase] Configured")
-        } else {
-            print("[Firebase] Already configured")
-        }
-        
-        // Set up initial user defaults
         setupUserDefaults()
     }
 
     var body: some Scene {
         WindowGroup {
             Group {
-                if isOnboardingComplete {
+                if !hasBootedUp {
+                    // Boot screen shown once per cold launch
+                    BootScreenView(onComplete: { hasBootedUp = true })
+                        .preferredColorScheme(.dark)
+                } else if isOnboardingComplete {
                     ContentView()
                         .onAppear {
-                            // Initialize sample food data
                             SampleFoodData.createSampleFoods(context: sharedModelContainer.mainContext)
+                            SystemDataSeeder.seedIfNeeded(context: sharedModelContainer.mainContext)
                         }
                 } else {
                     OnboardingView(isOnboardingComplete: $isOnboardingComplete)

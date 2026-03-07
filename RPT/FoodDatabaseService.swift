@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import Combine
 
 // MARK: - Open Food Facts Service
 //
@@ -205,11 +206,11 @@ private struct OFFProduct: Decodable {
         for tag in tags {
             let t = tag.lowercased()
             if t.contains("protein") || t.contains("meat") || t.contains("fish") || t.contains("poultry") || t.contains("egg") { return .protein }
-            if t.contains("fruit") || t.contains("vegetable") { return .vegetable }
+            if t.contains("fruit") || t.contains("vegetable") { return .vegetables }
             if t.contains("grain") || t.contains("bread") || t.contains("cereal") || t.contains("pasta") || t.contains("rice") { return .grains }
             if t.contains("dairy") || t.contains("milk") || t.contains("cheese") || t.contains("yogurt") { return .dairy }
-            if t.contains("snack") || t.contains("sweet") || t.contains("chocolate") || t.contains("candy") { return .snack }
-            if t.contains("beverage") || t.contains("drink") || t.contains("juice") { return .beverage }
+            if t.contains("snack") || t.contains("sweet") || t.contains("chocolate") || t.contains("candy") { return .snacks }
+            if t.contains("beverage") || t.contains("drink") || t.contains("juice") { return .beverages }
             if t.contains("fat") || t.contains("oil") || t.contains("butter") { return .fats }
         }
         return .other

@@ -1,41 +1,58 @@
 import SwiftUI
 import CloudKit
+import Observation
 
 // MARK: - CloudKit Leaderboard Manager
 
+@Observable
 @MainActor
-final class CloudKitLeaderboardManager: ObservableObject {
+final class CloudKitLeaderboardManager {
     static let shared = CloudKitLeaderboardManager()
 
-    @Published var players: [LeaderboardPlayer] = []
-    @Published var isLoading = false
-    @Published var errorMessage: String?
+    var players: [LeaderboardPlayer] = []
+    var isLoading = false
+    var errorMessage: String?
 
     private let recordType = "LeaderboardEntry"
     private let publicDB = CKContainer.default().publicCloudDatabase
 
-    // A stable device-level ID used to identify this player's record for upsert.
-    private var deviceID: String {
-        if let stored = UserDefaults.standard.string(forKey: "leaderboardDeviceID") {
-            return stored
+    /// The user's iCloud-account-bound CloudKit record ID.
+    /// Cached after the first successful fetch. Persists across app reinstalls and
+    /// device transfers because it is tied to the user's iCloud account, not the device.
+    private var _cachedCloudKitUserID: String?
+
+    /// Returns the cached CloudKit user ID, or nil if not yet fetched.
+    var currentUserID: String? { _cachedCloudKitUserID }
+
+    /// Fetches (and caches) the anonymous iCloud user record ID.
+    /// This is a stable, account-bound identifier that survives app deletion and device changes.
+    private func resolveUserID() async throws -> String {
+        if let cached = _cachedCloudKitUserID { return cached }
+        // Check UserDefaults cache first to avoid a network round-trip on every launch.
+        if let persisted = UserDefaults.standard.string(forKey: "cloudKitUserRecordID") {
+            _cachedCloudKitUserID = persisted
+            return persisted
         }
-        let new = UUID().uuidString
-        UserDefaults.standard.set(new, forKey: "leaderboardDeviceID")
-        return new
+        let recordID = try await CKContainer.default().userRecordID()
+        let idString = recordID.recordName
+        _cachedCloudKitUserID = idString
+        UserDefaults.standard.set(idString, forKey: "cloudKitUserRecordID")
+        return idString
     }
 
     // MARK: - Push local player to CloudKit
 
     func pushScore(name: String, level: Int, xp: Int, streak: Int) async {
         do {
-            let record = try await fetchOwnRecord() ?? CKRecord(recordType: recordType)
+            let userID = try await resolveUserID()
+            let record = try await fetchOwnRecord(userID: userID) ?? CKRecord(recordType: recordType)
             record["playerName"] = name as CKRecordValue
             record["level"] = level as CKRecordValue
             record["xp"] = xp as CKRecordValue
             record["streak"] = streak as CKRecordValue
-            record["deviceID"] = deviceID as CKRecordValue
+            record["cloudKitUserID"] = userID as CKRecordValue
             record["updatedAt"] = Date() as CKRecordValue
-            try await publicDB.save(record)
+            _ = try await publicDB.save(record)
             errorMessage = nil
         } catch let ckError as CKError where ckError.code == .notAuthenticated {
             errorMessage = "Sign in to iCloud in Settings to post your score."
@@ -51,41 +68,43 @@ final class CloudKitLeaderboardManager: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
 
+        // Resolve user ID in parallel with the leaderboard fetch so we can
+        // highlight the current user's row without a second round-trip.
+        async let userIDResult: String? = try? resolveUserID()
+
         do {
             let predicate = NSPredicate(value: true)
             let query = CKQuery(recordType: recordType, predicate: predicate)
             query.sortDescriptors = [NSSortDescriptor(key: "xp", ascending: false)]
-
-            let (results, _) = try await publicDB.records(matching: query, desiredKeys: ["playerName", "level", "xp", "streak", "deviceID"], resultsLimit: 100)
+            let records = try await performQuery(query, desiredKeys: ["playerName", "level", "xp", "streak", "cloudKitUserID"], limit: 100)
+            let resolvedUserID = await userIDResult
 
             var fetched: [LeaderboardPlayer] = []
-            for (_, result) in results {
-                if let record = try? result.get() {
-                    guard
-                        let name = record["playerName"] as? String,
-                        let level = record["level"] as? Int,
-                        let xp = record["xp"] as? Int,
-                        let streak = record["streak"] as? Int,
-                        let devID = record["deviceID"] as? String
-                    else { continue }
-                    fetched.append(LeaderboardPlayer(
-                        id: record.recordID.recordName,
-                        deviceID: devID,
-                        name: name,
-                        level: level,
-                        xp: xp,
-                        streak: streak,
-                        rank: 0
-                    ))
-                }
+            for record in records {
+                guard
+                    let name = record["playerName"] as? String,
+                    let level = record["level"] as? Int,
+                    let xp = record["xp"] as? Int,
+                    let streak = record["streak"] as? Int,
+                    let ckUserID = record["cloudKitUserID"] as? String
+                else { continue }
+                fetched.append(LeaderboardPlayer(
+                    id: record.recordID.recordName,
+                    cloudKitUserID: ckUserID,
+                    name: name,
+                    level: level,
+                    xp: xp,
+                    streak: streak,
+                    rank: 0,
+                    isCurrentUser: ckUserID == resolvedUserID
+                ))
             }
-
-            // Assign rank after sorting
             players = fetched.enumerated().map { idx, p in
-                LeaderboardPlayer(id: p.id, deviceID: p.deviceID, name: p.name, level: p.level, xp: p.xp, streak: p.streak, rank: idx + 1)
+                LeaderboardPlayer(id: p.id, cloudKitUserID: p.cloudKitUserID, name: p.name,
+                                  level: p.level, xp: p.xp, streak: p.streak,
+                                  rank: idx + 1, isCurrentUser: p.isCurrentUser)
             }
         } catch let ckError as CKError where ckError.code == .unknownItem {
-            // Record type not yet deployed (first launch before any save) — treat as empty
             players = []
         } catch {
             errorMessage = "Could not load leaderboard: \(error.localizedDescription)"
@@ -94,11 +113,41 @@ final class CloudKitLeaderboardManager: ObservableObject {
 
     // MARK: - Private helpers
 
-    private func fetchOwnRecord() async throws -> CKRecord? {
-        let predicate = NSPredicate(format: "deviceID == %@", deviceID)
+    private func fetchOwnRecord(userID: String) async throws -> CKRecord? {
+        let predicate = NSPredicate(format: "cloudKitUserID == %@", userID)
         let query = CKQuery(recordType: recordType, predicate: predicate)
-        let (results, _) = try await publicDB.records(matching: query, resultsLimit: 1)
-        return try results.first?.value.get()
+        return try await performQuery(query, desiredKeys: nil, limit: 1).first
+    }
+
+    /// Wraps `CKQueryOperation` in an async/throws interface.
+    private func performQuery(_ query: CKQuery, desiredKeys: [CKRecord.FieldKey]?, limit: Int) async throws -> [CKRecord] {
+        try await withCheckedThrowingContinuation { continuation in
+            var collected: [CKRecord] = []
+            var finished = false
+
+            let op = CKQueryOperation(query: query)
+            op.desiredKeys = desiredKeys
+            op.resultsLimit = limit
+
+            op.recordMatchedBlock = { _, result in
+                if case .success(let record) = result {
+                    collected.append(record)
+                }
+            }
+
+            op.queryResultBlock = { result in
+                guard !finished else { return }
+                finished = true
+                switch result {
+                case .success:
+                    continuation.resume(returning: collected)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+
+            publicDB.add(op)
+        }
     }
 }
 
@@ -106,20 +155,22 @@ final class CloudKitLeaderboardManager: ObservableObject {
 
 struct LeaderboardPlayer: Identifiable {
     let id: String
-    let deviceID: String
+    let cloudKitUserID: String
     let name: String
     let level: Int
     let xp: Int
     let streak: Int
     let rank: Int
+    /// True when this player record belongs to the signed-in iCloud account.
+    let isCurrentUser: Bool
 }
 
 // MARK: - Root View
 
 struct LeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = CloudKitLeaderboardManager.shared
-    @StateObject private var dataManager = DataManager.shared
+    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
+    private var dataManager: DataManager { DataManager.shared }
     @State private var selectedTab: LeaderboardTab = .world
 
     enum LeaderboardTab: String, CaseIterable {
@@ -213,8 +264,8 @@ struct LeaderboardView: View {
 
 struct WorldLeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = CloudKitLeaderboardManager.shared
-    @StateObject private var dataManager = DataManager.shared
+    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
+    private var dataManager: DataManager { DataManager.shared }
 
     var body: some View {
         ScrollView {
@@ -263,10 +314,7 @@ struct WorldLeaderboardView: View {
 
     private var leaderboardList: some View {
         ForEach(leaderboard.players) { player in
-            LeaderboardRow(
-                player: player,
-                isCurrentUser: player.deviceID == CloudKitLeaderboardManager.shared.deviceID
-            )
+            LeaderboardRow(player: player, isCurrentUser: player.isCurrentUser)
         }
     }
 
@@ -284,13 +332,11 @@ struct WorldLeaderboardView: View {
 
 struct YourRankView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = CloudKitLeaderboardManager.shared
-    @StateObject private var dataManager = DataManager.shared
-
-    private var deviceID: String { CloudKitLeaderboardManager.shared.deviceID }
+    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
+    private var dataManager: DataManager { DataManager.shared }
 
     private var ownEntry: LeaderboardPlayer? {
-        leaderboard.players.first { $0.deviceID == deviceID }
+        leaderboard.players.first { $0.isCurrentUser }
     }
 
     var body: some View {
@@ -319,15 +365,16 @@ struct YourRankView: View {
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
 
-                        // Local preview
+                        // Local preview shown before the first sync.
                         let preview = LeaderboardPlayer(
                             id: "preview",
-                            deviceID: deviceID,
+                            cloudKitUserID: leaderboard.currentUserID ?? "",
                             name: profile.name,
                             level: profile.level,
                             xp: profile.xp,
                             streak: profile.currentStreak,
-                            rank: 0
+                            rank: 0,
+                            isCurrentUser: true
                         )
                         LeaderboardRow(player: preview, isCurrentUser: true)
                             .opacity(0.6)

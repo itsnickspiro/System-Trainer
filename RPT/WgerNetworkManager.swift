@@ -1,5 +1,7 @@
 import Foundation
 import SwiftData
+import Combine
+import UniformTypeIdentifiers
 
 // MARK: - Environment Configuration
 

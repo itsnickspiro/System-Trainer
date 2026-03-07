@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftUI
 import SwiftData
 import UIKit
 
@@ -291,7 +290,7 @@ struct DietView: View {
     
     private func foodEntryRow(entry: FoodEntry) -> some View {
         HStack {
-            Text("\(entry.foodItem.name)")
+            Text(entry.foodItem?.name ?? "Unknown")
                 .font(.subheadline)
                 .foregroundColor(.primary)
                 .lineLimit(1)
@@ -633,9 +632,10 @@ struct AddFoodView: View {
     }
     
     private func addCustomMeal(meal: CustomMeal) {
-        for item in meal.foodItems {
+        for item in meal.foodItems ?? [] {
+            guard let fi = item.foodItem else { continue }
             let entry = FoodEntry(
-                foodItem: item.foodItem,
+                foodItem: fi,
                 quantity: item.quantity,
                 unit: item.unit,
                 meal: selectedMeal,
@@ -792,7 +792,7 @@ struct CustomMealRow: View {
                             .font(.caption.weight(.medium))
                             .foregroundColor(.secondary)
                         
-                        Text("\(meal.foodItems.count) items")
+                        Text("\(meal.foodItems?.count ?? 0) items")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         

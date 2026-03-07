@@ -1,7 +1,12 @@
 
-# Secrets
+# Secrets — never commit live keys
 Secrets.swift
 GoogleService-Info.plist
+RPT/RPT/Info.plist
+*.xcconfig
+
+# Development artifacts
+RPT/RPT/BUILD_FIX_GUIDE.md
 
 # Xcode
 *.xcodeproj/*

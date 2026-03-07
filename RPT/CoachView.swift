@@ -1,10 +1,9 @@
 import SwiftUI
 
 struct CoachView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var dataManager = DataManager.shared
-    @StateObject private var ai = AIManager.shared
+    private var ai: AIManager { AIManager.shared }
     @State private var userInput = ""
     @State private var messages: [ChatMessage] = []
     @State private var isTyping = false
@@ -88,11 +87,7 @@ struct CoachView: View {
             .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color(.systemGroupedBackground))
             .navigationTitle("THE SYSTEM")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
+
         }
     }
 
@@ -244,18 +239,29 @@ struct ChatBubble: View {
             if message.isUser { Spacer(minLength: 50) }
 
             VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content)
-                    .font(.body)
-                    .foregroundColor(message.isUser ? .white : (colorScheme == .dark ? .white : .black))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(message.isUser
-                                  ? AnyShapeStyle(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                  : AnyShapeStyle(colorScheme == .dark ? Color.gray.opacity(0.3) : Color.gray.opacity(0.2))
-                            )
-                    )
+                if message.isUser {
+                    Text(message.content)
+                        .font(.body)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        )
+                } else {
+                    // Render System responses with markdown formatting
+                    Text(systemText(from: message.content))
+                        .font(.body)
+                        .foregroundColor(colorScheme == .dark ? .white : .black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(colorScheme == .dark ? Color.gray.opacity(0.3) : Color.gray.opacity(0.2))
+                        )
+                        .textSelection(.enabled)
+                }
 
                 Text(message.timestamp, style: .time)
                     .font(.caption2)
@@ -266,6 +272,20 @@ struct ChatBubble: View {
             if !message.isUser { Spacer(minLength: 50) }
         }
         .padding(.horizontal)
+    }
+
+    /// Convert the model's raw text into an AttributedString with markdown rendered.
+    private func systemText(from raw: String) -> AttributedString {
+        // Trim leading whitespace per line and collapse excess blank lines
+        let cleaned = raw
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .init(charactersIn: " \t")) }
+            .joined(separator: "\n")
+            .replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+        return (try? AttributedString(
+            markdown: cleaned,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(cleaned)
     }
 }
 

@@ -4,7 +4,7 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [Profile]
-    @StateObject private var healthManager = HealthManager()
+    @StateObject private var dataManager = DataManager.shared
     @State private var showingHealthSettings = false
     @State private var showingProfileEditor = false
     @State private var showingResetConfirmation = false
@@ -45,19 +45,19 @@ struct SettingsView: View {
                 // Health Integration Section
                 Section("Health Integration") {
                     HStack {
-                        Image(systemName: healthManager.isAuthorized ? "heart.fill" : "heart")
-                            .foregroundColor(healthManager.isAuthorized ? .green : .red)
+                        Image(systemName: dataManager.healthManager.isAuthorized ? "heart.fill" : "heart")
+                            .foregroundColor(dataManager.healthManager.isAuthorized ? .green : .red)
                         VStack(alignment: .leading) {
                             Text("Apple Health")
-                            Text(healthManager.permissionStatusMessage)
+                            Text(dataManager.healthManager.permissionStatusMessage)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        if !healthManager.isAuthorized && healthManager.healthDataAvailable {
+                        if !dataManager.healthManager.isAuthorized && dataManager.healthManager.healthDataAvailable {
                             Button("Connect") {
                                 Task {
-                                    await healthManager.requestAuthorization()
+                                    await dataManager.healthManager.requestAuthorization()
                                 }
                             }
                             .buttonStyle(.bordered)
@@ -125,21 +125,36 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     
-                    Link(destination: URL(string: "https://yourapp.com/privacy")!) {
+                    // TODO: Replace these URLs with your actual privacy policy and terms pages
+                    Button {
+                        // Privacy policy URL not yet configured
+                    } label: {
                         HStack {
                             Image(systemName: "hand.raised.fill")
                                 .foregroundColor(.green)
                             Text("Privacy Policy")
+                            Spacer()
+                            Text("Coming Soon")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
-                    
-                    Link(destination: URL(string: "https://yourapp.com/terms")!) {
+                    .foregroundColor(.primary)
+
+                    Button {
+                        // Terms URL not yet configured
+                    } label: {
                         HStack {
                             Image(systemName: "doc.text.fill")
                                 .foregroundColor(.blue)
                             Text("Terms of Service")
+                            Spacer()
+                            Text("Coming Soon")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
+                    .foregroundColor(.primary)
                 }
             }
             .navigationTitle("Settings")
@@ -147,7 +162,7 @@ struct SettingsView: View {
                 ProfileEditorView(profile: profile)
             }
             .sheet(isPresented: $showingHealthSettings) {
-                HealthSettingsView(healthManager: healthManager, profile: profile)
+                HealthSettingsView(healthManager: dataManager.healthManager, profile: profile)
             }
             .confirmationDialog(
                 "Reset All Data",
@@ -165,21 +180,27 @@ struct SettingsView: View {
         .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
         .onAppear {
             Task {
-                await healthManager.requestAuthorization()
+                await dataManager.healthManager.requestAuthorization()
             }
         }
     }
     
     private func resetAllData() {
-        // Delete all profiles
-        for profile in profiles {
-            context.delete(profile)
+        do {
+            // Delete all SwiftData model instances
+            try context.delete(model: Profile.self)
+            try context.delete(model: Quest.self)
+            try context.delete(model: FoodEntry.self)
+            try context.delete(model: FoodItem.self)
+            try context.delete(model: CustomMeal.self)
+            try context.save()
+
+            // Clear onboarding flag so the user is sent back to setup
+            UserDefaults.standard.removeObject(forKey: "hasCompletedOnboarding")
+            UserDefaults.standard.removeObject(forKey: "userProfileName")
+        } catch {
+            print("Failed to reset all data: \(error)")
         }
-        
-        // Note: You'd also want to delete quests here
-        // This is a simplified version
-        
-        try? context.save()
     }
 }
 

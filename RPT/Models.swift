@@ -4,29 +4,32 @@ import SwiftUI
 
 @Model
 final class Profile {
-    var id: UUID
-    var name: String
-    var xp: Int
-    var level: Int
-    var currentStreak: Int
-    var bestStreak: Int
+    // CloudKit sync requires every stored property to be optional or have a default value.
+    // Non-optional properties without defaults crash when CloudKit returns a record
+    // that doesn't yet have that field (e.g. first sync, schema evolution).
+    var id: UUID = UUID()
+    var name: String = "Player"
+    var xp: Int = 0
+    var level: Int = 1
+    var currentStreak: Int = 0
+    var bestStreak: Int = 0
     var lastCompletionDate: Date?
     var hardcoreResetDeadline: Date?
-    
+
     // RPG Stats
-    var health: Double // 0-100, affected by food, water, sleep
-    var energy: Double // 0-100, affected by rest and activities
-    var strength: Double // 0-100, affected by workouts
-    var endurance: Double // 0-100, affected by cardio
-    var focus: Double // 0-100, affected by meditation, study
-    var discipline: Double // 0-100, affected by quest completion consistency
-    
+    var health: Double = 80.0
+    var energy: Double = 75.0
+    var strength: Double = 50.0
+    var endurance: Double = 50.0
+    var focus: Double = 60.0
+    var discipline: Double = 50.0
+
     // Health tracking
-    var waterIntake: Int // glasses of water today
+    var waterIntake: Int = 0
     var lastMealTime: Date?
     var lastWorkoutTime: Date?
-    var sleepHours: Double // hours slept last night
-    var lastStatUpdate: Date
+    var sleepHours: Double = 7.0
+    var lastStatUpdate: Date = Date()
     
     // HealthKit Integration Properties
     var dailySteps: Int = 0
@@ -60,15 +63,38 @@ final class Profile {
     var mindfulnessMinutesToday: Int = 0
     var stairFlightsClimbed: Int = 0
     var uvExposure: Double = 0.0 // UV Index exposure
+
+    // Player Demographics — used by QuestManager progressive overload & BMR
+    var age: Int = 25
+    var genderRaw: String = PlayerGender.male.rawValue
+    var gymEnvironmentRaw: String = GymEnvironment.fullGym.rawValue
+
+    var gender: PlayerGender {
+        get { PlayerGender(rawValue: genderRaw) ?? .male }
+        set { genderRaw = newValue.rawValue }
+    }
+
+    var gymEnvironment: GymEnvironment {
+        get { GymEnvironment(rawValue: gymEnvironmentRaw) ?? .fullGym }
+        set { gymEnvironmentRaw = newValue.rawValue }
+    }
+
+    // Penalty System State
+    /// True when the player has an active exemption protecting against the midnight reset.
+    var hasActiveExemption: Bool = false
+    var exemptionExpiresAt: Date?
+
+    // Double XP state
+    var doubleXPActiveUntil: Date?
+    var hasDoubleXP: Bool { doubleXPActiveUntil.map { $0 > Date() } ?? false }
     
     // Computed Health Metrics
     var bmi: Double { weight / pow(height / 100, 2) }
 
-    // Note: For more accurate BMR, add age and gender properties to Profile
-    var bmr: Double { // Basal Metabolic Rate (Mifflin-St Jeor Equation)
-        // Using estimated age of 25 and male formula
-        // TODO: Add age and gender properties for accurate calculation
-        return (10 * weight) + (6.25 * height) - (5 * 25) + 5
+    /// Basal Metabolic Rate — Mifflin-St Jeor Equation using real age & gender.
+    var bmr: Double {
+        let base = (10 * weight) + (6.25 * height) - (5 * Double(age))
+        return gender == .female ? base - 161 : base + 5
     }
     
     var healthScore: Double {
@@ -169,19 +195,39 @@ final class Profile {
     }
 
     func applyHardcoreResetIfNeeded(now: Date = Date()) {
-        if let deadline = hardcoreResetDeadline, now >= deadline {
-            // wipe progress
-            xp = 0
-            level = 1
-            currentStreak = 0
-            bestStreak = 0
-            lastCompletionDate = nil
-            hardcoreResetDeadline = nil
-            // Massive stat penalties
-            health = max(20.0, health - 30.0)
-            energy = max(10.0, energy - 40.0)
-            discipline = max(10.0, discipline - 50.0)
+        guard let deadline = hardcoreResetDeadline, now >= deadline else { return }
+
+        // Check for active exemption item
+        if hasActiveExemption {
+            if let expiry = exemptionExpiresAt, now < expiry {
+                // Exemption pass still valid — defer deadline by 24 hours
+                hardcoreResetDeadline = Calendar.current.date(byAdding: .day, value: 1, to: now)
+                return
+            }
+            // Expired exemption — clear flag and apply reset
+            hasActiveExemption = false
+            exemptionExpiresAt = nil
         }
+
+        // Penalty: full Level 1 reset
+        xp = 0
+        level = 1
+        currentStreak = 0
+        bestStreak = 0
+        lastCompletionDate = nil
+        hardcoreResetDeadline = nil
+        health = max(20.0, health - 30.0)
+        energy = max(10.0, energy - 40.0)
+        discipline = max(10.0, discipline - 50.0)
+    }
+
+    /// Consume an exemption item from inventory and mark the profile as protected.
+    /// Returns true if the item was available and consumed.
+    @discardableResult
+    func activateExemption(durationHours: Int = 24) -> Bool {
+        hasActiveExemption = true
+        exemptionExpiresAt = Calendar.current.date(byAdding: .hour, value: durationHours, to: Date())
+        return true
     }
     
     // MARK: - RPG Stat System
@@ -438,7 +484,9 @@ final class Profile {
         for entry in entries {
             dailyProteinIntake += entry.totalProtein
             dailyFiberIntake += entry.totalFiber
-            dailySugarIntake += entry.foodItem.sugar * (entry.unit == .grams ? entry.quantity / 100.0 : (entry.quantity * entry.foodItem.servingSize / 100.0))
+            if let fi = entry.foodItem {
+                dailySugarIntake += fi.sugar * (entry.unit == .grams ? entry.quantity / 100.0 : (entry.quantity * fi.servingSize / 100.0))
+            }
         }
         
         // Update health stat based on nutrition quality
@@ -466,7 +514,7 @@ final class Profile {
     }
 }
 
-enum WorkoutType: String, CaseIterable, Identifiable {
+enum WorkoutType: String, CaseIterable, Identifiable, Codable {
     case strength = "strength"
     case cardio = "cardio"
     case flexibility = "flexibility"
@@ -569,19 +617,20 @@ enum StatInfluence {
 
 @Model
 final class Quest {
-    var id: UUID
-    var title: String
-    var details: String
-    var type: QuestType
-    var createdAt: Date
-    var dueDate: Date? // for scheduled/punishment
-    var isCompleted: Bool
+    var id: UUID = UUID()
+    var title: String = ""
+    var details: String = ""
+    var type: QuestType = QuestType.daily
+    var createdAt: Date = Date()
+    var dueDate: Date?
+    var isCompleted: Bool = false
     var completedAt: Date?
-    var repeatDays: [Int] // 1...7 for Sun..Sat using Calendar.weekday
-    var xpReward: Int
-    var dateTag: Date // normalized day for daily grouping
+    var repeatDays: [Int] = []
+    var xpReward: Int = 20
+    var dateTag: Date = Date()
+    var statTarget: String?
 
-    init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, dateTag: Date = Calendar.current.startOfDay(for: Date())) {
+    init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, statTarget: String? = nil, dateTag: Date = Calendar.current.startOfDay(for: Date())) {
         self.id = UUID()
         self.title = title
         self.details = details
@@ -592,6 +641,7 @@ final class Quest {
         self.completedAt = completedAt
         self.repeatDays = repeatDays
         self.xpReward = xpReward
+        self.statTarget = statTarget
         self.dateTag = dateTag
     }
 }
@@ -600,32 +650,36 @@ final class Quest {
 
 @Model
 final class FoodItem {
-    var id: UUID
-    var name: String
+    var id: UUID = UUID()
+    var name: String = ""
     var brand: String?
     var barcode: String?
-    
+
     // Nutritional info per 100g or per serving
-    var caloriesPer100g: Double
-    var servingSize: Double // in grams
-    var caloriesPerServing: Double
-    
+    var caloriesPer100g: Double = 0.0
+    var servingSize: Double = 100.0
+    var caloriesPerServing: Double = 0.0
+
     // Macronutrients (per 100g)
-    var carbohydrates: Double // grams
-    var protein: Double // grams
-    var fat: Double // grams
-    var fiber: Double // grams
-    var sugar: Double // grams
-    var sodium: Double // mg
-    
+    var carbohydrates: Double = 0.0
+    var protein: Double = 0.0
+    var fat: Double = 0.0
+    var fiber: Double = 0.0
+    var sugar: Double = 0.0
+    var sodium: Double = 0.0
+
     // Categories
-    var category: FoodCategory
-    var isCustom: Bool // User-created vs database food
-    var isVerified: Bool // Whether nutritional info is verified
-    
-    var createdAt: Date
+    var category: FoodCategory = FoodCategory.other
+    var isCustom: Bool = true
+    var isVerified: Bool = false
+
+    var createdAt: Date = Date()
     var lastUsed: Date?
-    
+
+    // Inverses required by CloudKit — must exist for all relationships pointing at FoodItem
+    @Relationship var entries: [FoodEntry]?
+    @Relationship var mealItems: [CustomMealItem]?
+
     init(name: String, brand: String? = nil, barcode: String? = nil, caloriesPer100g: Double, servingSize: Double = 100, carbohydrates: Double = 0, protein: Double = 0, fat: Double = 0, fiber: Double = 0, sugar: Double = 0, sodium: Double = 0, category: FoodCategory = .other, isCustom: Bool = true) {
         self.id = UUID()
         self.name = name
@@ -650,41 +704,47 @@ final class FoodItem {
 
 @Model
 final class FoodEntry {
-    var id: UUID
-    @Relationship var foodItem: FoodItem
-    var quantity: Double // in grams or servings based on unit
-    var unit: FoodUnit
-    var meal: MealType
-    var dateConsumed: Date
+    var id: UUID = UUID()
+    // CloudKit sync requires relationships to be optional and have inverses.
+    @Relationship(inverse: \FoodItem.entries) var foodItem: FoodItem?
+    var quantity: Double = 0.0
+    var unit: FoodUnit = FoodUnit.grams
+    var meal: MealType = MealType.lunch
+    var dateConsumed: Date = Date()
     var notes: String?
-    
-    // Computed nutritional values for this entry
+
+    // Computed nutritional values — guard against nil foodItem during sync
     var totalCalories: Double {
+        guard let foodItem else { return 0 }
         return unit == .grams ?
             (foodItem.caloriesPer100g * quantity / 100.0) :
             (foodItem.caloriesPerServing * quantity)
     }
-    
+
     var totalCarbs: Double {
+        guard let foodItem else { return 0 }
         let multiplier = unit == .grams ? quantity / 100.0 : (quantity * foodItem.servingSize / 100.0)
         return foodItem.carbohydrates * multiplier
     }
-    
+
     var totalProtein: Double {
+        guard let foodItem else { return 0 }
         let multiplier = unit == .grams ? quantity / 100.0 : (quantity * foodItem.servingSize / 100.0)
         return foodItem.protein * multiplier
     }
-    
+
     var totalFat: Double {
+        guard let foodItem else { return 0 }
         let multiplier = unit == .grams ? quantity / 100.0 : (quantity * foodItem.servingSize / 100.0)
         return foodItem.fat * multiplier
     }
-    
+
     var totalFiber: Double {
+        guard let foodItem else { return 0 }
         let multiplier = unit == .grams ? quantity / 100.0 : (quantity * foodItem.servingSize / 100.0)
         return foodItem.fiber * multiplier
     }
-    
+
     init(foodItem: FoodItem, quantity: Double, unit: FoodUnit = .grams, meal: MealType, dateConsumed: Date = Date(), notes: String? = nil) {
         self.id = UUID()
         self.foodItem = foodItem
@@ -693,54 +753,56 @@ final class FoodEntry {
         self.meal = meal
         self.dateConsumed = dateConsumed
         self.notes = notes
-        
-        // Update last used date
         foodItem.lastUsed = Date()
     }
 }
 
-@Model 
+@Model
 final class CustomMeal {
-    var id: UUID
-    var name: String
+    var id: UUID = UUID()
+    var name: String = ""
     var details: String?
-    @Relationship var foodItems: [CustomMealItem]
-    var category: MealType
-    var createdAt: Date
+    @Relationship(deleteRule: .cascade, inverse: \CustomMealItem.meal) var foodItems: [CustomMealItem]?
+    var category: MealType = MealType.lunch
+    var createdAt: Date = Date()
     var lastUsed: Date?
-    var isFavorite: Bool
+    var isFavorite: Bool = false
     
-    // Computed nutritional totals
+    // Computed nutritional totals — guard against nil foodItem during CloudKit sync
     var totalCalories: Double {
-        foodItems.reduce(0) { sum, item in
+        (foodItems ?? []).reduce(0) { sum, item in
+            guard let fi = item.foodItem else { return sum }
             let calories = item.unit == .grams ?
-                (item.foodItem.caloriesPer100g * item.quantity / 100.0) :
-                (item.foodItem.caloriesPerServing * item.quantity)
+                (fi.caloriesPer100g * item.quantity / 100.0) :
+                (fi.caloriesPerServing * item.quantity)
             return sum + calories
         }
     }
-    
+
     var totalCarbs: Double {
-        foodItems.reduce(0) { sum, item in
-            let multiplier = item.unit == .grams ? item.quantity / 100.0 : (item.quantity * item.foodItem.servingSize / 100.0)
-            return sum + (item.foodItem.carbohydrates * multiplier)
+        (foodItems ?? []).reduce(0) { sum, item in
+            guard let fi = item.foodItem else { return sum }
+            let multiplier = item.unit == .grams ? item.quantity / 100.0 : (item.quantity * fi.servingSize / 100.0)
+            return sum + (fi.carbohydrates * multiplier)
         }
     }
-    
+
     var totalProtein: Double {
-        foodItems.reduce(0) { sum, item in
-            let multiplier = item.unit == .grams ? item.quantity / 100.0 : (item.quantity * item.foodItem.servingSize / 100.0)
-            return sum + (item.foodItem.protein * multiplier)
+        (foodItems ?? []).reduce(0) { sum, item in
+            guard let fi = item.foodItem else { return sum }
+            let multiplier = item.unit == .grams ? item.quantity / 100.0 : (item.quantity * fi.servingSize / 100.0)
+            return sum + (fi.protein * multiplier)
         }
     }
-    
+
     var totalFat: Double {
-        foodItems.reduce(0) { sum, item in
-            let multiplier = item.unit == .grams ? item.quantity / 100.0 : (item.quantity * item.foodItem.servingSize / 100.0)
-            return sum + (item.foodItem.fat * multiplier)
+        (foodItems ?? []).reduce(0) { sum, item in
+            guard let fi = item.foodItem else { return sum }
+            let multiplier = item.unit == .grams ? item.quantity / 100.0 : (item.quantity * fi.servingSize / 100.0)
+            return sum + (fi.fat * multiplier)
         }
     }
-    
+
     init(name: String, details: String? = nil, foodItems: [CustomMealItem] = [], category: MealType = .lunch) {
         self.id = UUID()
         self.name = name
@@ -754,10 +816,11 @@ final class CustomMeal {
 }
 
 @Model final class CustomMealItem {
-    var id: UUID
-    @Relationship var foodItem: FoodItem
-    var quantity: Double
-    var unit: FoodUnit
+    var id: UUID = UUID()
+    @Relationship(inverse: \FoodItem.mealItems) var foodItem: FoodItem?
+    var meal: CustomMeal?   // inverse of CustomMeal.foodItems — required by CloudKit
+    var quantity: Double = 0.0
+    var unit: FoodUnit = FoodUnit.grams
 
     init(foodItem: FoodItem, quantity: Double, unit: FoodUnit) {
         self.id = UUID()
@@ -878,6 +941,45 @@ enum FoodUnit: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - Exercise Cache Model
+
+/// Cached exercise data fetched from the wger REST API.
+/// Persisted locally so the app works offline after the first fetch.
+@Model
+final class ExerciseItem {
+    /// wger's own integer ID — stable across API calls.
+    var wgerID: Int = 0
+    var name: String = ""
+    var exerciseDescription: String = ""
+    var category: String = ""
+    var equipment: [String] = []
+    var primaryMuscles: [String] = []
+    var secondaryMuscles: [String] = []
+    var workoutType: WorkoutType = WorkoutType.mixed
+    var cachedAt: Date = Date()
+
+    init(
+        wgerID: Int,
+        name: String,
+        exerciseDescription: String = "",
+        category: String = "",
+        equipment: [String] = [],
+        primaryMuscles: [String] = [],
+        secondaryMuscles: [String] = [],
+        workoutType: WorkoutType = .mixed
+    ) {
+        self.wgerID = wgerID
+        self.name = name
+        self.exerciseDescription = exerciseDescription
+        self.category = category
+        self.equipment = equipment
+        self.primaryMuscles = primaryMuscles
+        self.secondaryMuscles = secondaryMuscles
+        self.workoutType = workoutType
+        self.cachedAt = Date()
+    }
+}
+
 // MARK: - Recipe Model
 
 /// Recipe model for meal planning and nutrition tracking
@@ -908,6 +1010,401 @@ struct Recipe: Codable, Identifiable {
         case ingredients
         case servings
         case instructions
+    }
+}
+
+// MARK: - Workout Session Models (Hevy Replacement)
+
+/// A named routine template — the "master" the player builds once and reuses.
+/// Lives in SwiftData; cloned into WorkoutSession each time the player starts training.
+@Model
+final class ActiveRoutine {
+    var id: UUID = UUID()
+    var name: String = ""
+    var notes: String = ""
+    /// Ordered list of exercise IDs (wger IDs) in this routine.
+    var exerciseWgerIDs: [Int] = []
+    var createdAt: Date = Date()
+    var lastUsedAt: Date?
+    /// GymEnvironment raw value — used to filter available exercises.
+    var gymEnvironmentRaw: String = GymEnvironment.fullGym.rawValue
+
+    var gymEnvironment: GymEnvironment {
+        get { GymEnvironment(rawValue: gymEnvironmentRaw) ?? .fullGym }
+        set { gymEnvironmentRaw = newValue.rawValue }
+    }
+
+    init(name: String, notes: String = "", exerciseWgerIDs: [Int] = [],
+         gymEnvironment: GymEnvironment = .fullGym) {
+        self.id = UUID()
+        self.name = name
+        self.notes = notes
+        self.exerciseWgerIDs = exerciseWgerIDs
+        self.createdAt = Date()
+        self.gymEnvironmentRaw = gymEnvironment.rawValue
+    }
+}
+
+/// A completed (or in-progress) training session — one instance of a routine.
+@Model
+final class WorkoutSession {
+    var id: UUID = UUID()
+    var routineName: String = ""
+    var startedAt: Date = Date()
+    var finishedAt: Date?
+    var totalVolumeKg: Double = 0.0   // sum of (weight × reps) for all sets
+    var durationMinutes: Int = 0
+    var xpAwarded: Int = 0
+    var notes: String = ""
+    @Relationship(deleteRule: .cascade, inverse: \ExerciseSet.session) var sets: [ExerciseSet]?
+
+    var isComplete: Bool { finishedAt != nil }
+
+    /// Duration as a display string, e.g. "42 min"
+    var durationDisplay: String {
+        durationMinutes > 0 ? "\(durationMinutes) min" : "In Progress"
+    }
+
+    init(routineName: String) {
+        self.id = UUID()
+        self.routineName = routineName
+        self.startedAt = Date()
+    }
+
+    func finish() {
+        finishedAt = Date()
+        durationMinutes = Int(finishedAt!.timeIntervalSince(startedAt) / 60)
+        totalVolumeKg = (sets ?? []).reduce(0) { $0 + ($1.weightKg * Double($1.reps)) }
+        // XP = 1 pt per 10 kg of volume, capped to encourage quality over spam
+        xpAwarded = min(500, Int(totalVolumeKg / 10))
+    }
+}
+
+/// A single logged set within a WorkoutSession.
+@Model
+final class ExerciseSet {
+    var id: UUID = UUID()
+    var exerciseName: String = ""
+    var exerciseWgerID: Int = 0
+    var setNumber: Int = 1
+    var weightKg: Double = 0.0
+    var reps: Int = 0
+    var isWarmUp: Bool = false
+    var rpe: Double = 0.0       // Rate of Perceived Exertion 1–10
+    var loggedAt: Date = Date()
+    var session: WorkoutSession?  // inverse of WorkoutSession.sets — required by CloudKit
+
+    init(exerciseName: String, exerciseWgerID: Int, setNumber: Int,
+         weightKg: Double, reps: Int, isWarmUp: Bool = false, rpe: Double = 7.0) {
+        self.id = UUID()
+        self.exerciseName = exerciseName
+        self.exerciseWgerID = exerciseWgerID
+        self.setNumber = setNumber
+        self.weightKg = weightKg
+        self.reps = reps
+        self.isWarmUp = isWarmUp
+        self.rpe = rpe
+        self.loggedAt = Date()
+    }
+}
+
+/// Personal record for a given exercise — used by QuestManager for progressive overload.
+@Model
+final class PersonalRecord {
+    var id: UUID = UUID()
+    var exerciseWgerID: Int = 0
+    var exerciseName: String = ""
+    var oneRepMaxKg: Double = 0.0   // Epley formula estimate
+    var bestWeightKg: Double = 0.0
+    var bestReps: Int = 0
+    var achievedAt: Date = Date()
+
+    init(exerciseWgerID: Int, exerciseName: String,
+         weightKg: Double, reps: Int) {
+        self.id = UUID()
+        self.exerciseWgerID = exerciseWgerID
+        self.exerciseName = exerciseName
+        self.bestWeightKg = weightKg
+        self.bestReps = reps
+        self.achievedAt = Date()
+        // Epley 1RM = weight × (1 + reps/30)
+        self.oneRepMaxKg = weightKg * (1.0 + Double(reps) / 30.0)
+    }
+}
+
+// MARK: - Patrol Route Model (Strava Replacement)
+
+/// A tracked outdoor activity (run, walk, cycle) stored as an encoded polyline.
+@Model
+final class PatrolRoute {
+    var id: UUID = UUID()
+    var name: String = "Patrol Route"
+    var activityType: PatrolActivityType = PatrolActivityType.run
+    var startedAt: Date = Date()
+    var finishedAt: Date?
+    var distanceMeters: Double = 0.0
+    var durationSeconds: Int = 0
+    var averagePaceSecondsPerKm: Double = 0.0
+    var elevationGainMeters: Double = 0.0
+    var xpAwarded: Int = 0
+    /// JSON-encoded [CLLocationCoordinate2D] — stored as string for SwiftData compat.
+    var encodedCoordinates: String = ""
+
+    var distanceDisplay: String {
+        let km = distanceMeters / 1000
+        return String(format: "%.2f km", km)
+    }
+
+    var paceDisplay: String {
+        guard averagePaceSecondsPerKm > 0 else { return "--:--" }
+        let mins = Int(averagePaceSecondsPerKm) / 60
+        let secs = Int(averagePaceSecondsPerKm) % 60
+        return String(format: "%d:%02d /km", mins, secs)
+    }
+
+    init(name: String = "Patrol Route", activityType: PatrolActivityType = .run) {
+        self.id = UUID()
+        self.name = name
+        self.activityType = activityType
+        self.startedAt = Date()
+    }
+}
+
+enum PatrolActivityType: String, Codable, CaseIterable {
+    case run = "run"
+    case walk = "walk"
+    case cycle = "cycle"
+    case hike = "hike"
+
+    var displayName: String {
+        switch self {
+        case .run:   return "Run"
+        case .walk:  return "Walk"
+        case .cycle: return "Cycle"
+        case .hike:  return "Hike"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .run:   return "figure.run"
+        case .walk:  return "figure.walk"
+        case .cycle: return "figure.outdoor.cycle"
+        case .hike:  return "figure.hiking"
+        }
+    }
+
+    /// XP per km completed
+    var xpPerKm: Int {
+        switch self {
+        case .run:   return 30
+        case .walk:  return 15
+        case .cycle: return 20
+        case .hike:  return 25
+        }
+    }
+}
+
+// MARK: - Inventory & Penalty System
+
+/// An item the player can own in their inventory to block penalties or unlock bonuses.
+@Model
+final class InventoryItem {
+    var id: UUID = UUID()
+    var itemType: InventoryItemType = InventoryItemType.hermitMiracleSeed
+    var quantity: Int = 0
+    var acquiredAt: Date = Date()
+
+    var displayName: String { itemType.displayName }
+    var description: String { itemType.description }
+    var icon: String { itemType.icon }
+
+    init(itemType: InventoryItemType, quantity: Int = 1) {
+        self.id = UUID()
+        self.itemType = itemType
+        self.quantity = quantity
+        self.acquiredAt = Date()
+    }
+}
+
+enum InventoryItemType: String, Codable, CaseIterable {
+    case hermitMiracleSeed      = "hermit_miracle_seed"
+    case gateEscapeFragment     = "gate_escape_fragment"
+    case demonLordPanacea       = "demon_lord_panacea"
+    case pocketGuardianCandy    = "pocket_guardian_candy"
+    case equivalentExchangeChalk = "equivalent_exchange_chalk"
+
+    // MARK: Display
+
+    var displayName: String {
+        switch self {
+        case .hermitMiracleSeed:       return "Hermit's Miracle Seed"
+        case .gateEscapeFragment:      return "Gate Escape Fragment"
+        case .demonLordPanacea:        return "Demon Lord's Panacea"
+        case .pocketGuardianCandy:     return "Pocket Guardian's Candy"
+        case .equivalentExchangeChalk: return "Equivalent Exchange Chalk"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .hermitMiracleSeed:
+            return "Fully restores all HP stats and nullifies a Level 1 reset. Use before the midnight deadline."
+        case .gateEscapeFragment:
+            return "Flee a Daily Quest without breaking your streak. One incomplete quest is absolved."
+        case .demonLordPanacea:
+            return "Doubles HealthKit sleep recovery HP for 24 hours. Clears all active debuffs."
+        case .pocketGuardianCandy:
+            return "Grants a massive flat XP bonus. The System rewards those who hoard power."
+        case .equivalentExchangeChalk:
+            return "Rerolls one exercise based on your available equipment. No streak penalty."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .hermitMiracleSeed:       return "shield.fill"
+        case .gateEscapeFragment:      return "arrow.up.right.square.fill"
+        case .demonLordPanacea:        return "cross.vial.fill"
+        case .pocketGuardianCandy:     return "star.circle.fill"
+        case .equivalentExchangeChalk: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    var accentColor: String {
+        switch self {
+        case .hermitMiracleSeed:       return "cyan"
+        case .gateEscapeFragment:      return "purple"
+        case .demonLordPanacea:        return "green"
+        case .pocketGuardianCandy:     return "yellow"
+        case .equivalentExchangeChalk: return "orange"
+        }
+    }
+
+    var category: ItemCategory {
+        switch self {
+        case .hermitMiracleSeed:       return .exemption
+        case .gateEscapeFragment:      return .exemption
+        case .demonLordPanacea:        return .restoration
+        case .pocketGuardianCandy:     return .statBoost
+        case .equivalentExchangeChalk: return .utility
+        }
+    }
+
+    /// XP cost in the System Shop.
+    var shopXPCost: Int {
+        switch self {
+        case .hermitMiracleSeed:       return 5_000
+        case .gateEscapeFragment:      return 2_500
+        case .demonLordPanacea:        return 3_000
+        case .pocketGuardianCandy:     return 4_000
+        case .equivalentExchangeChalk: return 1_500
+        }
+    }
+
+    /// Whether consuming this item blocks the hardcore Level 1 penalty.
+    var blocksLevelReset: Bool {
+        self == .hermitMiracleSeed || self == .gateEscapeFragment
+    }
+
+    /// Flat XP bonus granted on consumption (0 if not applicable).
+    var xpBonus: Int {
+        switch self {
+        case .pocketGuardianCandy: return 2_000
+        default:                   return 0
+        }
+    }
+}
+
+enum ItemCategory: String, Codable {
+    case exemption  = "exemption"
+    case restoration = "restoration"
+    case statBoost  = "stat_boost"
+    case utility    = "utility"
+
+    var displayName: String {
+        switch self {
+        case .exemption:   return "Exemption"
+        case .restoration: return "Restoration"
+        case .statBoost:   return "Stat Boost"
+        case .utility:     return "Utility"
+        }
+    }
+
+    var badgeColor: String {
+        switch self {
+        case .exemption:   return "cyan"
+        case .restoration: return "green"
+        case .statBoost:   return "yellow"
+        case .utility:     return "orange"
+        }
+    }
+}
+
+// MARK: - Gym Environment Presets
+
+/// Defines which equipment categories are available in a given gym,
+/// mapping directly to wger equipment IDs.
+enum PlayerGender: String, Codable, CaseIterable {
+    case male   = "male"
+    case female = "female"
+    case other  = "other"
+
+    var displayName: String {
+        switch self {
+        case .male:   return "Male"
+        case .female: return "Female"
+        case .other:  return "Other"
+        }
+    }
+}
+
+enum GymEnvironment: String, Codable, CaseIterable {
+    case fullGym        = "full_gym"
+    case planetFitness  = "planet_fitness"
+    case laFitness      = "la_fitness"
+    case homeGym        = "home_gym"
+    case bodyweightOnly = "bodyweight_only"
+
+    var displayName: String {
+        switch self {
+        case .fullGym:        return "Full Gym"
+        case .planetFitness:  return "Planet Fitness"
+        case .laFitness:      return "LA Fitness"
+        case .homeGym:        return "Home Gym"
+        case .bodyweightOnly: return "Bodyweight Only"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .fullGym:        return "building.2.fill"
+        case .planetFitness:  return "p.circle.fill"
+        case .laFitness:      return "l.circle.fill"
+        case .homeGym:        return "house.fill"
+        case .bodyweightOnly: return "figure.mind.and.body"
+        }
+    }
+
+    /// wger equipment IDs available in this environment.
+    /// wger IDs: 1=Barbell, 2=SZ-Bar, 3=Dumbbell, 4=Gym Mat, 5=Swiss Ball,
+    /// 6=Pull-up Bar, 7=Cable, 8=Bench, 9=Incline Bench, 10=Kettlebell,
+    /// 11=Smith Machine, 12=Resistance Bands, 99=Bodyweight (no equipment)
+    var allowedEquipmentIDs: Set<Int> {
+        switch self {
+        case .fullGym:
+            return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 99]
+        case .planetFitness:
+            // No standard barbells (ID 1) — Smith Machine + dumbbells + cables only
+            return [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 99]
+        case .laFitness:
+            // Full selection minus SZ-Bar
+            return [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 99]
+        case .homeGym:
+            return [1, 3, 4, 5, 6, 8, 10, 12, 99]
+        case .bodyweightOnly:
+            return [4, 5, 6, 99]
+        }
     }
 }
 

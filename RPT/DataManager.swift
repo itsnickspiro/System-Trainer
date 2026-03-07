@@ -1,10 +1,10 @@
 import Foundation
 import SwiftData
 import Combine
-import FirebaseFirestore
-import FirebaseAuth
+import Network
+import HealthKit
 
-/// Centralized data manager that coordinates between local SwiftData, Firebase, and APIs
+/// Centralized data manager that coordinates between local SwiftData and APIs
 @MainActor
 final class DataManager: ObservableObject {
     static let shared = DataManager()
@@ -12,7 +12,6 @@ final class DataManager: ObservableObject {
     // MARK: - Core Managers
     @Published private(set) var healthManager = HealthManager()
     @Published private(set) var recipeAPI = RecipeAPI.shared
-    private let firebaseManager = FirebaseManager.shared
     
     // MARK: - Local Data Context
     private var modelContext: ModelContext?
@@ -28,10 +27,13 @@ final class DataManager: ObservableObject {
     @Published var isSyncing = false
     @Published var syncError: Error?
     
-    // MARK: - Configuration
-    private let syncInterval: TimeInterval = 300 // 5 minutes
-    private var syncTimer: Timer?
-    
+    // MARK: - HealthKit background delivery
+    /// Active observer queries, keyed by sample type identifier.
+    /// Keeping strong references prevents queries from being deallocated.
+    private var observerQueries: [String: HKObserverQuery] = [:]
+    /// Direct reference to the HKHealthStore so deinit (nonisolated) can stop queries.
+    private let hkStore = HKHealthStore()
+
     // MARK: - Combine
     private var cancellables = Set<AnyCancellable>()
     
@@ -44,23 +46,19 @@ final class DataManager: ObservableObject {
     func configure(with context: ModelContext) {
         self.modelContext = context
         loadLocalData()
-        
-        Task {
-            await syncWithFirebase()
-        }
     }
     
     private func setupObservers() {
         // Monitor network connectivity
         NetworkMonitor.shared.$isConnected
             .assign(to: &$isOnline)
-        
-        // Monitor health data changes
-        healthManager.objectWillChange
-            .sink { [weak self] in
-                Task { @MainActor in
-                    await self?.handleHealthDataUpdate()
-                }
+
+        // When HealthKit authorization is granted, register background observers.
+        healthManager.$isAuthorized
+            .filter { $0 }
+            .first()
+            .sink { [weak self] _ in
+                self?.startHealthKitBackgroundDelivery()
             }
             .store(in: &cancellables)
     }
@@ -119,14 +117,6 @@ final class DataManager: ObservableObject {
         
         updates(profile)
         saveLocalChanges()
-        
-        Task {
-            do {
-                try await syncProfileToFirebase(profile)
-            } catch {
-                print("Failed to sync profile update: \(error)")
-            }
-        }
     }
     
     func addXPToProfile(_ xp: Int, source: String = "General") {
@@ -141,27 +131,10 @@ final class DataManager: ObservableObject {
         }
         
         saveLocalChanges()
-        
-        Task {
-            do {
-                try await syncProfileToFirebase(profile)
-            } catch {
-                print("Failed to sync XP update: \(error)")
-            }
-        }
     }
     
     private func handleLevelUp(from oldLevel: Int, to newLevel: Int) {
-        // Handle level up rewards, notifications, etc.
         print("Level up! \(oldLevel) -> \(newLevel)")
-        
-        Task {
-            await firebaseManager.logEvent("level_up", parameters: [
-                "old_level": oldLevel,
-                "new_level": newLevel,
-                "timestamp": Date().timeIntervalSince1970
-            ])
-        }
     }
     
     // MARK: - Quest Management
@@ -171,14 +144,6 @@ final class DataManager: ObservableObject {
         context.insert(quest)
         saveLocalChanges()
         refreshTodaysQuests()
-        
-        Task {
-            do {
-                try await syncQuestToFirebase(quest)
-            } catch {
-                print("Failed to sync new quest: \(error)")
-            }
-        }
     }
     
     func completeQuest(_ quest: Quest) {
@@ -193,20 +158,6 @@ final class DataManager: ObservableObject {
 
         saveLocalChanges()
         refreshTodaysQuests()
-
-        Task {
-            do {
-                // Sync quest completion
-                try await syncQuestToFirebase(quest)
-
-                // CRITICAL: Sync updated profile with new XP to Firebase
-                if let profile = currentProfile {
-                    try await syncProfileToFirebase(profile)
-                }
-            } catch {
-                print("Failed to sync completed quest: \(error)")
-            }
-        }
     }
     
     func deleteQuest(_ quest: Quest) {
@@ -216,80 +167,129 @@ final class DataManager: ObservableObject {
             context.delete(quest)
             try context.save()
             refreshTodaysQuests()
-
-            Task {
-                do {
-                    try await firebaseManager.deleteQuest(questId: quest.id.uuidString)
-                } catch {
-                    print("Failed to delete quest from Firebase: \(error)")
-                }
-            }
         } catch {
             print("Failed to delete quest: \(error)")
         }
     }
 
-    // MARK: - Default Quest Generation
+    // MARK: - Daily Quest Generation
+
+    /// Generates today's quests from HealthKit data if they haven't been generated yet.
+    /// Called once on app launch; keyed to today's date so it only runs once per day.
     func generateDefaultDailyQuests() {
-        guard let context = modelContext else { return }
-
         let today = Calendar.current.startOfDay(for: Date())
+        let key = "questsGeneratedDate"
+        let lastGenerated = UserDefaults.standard.object(forKey: key) as? Date ?? .distantPast
 
-        // Check if default quests already exist for today
-        let questDescriptor = FetchDescriptor<Quest>(
-            predicate: #Predicate<Quest> { quest in
-                quest.dateTag >= today
-            }
+        // Already generated today — skip
+        guard !Calendar.current.isDate(lastGenerated, inSameDayAs: today) else { return }
+
+        guard let context = modelContext, let profile = currentProfile else { return }
+
+        // Clear any stale auto-generated quests from yesterday
+        let yesterday = today.addingTimeInterval(-86400)
+        let staleDescriptor = FetchDescriptor<Quest>(
+            predicate: #Predicate<Quest> { q in q.dateTag >= yesterday && q.dateTag < today }
         )
-
-        do {
-            let existingQuests = try context.fetch(questDescriptor)
-
-            // Define default daily quest templates
-            let defaultQuestTitles = [
-                "Drink 8 Glasses of Water",
-                "Complete a 30-Min Workout",
-                "Log All Meals Today",
-                "Get 7-8 Hours of Sleep",
-                "Take 10,000 Steps"
-            ]
-
-            // Only create quests that don't already exist
-            for title in defaultQuestTitles {
-                let questExists = existingQuests.contains { $0.title == title }
-                if !questExists {
-                    let quest = Quest(
-                        title: title,
-                        details: getQuestDetails(for: title),
-                        type: .daily,
-                        createdAt: Date(),
-                        dueDate: Calendar.current.date(byAdding: .day, value: 1, to: today),
-                        xpReward: 20,
-                        dateTag: today
-                    )
-                    addQuest(quest)
-                }
-            }
-        } catch {
-            print("Failed to check existing quests: \(error)")
+        if let staleQuests = try? context.fetch(staleDescriptor) {
+            staleQuests.filter { !$0.isCompleted }.forEach { context.delete($0) }
         }
+
+        // Build quest list driven by the player's health data gaps
+        let quests = buildHealthDrivenQuests(for: profile, on: today)
+        quests.forEach { addQuest($0) }
+
+        UserDefaults.standard.set(today, forKey: key)
     }
 
-    private func getQuestDetails(for title: String) -> String {
-        switch title {
-        case "Drink 8 Glasses of Water":
-            return "Stay hydrated throughout the day for optimal health and energy"
-        case "Complete a 30-Min Workout":
-            return "Engage in any physical activity for at least 30 minutes"
-        case "Log All Meals Today":
-            return "Track your nutrition by logging breakfast, lunch, and dinner"
-        case "Get 7-8 Hours of Sleep":
-            return "Ensure quality rest for recovery and mental clarity"
-        case "Take 10,000 Steps":
-            return "Meet the daily step goal to improve cardiovascular health"
-        default:
-            return "Complete this quest to earn XP and improve your stats"
+    /// Analyses the player's current health stats and returns a tailored set of quests.
+    private func buildHealthDrivenQuests(for profile: Profile, on date: Date) -> [Quest] {
+        var quests: [Quest] = []
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: date)
+
+        // ── Steps ──────────────────────────────────────────────────────────────
+        let stepGoal = 10_000
+        let stepGap = stepGoal - profile.dailySteps
+        if stepGap > 5_000 {
+            quests.append(Quest(
+                title: "Step Count Protocol",
+                details: "Reach \(stepGoal.formatted()) steps today. Current: \(profile.dailySteps.formatted()). Endurance stat will increase.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 75, statTarget: "endurance", dateTag: date
+            ))
+        } else {
+            quests.append(Quest(
+                title: "Maintain Pace",
+                details: "Hit \(stepGoal.formatted()) steps. You're on track — keep moving.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 50, statTarget: "endurance", dateTag: date
+            ))
         }
+
+        // ── Sleep ──────────────────────────────────────────────────────────────
+        if profile.sleepHours < 6.5 {
+            quests.append(Quest(
+                title: "Sleep Debt Recovery",
+                details: "Last night: \(String(format: "%.1f", profile.sleepHours))h. Sleep deficit detected. Achieve 8h tonight to restore Energy and Focus stats.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 100, statTarget: "energy", dateTag: date
+            ))
+        } else if profile.sleepHours < 7.5 {
+            quests.append(Quest(
+                title: "Rest Optimization",
+                details: "Sleep logged: \(String(format: "%.1f", profile.sleepHours))h. Target 8h for maximum stat recovery.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 60, statTarget: "energy", dateTag: date
+            ))
+        }
+
+        // ── Active Calories ────────────────────────────────────────────────────
+        let calGoal = 400
+        if profile.dailyActiveCalories < calGoal / 2 {
+            quests.append(Quest(
+                title: "Burn Protocol — URGENT",
+                details: "Active calories today: \(profile.dailyActiveCalories) kcal. Target: \(calGoal) kcal. Complete any 30-min workout.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 120, statTarget: "strength", dateTag: date
+            ))
+        } else if profile.dailyActiveCalories < calGoal {
+            quests.append(Quest(
+                title: "Burn Target",
+                details: "Active calories: \(profile.dailyActiveCalories)/\(calGoal) kcal. Close the gap with a workout session.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 80, statTarget: "strength", dateTag: date
+            ))
+        }
+
+        // ── Resting Heart Rate ────────────────────────────────────────────────
+        if profile.restingHeartRate > 75 {
+            quests.append(Quest(
+                title: "Cardiovascular Conditioning",
+                details: "Resting HR: \(profile.restingHeartRate) bpm — above optimal. 20 minutes of zone-2 cardio will improve Health stat.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 90, statTarget: "health", dateTag: date
+            ))
+        }
+
+        // ── Discipline (streak guard) ─────────────────────────────────────────
+        quests.append(Quest(
+            title: "Daily Discipline Check",
+            details: "Current streak: \(profile.currentStreak) days. Log at least one meal and complete one quest before midnight.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 50, statTarget: "discipline", dateTag: date
+        ))
+
+        // ── Low stat — Focus ──────────────────────────────────────────────────
+        if profile.focus < 40 {
+            quests.append(Quest(
+                title: "Cognitive Training",
+                details: "Focus stat is low (\(Int(profile.focus))/100). Meditate for 10 minutes or complete a focused deep-work session.",
+                type: .daily, createdAt: Date(), dueDate: tomorrow,
+                xpReward: 70, statTarget: "focus", dateTag: date
+            ))
+        }
+
+        return quests
     }
     
     // MARK: - Recipe Management
@@ -320,15 +320,12 @@ final class DataManager: ObservableObject {
             profile.recordMeal(healthiness: .healthy) // Default to healthy
         }
 
-        Task {
-            await firebaseManager.logEvent("recipe_saved", parameters: [
-                "recipe_id": recipe.id,
-                "recipe_title": recipe.title
-            ])
-        }
     }
     
     // MARK: - Health Data Integration
+
+    /// Called whenever HealthKit delivers new data (via observer query) or the
+    /// health manager publishes an objectWillChange notification.
     private func handleHealthDataUpdate() async {
         guard let profile = currentProfile else { return }
 
@@ -339,13 +336,63 @@ final class DataManager: ObservableObject {
         profile.updateDailyStats()
 
         saveLocalChanges()
+    }
 
-        // Sync health changes to Firebase
-        do {
-            try await syncProfileToFirebase(profile)
-        } catch {
-            print("Failed to sync health data update: \(error)")
+    // MARK: - HealthKit Background Observer Setup
+
+    /// Registers HKObserverQuery + enableBackgroundDelivery for the four core
+    /// metrics: steps, active calories, workouts, and resting heart rate.
+    ///
+    /// When HealthKit wakes the app via silent push (background delivery), the
+    /// observer fires, we refetch and update the profile in SwiftData.
+    /// This replaces any polling timer and is iOS-recommended for battery health.
+    private func startHealthKitBackgroundDelivery() {
+        guard hkStore.authorizationStatus(for: HKQuantityType(.stepCount)) != .notDetermined else {
+            // HealthKit not yet authorised — do nothing; observers will be
+            // registered after the user grants permission via requestAuthorization.
+            return
         }
+
+        let trackedTypes: [(HKSampleType, HKUpdateFrequency)] = [
+            (HKQuantityType(.stepCount),          .hourly),
+            (HKQuantityType(.activeEnergyBurned), .hourly),
+            (HKQuantityType(.restingHeartRate),   .daily),
+            (HKObjectType.workoutType(),          .immediate),
+        ]
+
+        for (sampleType, frequency) in trackedTypes {
+            let typeID = sampleType.identifier
+
+            // Skip if an observer is already registered for this type.
+            guard observerQueries[typeID] == nil else { continue }
+
+            // Register background delivery so HealthKit wakes the app via silent push.
+            hkStore.enableBackgroundDelivery(for: sampleType, frequency: frequency) { _, error in
+                if let error { print("[HealthKit] Background delivery failed for \(typeID): \(error)") }
+            }
+
+            // Observer query fires when new samples arrive (foreground or background).
+            let query = HKObserverQuery(sampleType: sampleType, predicate: nil) { [weak self] _, completionHandler, error in
+                if let error {
+                    print("[HealthKit] Observer error for \(typeID): \(error)")
+                    completionHandler()
+                    return
+                }
+                Task { @MainActor [weak self] in
+                    await self?.handleHealthDataUpdate()
+                    completionHandler() // Must be called to signal HealthKit the delivery was handled.
+                }
+            }
+
+            observerQueries[typeID] = query
+            hkStore.execute(query)
+        }
+    }
+
+    /// Call this after HealthKit authorization is granted so observers are
+    /// registered immediately without waiting for the next app launch.
+    func registerHealthKitObserversAfterAuthorization() {
+        startHealthKitBackgroundDelivery()
     }
     
     func recordHealthAction(_ action: HealthAction) {
@@ -365,14 +412,6 @@ final class DataManager: ObservableObject {
         }
         
         saveLocalChanges()
-        
-        Task {
-            do {
-                try await syncProfileToFirebase(profile)
-            } catch {
-                print("Failed to sync health action: \(error)")
-            }
-        }
     }
     
     // MARK: - Local Storage
@@ -386,70 +425,23 @@ final class DataManager: ObservableObject {
         }
     }
     
-    // MARK: - Firebase Sync
-    private func syncWithFirebase() async {
-        guard isOnline else { return }
-        
-        isSyncing = true
-        syncError = nil
-        
-        var hasErrors = false
-        
-        // Sync profile
-        if let profile = currentProfile {
-            do {
-                try await firebaseManager.syncProfile(profile)
-            } catch {
-                print("Failed to sync profile: \(error)")
-                syncError = error
-                hasErrors = true
-            }
-        }
-        
-        // Sync quests
-        for quest in todaysQuests {
-            do {
-                try await firebaseManager.syncQuest(quest)
-            } catch {
-                print("Failed to sync quest: \(error)")
-                if syncError == nil {
-                    syncError = error
-                }
-                hasErrors = true
-            }
-        }
-        
-        if !hasErrors {
-            lastSyncDate = Date()
-        }
-        
-        isSyncing = false
-    }
-    
-    private func syncProfileToFirebase(_ profile: Profile) async throws {
-        try await firebaseManager.syncProfile(profile)
-    }
-    
-    private func syncQuestToFirebase(_ quest: Quest) async throws {
-        try await firebaseManager.syncQuest(quest)
-    }
-    
-    // MARK: - Periodic Sync
+    // MARK: - Sync
     private func startPeriodicSync() {
-        syncTimer = Timer.scheduledTimer(withTimeInterval: syncInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.syncWithFirebase()
-            }
-        }
+        // No-op: sync is driven by HKObserverQuery background delivery.
     }
-    
+
     func forceSyncNow() async {
-        await syncWithFirebase()
+        await handleHealthDataUpdate()
     }
     
     // MARK: - Cleanup
     deinit {
-        syncTimer?.invalidate()
+        // Stop all active HealthKit observer queries.
+        // hkStore is a nonisolated stored property so safe to access in deinit.
+        for query in observerQueries.values {
+            hkStore.stop(query)
+        }
+        observerQueries.removeAll()
         cancellables.removeAll()
     }
 }
@@ -466,10 +458,22 @@ enum HealthAction {
 // MARK: - Network Monitor
 class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()
+
     @Published var isConnected = true
-    
+
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "com.rpt.networkMonitor", qos: .utility)
+
     private init() {
-        // Implement actual network monitoring
-        // For now, assume always connected
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.isConnected = path.status == .satisfied
+            }
+        }
+        monitor.start(queue: queue)
+    }
+
+    deinit {
+        monitor.cancel()
     }
 }

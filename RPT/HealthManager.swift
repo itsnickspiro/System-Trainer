@@ -12,7 +12,7 @@ class HealthManager: ObservableObject {
     private let useMockData = true // Change to false for production
     
     // MARK: - HealthKit Setup
-    private let healthStore = HKHealthStore()
+    let healthStore = HKHealthStore()
     
     // MARK: - Published State
     @Published var isAuthorized = false
