@@ -1,25 +1,33 @@
 import Foundation
 
-/// Runtime access to API keys stored in Info.plist.
+/// Public Supabase configuration.
 ///
-/// Keys are read from Info.plist at runtime so they are available in both
-/// Debug and Release builds. Info.plist ships inside the app bundle, so these
-/// keys are not truly secret from a determined extractor — before shipping to
-/// the App Store, consider moving high-value keys behind a backend proxy.
+/// `supabaseURL` and `supabaseAnonKey` are intentionally public — the anon key
+/// is a row-level-security token, not a secret. It identifies the project but
+/// grants only the permissions defined by your Supabase RLS policies.
+///
+/// All third-party API keys (API Ninjas, WeatherStack, etc.) live exclusively in
+/// Supabase Vault and are never transmitted to the client. The app calls Supabase
+/// Edge Functions, which fetch the real keys server-side and proxy the request.
+///
+/// `appSecret` is a shared secret injected at build time via an Xcode User-Defined
+/// Build Setting (APP_SECRET). It is NOT stored in source control — each developer
+/// sets it locally. The Edge Functions verify this header to reject calls that
+/// didn't originate from the legitimate RPT app build.
 enum Secrets {
-    /// AI API key (unused in the current on-device FoundationModels integration,
-    /// kept for any future cloud AI fallback).
-    static var aiAPIKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "AIAPIKey") as? String ?? ""
-    }
+    /// Supabase project URL — safe to commit.
+    static let supabaseURL = "https://erghbsnxtsbnmfuycnyb.supabase.co"
 
-    /// API Ninjas key — used by NutritionAPI for food/nutrition lookups.
-    static var apiNinjasKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "API_NINJAS_KEY") as? String ?? ""
-    }
+    /// Supabase anon key — safe to commit (public by design).
+    /// Set this value from your Supabase project dashboard → Settings → API.
+    static let supabaseAnonKey: String = {
+        Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String ?? ""
+    }()
 
-    /// WeatherStack API key — used by WeatherstackAPI for weather data on HomeView.
-    static var weatherstackAPIKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "WeatherStack_API") as? String ?? ""
-    }
+    /// Shared secret that Edge Functions verify to ensure requests come from RPT.
+    /// Value is injected via the APP_SECRET Xcode build setting — never commit
+    /// the actual value to source control.
+    static let appSecret: String = {
+        Bundle.main.object(forInfoDictionaryKey: "APP_SECRET") as? String ?? ""
+    }()
 }

@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var showingHealthSettings = false
     @State private var showingProfileEditor = false
     @State private var showingResetConfirmation = false
+    @State private var showingBodyMetrics = false
+    @State private var showingAchievements = false
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
     
     var profile: Profile {
@@ -27,19 +29,43 @@ struct SettingsView: View {
                             showingProfileEditor = true
                         }
                     
-                    HStack {
-                        Image(systemName: "trophy.fill")
-                            .foregroundColor(.yellow)
-                        VStack(alignment: .leading) {
-                            Text("Achievements")
-                            Text("\(profile.level) levels • \(profile.bestStreak) day streak")
-                                .font(.caption)
+                    Button {
+                        showingAchievements = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "trophy.fill")
+                                .foregroundColor(.yellow)
+                            VStack(alignment: .leading) {
+                                Text("Achievements")
+                                Text("\(profile.level) levels • \(profile.bestStreak) day streak")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
                                 .foregroundColor(.secondary)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
                     }
+                    .foregroundColor(.primary)
+
+                    Button {
+                        showingBodyMetrics = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "scalemass.fill")
+                                .foregroundColor(.blue)
+                            VStack(alignment: .leading) {
+                                Text("Body Metrics")
+                                Text("Weight & measurements history")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
                 }
                 
                 // Health Integration Section
@@ -121,35 +147,31 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0")
+                        Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
                             .foregroundColor(.secondary)
                     }
                     
-                    // TODO: Replace these URLs with your actual privacy policy and terms pages
-                    Button {
-                        // Privacy policy URL not yet configured
-                    } label: {
+                    // Replace these URLs with your actual hosted privacy policy and terms pages
+                    Link(destination: URL(string: "https://spiro-technologies.github.io/rpt/privacy")!) {
                         HStack {
                             Image(systemName: "hand.raised.fill")
                                 .foregroundColor(.green)
                             Text("Privacy Policy")
                             Spacer()
-                            Text("Coming Soon")
+                            Image(systemName: "arrow.up.right")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                     }
                     .foregroundColor(.primary)
 
-                    Button {
-                        // Terms URL not yet configured
-                    } label: {
+                    Link(destination: URL(string: "https://spiro-technologies.github.io/rpt/terms")!) {
                         HStack {
                             Image(systemName: "doc.text.fill")
                                 .foregroundColor(.blue)
                             Text("Terms of Service")
                             Spacer()
-                            Text("Coming Soon")
+                            Image(systemName: "arrow.up.right")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -163,6 +185,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingHealthSettings) {
                 HealthSettingsView(healthManager: dataManager.healthManager, profile: profile)
+            }
+            .sheet(isPresented: $showingBodyMetrics) {
+                BodyMetricsView()
+            }
+            .sheet(isPresented: $showingAchievements) {
+                AchievementsView()
             }
             .confirmationDialog(
                 "Reset All Data",
@@ -193,6 +221,18 @@ struct SettingsView: View {
             try context.delete(model: FoodEntry.self)
             try context.delete(model: FoodItem.self)
             try context.delete(model: CustomMeal.self)
+            try context.delete(model: CustomMealItem.self)
+            try context.delete(model: WorkoutSession.self)
+            try context.delete(model: ExerciseSet.self)
+            try context.delete(model: ExerciseItem.self)
+            try context.delete(model: ActiveRoutine.self)
+            try context.delete(model: PersonalRecord.self)
+            try context.delete(model: PatrolRoute.self)
+            try context.delete(model: InventoryItem.self)
+            try context.delete(model: Achievement.self)
+            try context.delete(model: BodyMeasurement.self)
+            try context.delete(model: PlannedMeal.self)
+            try context.delete(model: CustomWorkoutPlan.self)
             try context.save()
 
             // Clear onboarding flag so the user is sent back to setup
@@ -318,43 +358,120 @@ struct AppearanceSettingsView: View {
 }
 
 struct DataExportView: View {
-    @State private var isExporting = false
+    @Environment(\.modelContext) private var context
+    @Query private var profiles: [Profile]
+    @Query(sort: \FoodEntry.dateConsumed) private var foodEntries: [FoodEntry]
+    @Query(sort: \WorkoutSession.startedAt) private var sessions: [WorkoutSession]
+    @Query(sort: \BodyMeasurement.date) private var measurements: [BodyMeasurement]
+    @State private var shareItem: URL?
+    @State private var showingShareSheet = false
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
-    
+
     var body: some View {
         List {
-            Section {
-                Button("Export Profile Data") {
-                    exportData()
-                }
-                
-                Button("Export Quest History") {
-                    exportQuests()
-                }
-            } footer: {
-                Text("Export your data in JSON format for backup or analysis.")
+            Section(header: Text("Export as CSV"), footer: Text("Exports open the iOS share sheet so you can save to Files, email, or any app.")) {
+                exportRow(title: "Nutrition Log", icon: "fork.knife", color: .orange, action: exportNutritionCSV)
+                exportRow(title: "Workout History", icon: "dumbbell.fill", color: .blue, action: exportWorkoutsCSV)
+                exportRow(title: "Body Measurements", icon: "scalemass.fill", color: .green, action: exportMeasurementsCSV)
+            }
+            Section(header: Text("Export as JSON")) {
+                exportRow(title: "Full Profile Backup", icon: "person.fill", color: .purple, action: exportProfileJSON)
             }
         }
         .navigationTitle("Export Data")
         .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
-    }
-    
-    private func exportData() {
-        // Implementation for data export
-        isExporting = true
-        // Add actual export logic here
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            isExporting = false
+        .sheet(isPresented: $showingShareSheet) {
+            if let url = shareItem {
+                ShareSheet(activityItems: [url])
+            }
         }
     }
-    
-    private func exportQuests() {
-        // Implementation for quest export
+
+    private func exportRow(title: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon).foregroundColor(color)
+                Text(title)
+                Spacer()
+                Image(systemName: "square.and.arrow.up").foregroundColor(.secondary).font(.caption)
+            }
+        }
+        .foregroundColor(.primary)
     }
+
+    private func writeTemp(_ content: String, name: String) -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        try? content.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    private func share(_ url: URL?) {
+        guard let url else { return }
+        shareItem = url
+        showingShareSheet = true
+    }
+
+    private func exportNutritionCSV() {
+        var csv = "Date,Meal,Food,Calories,Protein(g),Carbs(g),Fat(g)\n"
+        let fmt = DateFormatter(); fmt.dateStyle = .short
+        for e in foodEntries {
+            let cal = Int(e.totalCalories)
+            csv += "\(fmt.string(from: e.dateConsumed)),\(e.meal.displayName),\"\(e.foodItem?.name ?? "")\",\(cal),\(String(format:"%.1f",e.totalProtein)),\(String(format:"%.1f",e.totalCarbs)),\(String(format:"%.1f",e.totalFat))\n"
+        }
+        share(writeTemp(csv, name: "nutrition_log.csv"))
+    }
+
+    private func exportWorkoutsCSV() {
+        var csv = "Date,Routine,Duration(min),XP Awarded,Sets\n"
+        let fmt = DateFormatter(); fmt.dateStyle = .short
+        for s in sessions {
+            let sets = s.sets?.count ?? 0
+            csv += "\(fmt.string(from: s.startedAt)),\"\(s.routineName)\",\(s.durationMinutes),\(s.xpAwarded),\(sets)\n"
+        }
+        share(writeTemp(csv, name: "workout_history.csv"))
+    }
+
+    private func exportMeasurementsCSV() {
+        var csv = "Date,Weight(kg),Chest(cm),Waist(cm),Hips(cm),BodyFat(%),Note\n"
+        let fmt = DateFormatter(); fmt.dateStyle = .short
+        for m in measurements {
+            csv += "\(fmt.string(from: m.date)),\(m.weightKg),\(m.chestCm.map{String(format:"%.1f",$0)} ?? ""),\(m.waistCm.map{String(format:"%.1f",$0)} ?? ""),\(m.hipsCm.map{String(format:"%.1f",$0)} ?? ""),\(m.bodyFatPercent.map{String(format:"%.1f",$0)} ?? ""),\"\(m.note)\"\n"
+        }
+        share(writeTemp(csv, name: "body_measurements.csv"))
+    }
+
+    private func exportProfileJSON() {
+        guard let p = profiles.first else { return }
+        let dict: [String: Any] = [
+            "name": p.name, "level": p.level, "xp": p.xp,
+            "currentStreak": p.currentStreak, "bestStreak": p.bestStreak,
+            "weight": p.weight, "height": p.height, "age": p.age,
+            "gender": p.genderRaw, "fitnessGoal": p.fitnessGoalRaw,
+            "dailyStepsGoal": p.dailyStepsGoal, "weeklyWorkoutGoal": p.weeklyWorkoutGoal,
+            "exportedAt": ISO8601DateFormatter().string(from: Date())
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
+              let str = String(data: data, encoding: .utf8) else { return }
+        share(writeTemp(str, name: "rpt_profile_backup.json"))
+    }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
 #Preview {
     SettingsView()
-        .modelContainer(for: [Quest.self, Profile.self], inMemory: true)
+        .modelContainer(for: [
+            Quest.self, Profile.self,
+            FoodItem.self, FoodEntry.self, CustomMeal.self, CustomMealItem.self,
+            WorkoutSession.self, ExerciseSet.self, ExerciseItem.self, ActiveRoutine.self,
+            PersonalRecord.self, PatrolRoute.self, InventoryItem.self,
+            Achievement.self, BodyMeasurement.self, PlannedMeal.self, CustomWorkoutPlan.self
+        ], inMemory: true)
 }
 

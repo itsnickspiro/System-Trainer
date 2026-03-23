@@ -6,32 +6,36 @@ struct Exercise: Identifiable, Codable, Equatable {
     let name: String
     let type: String?
     let muscle: String?
+    let secondaryMuscle: String?
     let equipment: String?
     let difficulty: String?
     let instructions: String?
 
-    init(id: UUID = UUID(), name: String, type: String?, muscle: String?, equipment: String?, difficulty: String?, instructions: String?) {
+    init(id: UUID = UUID(), name: String, type: String?, muscle: String?,
+         secondaryMuscle: String? = nil, equipment: String?,
+         difficulty: String?, instructions: String?) {
         self.id = id
         self.name = name
         self.type = type
         self.muscle = muscle
+        self.secondaryMuscle = secondaryMuscle
         self.equipment = equipment
         self.difficulty = difficulty
         self.instructions = instructions
     }
 
     enum CodingKeys: String, CodingKey {
-        case id // allow encoding/decoding id when present
-        case name, type, muscle, equipment, difficulty, instructions
+        case id
+        case name, type, muscle, secondaryMuscle, equipment, difficulty, instructions
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // If the payload includes an id, use it; otherwise generate one
         self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         self.name = try container.decode(String.self, forKey: .name)
         self.type = try container.decodeIfPresent(String.self, forKey: .type)
         self.muscle = try container.decodeIfPresent(String.self, forKey: .muscle)
+        self.secondaryMuscle = try container.decodeIfPresent(String.self, forKey: .secondaryMuscle)
         self.equipment = try container.decodeIfPresent(String.self, forKey: .equipment)
         self.difficulty = try container.decodeIfPresent(String.self, forKey: .difficulty)
         self.instructions = try container.decodeIfPresent(String.self, forKey: .instructions)
@@ -43,9 +47,51 @@ struct Exercise: Identifiable, Codable, Equatable {
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(type, forKey: .type)
         try container.encodeIfPresent(muscle, forKey: .muscle)
+        try container.encodeIfPresent(secondaryMuscle, forKey: .secondaryMuscle)
         try container.encodeIfPresent(equipment, forKey: .equipment)
         try container.encodeIfPresent(difficulty, forKey: .difficulty)
         try container.encodeIfPresent(instructions, forKey: .instructions)
+    }
+
+    // MARK: - Derived helpers
+
+    /// Icon that represents the primary muscle group
+    var muscleIcon: String {
+        switch muscle?.lowercased() {
+        case "chest":                    return "figure.arms.open"
+        case "back", "lats", "traps":   return "figure.strengthtraining.traditional"
+        case "shoulders", "deltoids":   return "figure.boxing"
+        case "biceps", "triceps", "forearms": return "figure.strengthtraining.functional"
+        case "legs", "quadriceps", "hamstrings", "glutes", "calves": return "figure.run"
+        case "abdominals", "abs", "core": return "figure.core.training"
+        case "cardio":                  return "heart.fill"
+        default:                        return "figure.mixed.cardio"
+        }
+    }
+
+    /// Difficulty colour for UI tinting
+    var difficultyColor: Color {
+        switch difficulty?.lowercased() {
+        case "beginner":   return .green
+        case "intermediate": return .orange
+        case "expert":     return .red
+        default:           return .secondary
+        }
+    }
+
+    /// Numbered step breakdown parsed from the instructions string.
+    /// Falls back to the full string as one step if no numbering found.
+    var instructionSteps: [String] {
+        guard let raw = instructions, !raw.isEmpty else { return [] }
+        // Try splitting on numbered patterns like "1." "1)" or newlines
+        let lines = raw.components(separatedBy: CharacterSet.newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if lines.count > 1 { return lines }
+        // Try splitting on period+space patterns used by the API
+        let dotSplit = raw.components(separatedBy: ". ").filter { !$0.isEmpty }
+        if dotSplit.count > 2 { return dotSplit.map { $0.hasSuffix(".") ? $0 : $0 + "." } }
+        return [raw]
     }
 }
 
@@ -53,23 +99,27 @@ final class ExercisesAPI {
     static let shared = ExercisesAPI()
     private init() {}
 
-    enum APIError: Error { case missingAPIKey, badURL, requestFailed, decodingFailed, http(Int) }
+    enum APIError: Error { case badURL, requestFailed, decodingFailed, http(Int) }
 
-    func fetchExercises(muscle: String? = nil, type: String? = nil, name: String? = nil, limit: Int = 20) async throws -> [Exercise] {
-        let apiKey = Secrets.apiNinjasKey
-        guard !apiKey.isEmpty else { throw APIError.missingAPIKey }
-        var comps = URLComponents(string: "https://api.api-ninjas.com/v1/exercises")
-        var items: [URLQueryItem] = []
-        if let muscle, !muscle.isEmpty { items.append(URLQueryItem(name: "muscle", value: muscle)) }
-        if let type, !type.isEmpty { items.append(URLQueryItem(name: "type", value: type)) }
-        if let name, !name.isEmpty { items.append(URLQueryItem(name: "name", value: name)) }
-        comps?.queryItems = items.isEmpty ? nil : items
-        guard let url = comps?.url else { throw APIError.badURL }
+    func fetchExercises(muscle: String? = nil, type: String? = nil, name: String? = nil, difficulty: String? = nil, offset: Int? = nil, limit: Int = 20) async throws -> [Exercise] {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/exercises-proxy") else {
+            throw APIError.badURL
+        }
+
+        var body: [String: String] = [:]
+        if let muscle, !muscle.isEmpty         { body["muscle"] = muscle }
+        if let type, !type.isEmpty             { body["type"] = type }
+        if let name, !name.isEmpty             { body["name"] = name }
+        if let difficulty, !difficulty.isEmpty { body["difficulty"] = difficulty }
+        if let offset                          { body["offset"] = String(offset) }
 
         var req = URLRequest(url: url)
-        req.httpMethod = "GET"
-        req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
         req.timeoutInterval = 20
+        req.httpBody = try? JSONEncoder().encode(body)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
         if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
@@ -82,10 +132,13 @@ final class ExercisesAPI {
                 let name = dict["name"] as? String ?? "Unknown"
                 let type = dict["type"] as? String
                 let muscle = dict["muscle"] as? String
+                let secondaryMuscle = dict["secondaryMuscle"] as? String
                 let equipment = dict["equipment"] as? String
                 let difficulty = dict["difficulty"] as? String
                 let instructions = dict["instructions"] as? String
-                return Exercise(name: name, type: type, muscle: muscle, equipment: equipment, difficulty: difficulty, instructions: instructions)
+                return Exercise(name: name, type: type, muscle: muscle,
+                                secondaryMuscle: secondaryMuscle, equipment: equipment,
+                                difficulty: difficulty, instructions: instructions)
             }
             return Array(mapped.prefix(limit))
         } catch {

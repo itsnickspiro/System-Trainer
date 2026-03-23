@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwiftUI
 
 // MARK: - QuestManager
 //
@@ -69,14 +70,17 @@ final class QuestManager {
         }
 
         /// XP multiplier for this tier.
+        /// Scales quest rewards to match the steeper XP threshold curve so players
+        /// at every rank take roughly the same real-world effort to level up (~2-3 weeks of
+        /// consistent daily quest completion).
         var xpMultiplier: Double {
             switch rank {
-            case .e: return 1.0
-            case .d: return 1.2
-            case .c: return 1.5
-            case .b: return 1.8
-            case .a: return 2.2
-            case .s: return 3.0
+            case .e: return 1.0       // Rank E: base XP values
+            case .d: return 3.0       // Rank D: ~3× base (threshold ~4-8× higher)
+            case .c: return 12.0      // Rank C: ~12× base
+            case .b: return 60.0      // Rank B: ~60× base
+            case .a: return 350.0     // Rank A: ~350× base
+            case .s: return 2_500.0   // Rank S: ~2,500× base — every quest session is a serious grind
             }
         }
     }
@@ -119,6 +123,9 @@ final class QuestManager {
 
     /// Generates today's quest list for the given profile.
     ///
+    /// If the profile has an active anime workout plan, the plan's quest for
+    /// today's weekday is returned instead of the generic algorithm.
+    ///
     /// - Parameters:
     ///   - profile: The current PlayerProfile.
     ///   - exercises: All cached ExerciseItems from SwiftData.
@@ -129,13 +136,27 @@ final class QuestManager {
         for profile: Profile,
         exercises: [ExerciseItem],
         personalRecords: [PersonalRecord],
-        existingQuests: [Quest]
+        existingQuests: [Quest],
+        modelContext: ModelContext? = nil
     ) -> [Quest] {
         guard existingQuests.isEmpty else { return [] } // Already generated today
 
-        let tier = QuestManager.tier(for: profile.level)
         let today = Calendar.current.startOfDay(for: Date())
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)
+
+        // --- Active Plan Override (anime or custom) ---
+        // When a plan is active, replace the generic strength/cardio quests with
+        // the plan's quest for today (keyed by day-of-week, 0 = Monday).
+        if !profile.activePlanID.isEmpty {
+            let activePlan = AnimeWorkoutPlans.plan(id: profile.activePlanID)
+                ?? customPlan(id: profile.activePlanID, context: modelContext)
+            if let plan = activePlan {
+                return buildPlanQuests(plan: plan, profile: profile, date: today, dueDate: tomorrow)
+            }
+        }
+
+        // --- Generic Algorithm ---
+        let tier = QuestManager.tier(for: profile.level)
         var quests: [Quest] = []
 
         // 1. Strength Block
@@ -172,6 +193,78 @@ final class QuestManager {
 
         // 6. Discipline anchor (always present)
         quests.append(disciplineQuest(profile: profile, tier: tier, date: today, dueDate: tomorrow))
+
+        return quests
+    }
+
+    // MARK: - Anime Plan Quest Builder
+
+    /// Converts today's `DayPlan` from an anime workout plan into Quest objects.
+    /// Also appends the always-present penalty-awareness and discipline quests.
+    func buildPlanQuests(
+        plan: AnimeWorkoutPlan,
+        profile: Profile,
+        date: Date,
+        dueDate: Date?
+    ) -> [Quest] {
+        var quests: [Quest] = []
+
+        // Map Calendar weekday (1=Sun…7=Sat) → plan index (0=Mon…6=Sun)
+        let calWeekday = Calendar.current.component(.weekday, from: date)
+        let planIndex = (calWeekday + 5) % 7 // Sun=0→6, Mon=1→0, Tue=2→1 …
+        let dayPlan = plan.weeklySchedule[planIndex]
+
+        if dayPlan.isRest {
+            // Rest day — single active recovery quest
+            quests.append(Quest(
+                title: "[\(plan.character)] Rest & Recover",
+                details: """
+                Rest day on the \(plan.character) protocol. \
+                Active recovery: light stretching, mobility work, or a slow walk. \
+                Sleep 8+ hours. Hydrate. Let the adaptations compound.
+                """,
+                type: .daily,
+                createdAt: Date(),
+                dueDate: dueDate,
+                xpReward: 50,
+                statTarget: "energy",
+                dateTag: date
+            ))
+        } else {
+            // Training day — one quest per planned exercise block
+            // (group all exercises into a single workout quest for simplicity)
+            let exerciseLines = dayPlan.exercises.map { ex -> String in
+                "\(ex.sets)×\(ex.reps) \(ex.name)\(ex.notes.isEmpty ? "" : " — \(ex.notes)")"
+            }.joined(separator: "\n")
+
+            quests.append(Quest(
+                title: dayPlan.questTitle,
+                details: """
+                \(plan.character) Protocol — \(dayPlan.focus)
+
+                \(exerciseLines)
+
+                \(dayPlan.questDetails)
+                """,
+                type: .daily,
+                createdAt: Date(),
+                dueDate: dueDate,
+                xpReward: dayPlan.xpReward,
+                statTarget: "strength",
+                dateTag: date
+            ))
+        }
+
+        // Always include penalty-awareness and discipline anchors
+        if let deadline = profile.hardcoreResetDeadline {
+            let hoursLeft = deadline.timeIntervalSinceNow / 3600
+            if hoursLeft > 0 && hoursLeft <= 4 {
+                quests.append(urgencyQuest(hoursLeft: hoursLeft, date: date, dueDate: dueDate))
+            }
+        }
+
+        let tier = QuestManager.tier(for: profile.level)
+        quests.append(disciplineQuest(profile: profile, tier: tier, date: date, dueDate: dueDate))
 
         return quests
     }
@@ -258,7 +351,11 @@ final class QuestManager {
         dueDate: Date?
     ) -> Quest {
         let sets = tier.workingSets
-        let reps = (tier.repRange.lowerBound + tier.repRange.upperBound) / 2
+        let baseReps = (tier.repRange.lowerBound + tier.repRange.upperBound) / 2
+        // Females and 50+ players: shift to higher rep ranges (12-15) for joint health and
+        // connective tissue adaptation — same training stimulus, safer loading.
+        let repOffset = (profile.gender == .female || profile.age >= 50) ? 2 : 0
+        let reps = baseReps + repOffset
 
         // Progressive overload target weight
         let targetWeight: Double
@@ -267,8 +364,8 @@ final class QuestManager {
             let sessionBonus = 1.0 + (Double(profile.currentStreak % 4) * 0.025)
             targetWeight = pr.oneRepMaxKg * tier.workingSetPercent * sessionBonus
         } else {
-            // No PR — use bodyweight percentage as seed
-            targetWeight = profile.weight * bodyweightSeedPercent(tier: tier, exercise: exercise)
+            // No PR — use bodyweight percentage as seed (adjusted for gender & age)
+            targetWeight = profile.weight * bodyweightSeedPercent(tier: tier, exercise: exercise, profile: profile)
         }
 
         let rounded = roundToNearestPlate(targetWeight)
@@ -324,7 +421,14 @@ final class QuestManager {
 
         // Bonus distance for good cardio fitness (VO2 max > 45 = elite)
         let vo2Bonus = max(0.0, (profile.vo2Max - 35.0) / 10.0) * 0.5
-        let targetKm = baseKm + vo2Bonus
+
+        // Bio-factor: females average ~10% lower absolute distance at the same effort level
+        // due to smaller lung volume and lower haemoglobin (ACSM position stand).
+        // Age 50+: reduce target by ~10% to protect joints and cardiovascular load.
+        let genderAdjust: Double = profile.gender == .female ? 0.90 : 1.0
+        let ageAdjust: Double = profile.age >= 50 ? 0.90 : 1.0
+
+        let targetKm = (baseKm + vo2Bonus) * genderAdjust * ageAdjust
         let xp = Int(Double(tier.rank == .s ? 200 : 80) * tier.xpMultiplier)
 
         return [Quest(
@@ -354,7 +458,10 @@ final class QuestManager {
         // Step goal scales with tier and current streak momentum
         let baseGoal = 8_000 + (tier.rank.ordinal * 1_000)
         let streakBonus = min(2_000, profile.currentStreak * 100)
-        let totalGoal = baseGoal + streakBonus
+
+        // Age factor: WHO recommends 7,000–10,000 for adults; reduce for 60+ (joint load)
+        let ageStepFactor: Double = profile.age >= 60 ? 0.85 : 1.0
+        let totalGoal = Int(Double(baseGoal + streakBonus) * ageStepFactor)
         let gap = totalGoal - profile.dailySteps
 
         guard gap > 1_000 else { return [] } // Already near goal — skip
@@ -473,6 +580,18 @@ final class QuestManager {
         }
     }
 
+    // MARK: - Custom Plan Lookup
+
+    /// Fetches a user-created `CustomWorkoutPlan` from SwiftData by ID and converts it
+    /// to an `AnimeWorkoutPlan` so it can be handled by the same code path.
+    private func customPlan(id: String, context: ModelContext?) -> AnimeWorkoutPlan? {
+        guard let context else { return nil }
+        let descriptor = FetchDescriptor<CustomWorkoutPlan>(
+            predicate: #Predicate { $0.id == id }
+        )
+        return (try? context.fetch(descriptor))?.first?.asAnimeWorkoutPlan()
+    }
+
     // MARK: - Helpers
 
     /// Maps wger equipment name strings to their numeric IDs.
@@ -496,16 +615,33 @@ final class QuestManager {
     }
 
     /// Seed weight as a percentage of bodyweight when no PR exists.
-    private func bodyweightSeedPercent(tier: PlayerTier, exercise: ExerciseItem) -> Double {
+    /// Applies gender and age modifiers on top of the tier base.
+    private func bodyweightSeedPercent(tier: PlayerTier, exercise: ExerciseItem, profile: Profile) -> Double {
         let isBigLift = exercise.primaryMuscles.contains { ["Quadriceps", "Glutes", "Back", "Chest"].contains($0) }
+        let base: Double
         switch tier.rank {
-        case .e: return isBigLift ? 0.40 : 0.20
-        case .d: return isBigLift ? 0.55 : 0.30
-        case .c: return isBigLift ? 0.70 : 0.40
-        case .b: return isBigLift ? 0.90 : 0.55
-        case .a: return isBigLift ? 1.10 : 0.65
-        case .s: return isBigLift ? 1.30 : 0.80
+        case .e: base = isBigLift ? 0.40 : 0.20
+        case .d: base = isBigLift ? 0.55 : 0.30
+        case .c: base = isBigLift ? 0.70 : 0.40
+        case .b: base = isBigLift ? 0.90 : 0.55
+        case .a: base = isBigLift ? 1.10 : 0.65
+        case .s: base = isBigLift ? 1.30 : 0.80
         }
+
+        // Gender: females average ~65% relative strength of males at the same BW ratio
+        // (NSCA/ACSM general population baseline). This seeds appropriate starting weights.
+        let genderFactor: Double = profile.gender == .female ? 0.65 : 1.0
+
+        // Age: peak strength 25-35 years. Younger players build fast; older need conservative starts.
+        let ageFactor: Double
+        switch profile.age {
+        case ..<20:       ageFactor = 0.85  // still developing, protect joints
+        case 20..<36:     ageFactor = 1.0   // prime
+        case 36..<50:     ageFactor = 0.92  // slight decline in peak force
+        default:          ageFactor = 0.82  // 50+ conservative, longevity first
+        }
+
+        return base * genderFactor * ageFactor
     }
 
     /// Rounds a weight to the nearest 2.5 kg plate increment.

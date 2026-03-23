@@ -1,12 +1,17 @@
 import SwiftUI
 import SwiftData
 
+extension Notification.Name {
+    static let rptAddFriendDeepLink = Notification.Name("rptAddFriendDeepLink")
+}
+
 @main
 @MainActor
 struct RPTApp: App {
     @AppStorage("colorScheme") private var colorScheme = "dark"
     @State private var isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     @State private var hasBootedUp = false
+    @State private var notificationManager = NotificationManager()
     
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -24,6 +29,10 @@ struct RPTApp: App {
             PersonalRecord.self,
             PatrolRoute.self,
             InventoryItem.self,
+            CustomWorkoutPlan.self,
+            Achievement.self,
+            BodyMeasurement.self,
+            PlannedMeal.self,
         ])
 
         // CloudKit private database sync is enabled by passing a cloudKitDatabase
@@ -86,8 +95,33 @@ struct RPTApp: App {
                 }
             }
             .preferredColorScheme(colorScheme == "auto" ? nil : (colorScheme == "dark" ? .dark : .light))
+            .onOpenURL { url in
+                handleDeepLink(url)
+            }
+            .task {
+                // Request notification permission and schedule recurring notifications
+                await notificationManager.requestAuthorization()
+                if notificationManager.isAuthorized {
+                    notificationManager.setupNotificationCategories()
+                    notificationManager.configureRecurringNotifications()
+                }
+            }
         }
         .modelContainer(sharedModelContainer)
+    }
+
+    /// Handles incoming deep links of the form `rpt://addfriend/XXXXXX`.
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme?.lowercased() == "rpt",
+              url.host?.lowercased() == "addfriend" else { return }
+        // The friend code is the first path component, e.g. /A3F9K2
+        let code = url.pathComponents.dropFirst().first?.uppercased() ?? ""
+        guard code.count == 6 else { return }
+        NotificationCenter.default.post(
+            name: .rptAddFriendDeepLink,
+            object: nil,
+            userInfo: ["code": code]
+        )
     }
     
     private func setupUserDefaults() {

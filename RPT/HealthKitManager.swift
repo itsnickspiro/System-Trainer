@@ -106,9 +106,16 @@ class HealthKitManager: ObservableObject {
         
         let allTypes = Set(healthDataTypes.map { $0 as HKSampleType }) 
                       .union(Set(categoryTypes.map { $0 as HKSampleType }))
+
+        // Write types — workouts + nutrition we log in-app
+        var shareTypes = Set<HKSampleType>()
+        shareTypes.insert(HKObjectType.workoutType())
+        if let water = HKQuantityType.quantityType(forIdentifier: .dietaryWater) { shareTypes.insert(water) }
+        if let protein = HKQuantityType.quantityType(forIdentifier: .dietaryProtein) { shareTypes.insert(protein) }
+        if let weight = HKQuantityType.quantityType(forIdentifier: .bodyMass) { shareTypes.insert(weight) }
         
         do {
-            try await healthStore.requestAuthorization(toShare: [], read: allTypes)
+            try await healthStore.requestAuthorization(toShare: shareTypes, read: allTypes)
             await MainActor.run {
                 self.isAuthorized = true
                 self.authorizationStatus = .sharingAuthorized
@@ -402,6 +409,75 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     
+    // MARK: - Write-back to Apple Health
+
+    /// Save a completed WorkoutSession as an HKWorkout in Apple Health.
+    func saveWorkoutSession(_ session: WorkoutSession) async {
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard let finishedAt = session.finishedAt else { return }
+
+        // Map routineName to an HKWorkoutActivityType (best-effort)
+        let activityType: HKWorkoutActivityType = activityType(for: session.routineName)
+
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = activityType
+        configuration.locationType = .indoor
+
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+        do {
+            try await builder.beginCollection(at: session.startedAt)
+            try await builder.endCollection(at: finishedAt)
+            try await builder.finishWorkout()
+        } catch {
+            print("[HealthKit] Failed to save workout: \(error)")
+        }
+    }
+
+    /// Save a body weight measurement to Apple Health.
+    func saveBodyWeight(_ kg: Double, date: Date = Date()) async {
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return }
+        let quantity = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg)
+        let sample = HKQuantitySample(type: weightType, quantity: quantity, start: date, end: date)
+        do {
+            try await healthStore.save(sample)
+        } catch {
+            print("[HealthKit] Failed to save weight: \(error)")
+        }
+    }
+
+    /// Save daily water intake to Apple Health.
+    func saveWaterIntake(glasses: Int, date: Date = Date()) async {
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard let waterType = HKQuantityType.quantityType(forIdentifier: .dietaryWater) else { return }
+        let liters = Double(glasses) * 0.25 // 250 mL per glass
+        let quantity = HKQuantity(unit: .liter(), doubleValue: liters)
+        let sample = HKQuantitySample(type: waterType, quantity: quantity, start: date, end: date)
+        do {
+            try await healthStore.save(sample)
+        } catch {
+            print("[HealthKit] Failed to save water: \(error)")
+        }
+    }
+
+    private func activityType(for name: String) -> HKWorkoutActivityType {
+        let lower = name.lowercased()
+        if lower.contains("run") || lower.contains("cardio") { return .running }
+        if lower.contains("cycl") || lower.contains("bike") { return .cycling }
+        if lower.contains("swim") { return .swimming }
+        if lower.contains("yoga") || lower.contains("flex") { return .yoga }
+        if lower.contains("hiit") || lower.contains("mixed") { return .highIntensityIntervalTraining }
+        return .traditionalStrengthTraining
+    }
+
+    // MARK: - Background Refresh
+
+    /// Fetch today's health data and update the profile. Call on app foreground.
+    func refreshTodayIfNeeded(profile: Profile) async {
+        guard isAuthorized else { return }
+        await fetchTodaysHealthData(for: profile)
+    }
+
     // MARK: - XP Calculation
     func calculateDailyXPFromHealth(profile: Profile) -> Int {
         var xp = 0

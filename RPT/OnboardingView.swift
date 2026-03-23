@@ -242,7 +242,14 @@ struct PermissionRequestView: View {
     @StateObject private var notificationManager = NotificationManager()
     @State private var currentStep = 0
     @State private var profileName = ""
-    
+    @State private var selectedGoal: FitnessGoal = .generalHealth
+    @State private var selectedGender: PlayerGender = .male
+    @State private var selectedGym: GymEnvironment = .fullGym
+    @State private var ageText: String = "25"
+    @State private var heightText: String = "170"
+    @State private var weightText: String = "70"
+    @State private var activityLevelIndex: Int = 1
+
     let steps = PermissionStep.allSteps
     
     var body: some View {
@@ -264,7 +271,14 @@ struct PermissionRequestView: View {
                     step: steps[currentStep],
                     healthManager: healthManager,
                     notificationManager: notificationManager,
-                    profileName: $profileName
+                    profileName: $profileName,
+                    selectedGoal: $selectedGoal,
+                    selectedGender: $selectedGender,
+                    selectedGym: $selectedGym,
+                    ageText: $ageText,
+                    heightText: $heightText,
+                    weightText: $weightText,
+                    activityLevelIndex: $activityLevelIndex
                 )
                 
                 Spacer()
@@ -313,8 +327,8 @@ struct PermissionRequestView: View {
     
     private func handleStepAction() {
         switch steps[currentStep].type {
-        case .profile:
-            // Profile step handled by form
+        case .profile, .goal, .demographics, .gymEnvironment:
+            // Input steps are handled by their UI controls; nothing to do here
             break
         case .health:
             Task {
@@ -335,22 +349,29 @@ struct PermissionRequestView: View {
     
     private func completeOnboarding() {
         let trimmedName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let age = Int(ageText) ?? 25
+        let height = Double(heightText) ?? 170.0
+        let weight = Double(weightText) ?? 70.0
 
-        // Write the profile into SwiftData so every view that reads Profile.name
-        // shows the player's real name instead of the default "Player".
+        // Write the profile into SwiftData so every view that reads Profile fields
+        // shows the player's real info instead of defaults.
         // Fetch any existing profile first to avoid creating duplicates on re-runs.
         let existing = try? modelContext.fetch(FetchDescriptor<Profile>())
-        if let profile = existing?.first {
-            if !trimmedName.isEmpty {
-                profile.name = trimmedName
-            }
+        let profile: Profile
+        if let existing = existing?.first {
+            profile = existing
         } else {
-            let profile = Profile()
-            if !trimmedName.isEmpty {
-                profile.name = trimmedName
-            }
+            profile = Profile()
             modelContext.insert(profile)
         }
+        if !trimmedName.isEmpty { profile.name = trimmedName }
+        profile.fitnessGoal        = selectedGoal
+        profile.gender             = selectedGender
+        profile.gymEnvironment     = selectedGym
+        profile.age                = age
+        profile.height             = height
+        profile.weight             = weight
+        profile.activityLevelIndex = activityLevelIndex
         try? modelContext.save()
 
         // Keep UserDefaults in sync for any legacy reads
@@ -374,7 +395,36 @@ struct PermissionStepView: View {
     @ObservedObject var healthManager: HealthManager
     @ObservedObject var notificationManager: NotificationManager
     @Binding var profileName: String
-    
+    @Binding var selectedGoal: FitnessGoal
+    @Binding var selectedGender: PlayerGender
+    @Binding var selectedGym: GymEnvironment
+    @Binding var ageText: String
+    @Binding var heightText: String
+    @Binding var weightText: String
+    @Binding var activityLevelIndex: Int
+
+    private let activityLabels = ["Sedentary", "Lightly Active", "Moderately Active", "Very Active", "Extremely Active"]
+
+    /// Live TDEE estimate shown in the demographics step
+    private var estimatedCalories: Int {
+        let age = Double(Int(ageText) ?? 25)
+        let h = Double(Double(heightText) ?? 170)
+        let w = Double(Double(weightText) ?? 70)
+        let bmr: Double
+        switch selectedGender {
+        case .male:   bmr = 10 * w + 6.25 * h - 5 * age + 5
+        case .female: bmr = 10 * w + 6.25 * h - 5 * age - 161
+        default:      bmr = 10 * w + 6.25 * h - 5 * age - 78
+        }
+        let multipliers = [1.2, 1.375, 1.55, 1.725, 1.9]
+        let tdee = bmr * multipliers[max(0, min(multipliers.count - 1, activityLevelIndex))]
+        switch selectedGoal {
+        case .loseFat:     return Int((tdee - 500).rounded())
+        case .buildMuscle: return Int((tdee + 300).rounded())
+        default:           return Int(tdee.rounded())
+        }
+    }
+
     var body: some View {
         VStack(spacing: 24) {
             Image(systemName: step.icon)
@@ -403,10 +453,127 @@ struct PermissionStepView: View {
                     TextField("Enter your name", text: $profileName)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .frame(maxWidth: 250)
-                    
                     Text("We'll use this to personalize your experience")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+
+            case .goal:
+                VStack(spacing: 12) {
+                    ForEach(FitnessGoal.allCases, id: \.self) { goal in
+                        Button {
+                            selectedGoal = goal
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: goal.icon)
+                                    .font(.title3)
+                                    .foregroundColor(selectedGoal == goal ? .black : step.color)
+                                    .frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(goal.displayName)
+                                        .font(.headline)
+                                        .foregroundColor(selectedGoal == goal ? .black : .white)
+                                    Text(goal.description)
+                                        .font(.caption)
+                                        .foregroundColor(selectedGoal == goal ? .black.opacity(0.7) : .gray)
+                                }
+                                Spacer()
+                                if selectedGoal == goal {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.black)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(selectedGoal == goal ? step.color : Color.white.opacity(0.08))
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+
+            case .demographics:
+                VStack(spacing: 14) {
+                    // Gender picker
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Gender")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        Picker("Gender", selection: $selectedGender) {
+                            ForEach(PlayerGender.allCases, id: \.self) { g in
+                                Text(g.displayName).tag(g)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                    }
+                    // Age / Height / Weight fields
+                    HStack(spacing: 12) {
+                        DemographicField(label: "Age", placeholder: "25", unit: "yrs", text: $ageText)
+                        DemographicField(label: "Height", placeholder: "170", unit: "cm", text: $heightText)
+                        DemographicField(label: "Weight", placeholder: "70", unit: "kg", text: $weightText)
+                    }
+                    .padding(.horizontal)
+
+                    // Activity level picker
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Activity Level")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        Picker("Activity Level", selection: $activityLevelIndex) {
+                            ForEach(activityLabels.indices, id: \.self) { i in
+                                Text(activityLabels[i]).tag(i)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .padding(.horizontal)
+                        .tint(.cyan)
+                    }
+
+                    // Live calorie goal preview
+                    HStack {
+                        Image(systemName: "flame.fill")
+                            .foregroundColor(.orange)
+                        Text("Daily calorie goal: \(estimatedCalories) kcal")
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(10)
+                    .padding(.horizontal)
+                }
+
+            case .gymEnvironment:
+                VStack(spacing: 10) {
+                    ForEach(GymEnvironment.allCases, id: \.self) { env in
+                        Button {
+                            selectedGym = env
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: env.icon)
+                                    .font(.title3)
+                                    .foregroundColor(selectedGym == env ? .black : step.color)
+                                    .frame(width: 28)
+                                Text(env.displayName)
+                                    .font(.headline)
+                                    .foregroundColor(selectedGym == env ? .black : .white)
+                                Spacer()
+                                if selectedGym == env {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.black)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(selectedGym == env ? step.color : Color.white.opacity(0.08))
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal)
+                    }
                 }
                 
             case .health:
@@ -463,7 +630,7 @@ struct PermissionStepView: View {
 
 struct PermissionStep {
     enum StepType {
-        case profile, health, notifications, complete
+        case profile, goal, demographics, gymEnvironment, health, notifications, complete
     }
     
     let type: StepType
@@ -477,12 +644,35 @@ struct PermissionStep {
         PermissionStep(
             type: .profile,
             title: "Create Your Profile",
-            description: "Let's personalize your RPG experience with your name and goals.",
+            description: "Let's personalize your RPG experience with your name.",
             icon: "person.circle.fill",
             color: .blue,
             buttonTitle: "Continue"
         ),
-        
+        PermissionStep(
+            type: .goal,
+            title: "What's Your Goal?",
+            description: "We'll tailor your quests and program to match your fitness mission.",
+            icon: "target",
+            color: .orange,
+            buttonTitle: "Continue"
+        ),
+        PermissionStep(
+            type: .demographics,
+            title: "Your Body Stats",
+            description: "Used to personalise quest intensity, calorie targets and strength benchmarks.",
+            icon: "person.text.rectangle.fill",
+            color: .cyan,
+            buttonTitle: "Continue"
+        ),
+        PermissionStep(
+            type: .gymEnvironment,
+            title: "Where Do You Train?",
+            description: "Your training environment shapes which exercises and programs are right for you.",
+            icon: "building.2.fill",
+            color: .purple,
+            buttonTitle: "Continue"
+        ),
         PermissionStep(
             type: .health,
             title: "Connect Apple Health",
@@ -491,7 +681,6 @@ struct PermissionStep {
             color: .red,
             buttonTitle: "Connect Health"
         ),
-        
         PermissionStep(
             type: .notifications,
             title: "Enable Notifications",
@@ -500,7 +689,6 @@ struct PermissionStep {
             color: .orange,
             buttonTitle: "Enable Notifications"
         ),
-        
         PermissionStep(
             type: .complete,
             title: "Ready to Begin!",
@@ -543,6 +731,35 @@ struct SecondaryButtonStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
             .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Demographic input field helper
+private struct DemographicField: View {
+    let label: String
+    let placeholder: String
+    let unit: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            HStack(spacing: 2) {
+                TextField(placeholder, text: $text)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
+                    .frame(width: 52)
+                    .padding(8)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(8)
+                    .foregroundColor(.white)
+                Text(unit)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
     }
 }
 

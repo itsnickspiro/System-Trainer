@@ -7,6 +7,7 @@ struct QuestsView: View {
     @Query(sort: \Quest.createdAt, order: .reverse) private var quests: [Quest]
     @StateObject private var dataManager = DataManager.shared
     @State private var selectedDay = Date()
+    @State private var showingCreateQuest = false
     
     private var todaysQuests: [Quest] {
         quests.filter { Calendar.current.isDate($0.dateTag, inSameDayAs: selectedDay) }
@@ -49,15 +50,7 @@ struct QuestsView: View {
                                     .multilineTextAlignment(.center)
                                 
                                 Button("Create Quest") {
-                                    // Create a sample quest for demonstration
-                                    let quest = Quest(
-                                        title: "Morning Workout",
-                                        details: "Complete 30 minutes of exercise",
-                                        type: .daily,
-                                        xpReward: 50,
-                                        dateTag: selectedDay
-                                    )
-                                    context.insert(quest)
+                                    showingCreateQuest = true
                                 }
                                 .buttonStyle(.borderedProminent)
                             }
@@ -118,44 +111,341 @@ struct QuestsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Add", systemImage: "plus") {
-                        addSampleQuest()
+                        showingCreateQuest = true
                     }
                     .foregroundColor(.cyan)
                 }
+            }
+            .sheet(isPresented: $showingCreateQuest) {
+                CreateQuestView(selectedDay: selectedDay)
             }
         }
     }
     
     private func toggleQuestCompletion(_ quest: Quest) {
         if quest.isCompleted {
-            // Un-complete: clear flag and remove completion date only
-            quest.isCompleted = false
-            quest.completedAt = nil
-            try? context.save()
+            // Un-complete: refund XP so the player doesn't keep what they didn't earn
+            dataManager.uncompleteQuest(quest)
         } else {
-            // Complete via DataManager so XP is awarded and Firebase is synced
+            // Complete via DataManager so XP is awarded
             dataManager.completeQuest(quest)
         }
     }
     
-    private func addSampleQuest() {
-        let sampleQuests = [
-            ("Hydration Check", "Drink 8 glasses of water", 25),
-            ("Power Walk", "Walk 10,000 steps", 40),
-            ("Mindful Moment", "Meditate for 10 minutes", 30),
-            ("Strength Session", "Complete strength training", 60),
-            ("Healthy Meal", "Prepare a nutritious meal", 35)
-        ]
-        
-        let randomQuest = sampleQuests.randomElement()!
+}
+
+// MARK: - Quest Category (drives form fields + XP calculation)
+
+enum QuestCategory: String, CaseIterable, Identifiable {
+    case steps       = "steps"
+    case workout     = "workout"
+    case calories    = "calories"
+    case sleep       = "sleep"
+    case manual      = "manual"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .steps:    return "Steps"
+        case .workout:  return "Workout"
+        case .calories: return "Active Calories"
+        case .sleep:    return "Sleep"
+        case .manual:   return "Custom / Manual"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .steps:    return "figure.walk"
+        case .workout:  return "dumbbell.fill"
+        case .calories: return "flame.fill"
+        case .sleep:    return "bed.double.fill"
+        case .manual:   return "checkmark.seal.fill"
+        }
+    }
+
+    /// The stat that improves when this quest is completed.
+    var statTarget: String {
+        switch self {
+        case .steps:    return "endurance"
+        case .workout:  return "strength"
+        case .calories: return "endurance"
+        case .sleep:    return "energy"
+        case .manual:   return "discipline"
+        }
+    }
+
+    /// Description of how completion is verified.
+    var verificationNote: String {
+        switch self {
+        case .steps:    return "Verified automatically via HealthKit step count"
+        case .workout:  return "Verified automatically when a matching workout is logged"
+        case .calories: return "Verified automatically via HealthKit active calories"
+        case .sleep:    return "Verified automatically via HealthKit sleep data"
+        case .manual:   return "You confirm completion manually by tapping the quest"
+        }
+    }
+}
+
+enum QuestDifficulty: String, CaseIterable, Identifiable {
+    case easy   = "easy"
+    case medium = "medium"
+    case hard   = "hard"
+
+    var id: String { rawValue }
+
+    var displayName: String { rawValue.capitalized }
+
+    var color: Color {
+        switch self {
+        case .easy:   return .green
+        case .medium: return .orange
+        case .hard:   return .red
+        }
+    }
+
+    /// Base XP for this difficulty. Scaled by category weight in CreateQuestView.
+    var baseXP: Int {
+        switch self {
+        case .easy:   return 25
+        case .medium: return 50
+        case .hard:   return 100
+        }
+    }
+}
+
+// MARK: - Create Quest View
+
+struct CreateQuestView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @Environment(\.colorScheme) private var colorScheme
+
+    let selectedDay: Date
+
+    // Quest info
+    @State private var title = ""
+    @State private var details = ""
+    @State private var questType: QuestType = .daily
+
+    // Category + difficulty — XP is derived, not typed
+    @State private var category: QuestCategory = .workout
+    @State private var difficulty: QuestDifficulty = .medium
+
+    // Category-specific targets
+    @State private var stepTarget: Int = 10_000
+    @State private var calTarget: Int = 400
+    @State private var sleepTarget: Double = 8.0
+    @State private var workoutType: WorkoutType = .strength  // for workout category
+
+    private let stepOptions  = [5_000, 7_500, 10_000, 12_500, 15_000, 20_000]
+    private let calOptions   = [200, 300, 400, 500, 600, 800]
+    private let sleepOptions: [Double] = [6, 7, 7.5, 8, 9]
+
+    // XP is calculated from category + difficulty — user cannot set it
+    private var calculatedXP: Int {
+        let base = difficulty.baseXP
+        switch category {
+        case .steps:    return Int(Double(base) * (Double(stepTarget) / 10_000.0)).clamped(to: 15...200)
+        case .calories: return Int(Double(base) * (Double(calTarget) / 400.0)).clamped(to: 15...200)
+        case .sleep:    return Int(Double(base) * (sleepTarget / 8.0)).clamped(to: 15...150)
+        case .workout:  return base               // workout difficulty maps 1:1
+        case .manual:   return base               // manual quests use flat difficulty XP
+        }
+    }
+
+    private var completionCondition: String {
+        switch category {
+        case .steps:    return "steps:\(stepTarget)"
+        case .calories: return "calories:\(calTarget)"
+        case .sleep:    return "sleep:\(sleepTarget)"
+        case .workout:  return "workout:\(workoutType.rawValue)"
+        case .manual:   return "manual"
+        }
+    }
+
+    private var isValid: Bool {
+        !title.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                // ── Quest Info ──────────────────────────────────────────────
+                Section("Quest Info") {
+                    TextField("Title (e.g. Morning Run)", text: $title)
+                    TextField("Details / Description (optional)", text: $details, axis: .vertical)
+                        .lineLimit(3...5)
+                }
+
+                // ── Quest Type (Daily / Weekly / Custom) ────────────────────
+                Section("Frequency") {
+                    Picker("Quest Type", selection: $questType) {
+                        ForEach(QuestType.allCases) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                // ── Category ────────────────────────────────────────────────
+                Section {
+                    ForEach(QuestCategory.allCases) { cat in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) { category = cat }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: cat.icon)
+                                    .foregroundColor(category == cat ? .cyan : .secondary)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(cat.displayName)
+                                        .foregroundColor(colorScheme == .dark ? .white : .black)
+                                        .font(.body)
+                                    Text(cat.verificationNote)
+                                        .foregroundColor(.secondary)
+                                        .font(.caption)
+                                }
+                                Spacer()
+                                if category == cat {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.cyan)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Category & Verification")
+                } footer: {
+                    Text("The selected category determines how completion is verified — no manual cheating.")
+                        .font(.caption)
+                }
+
+                // ── Category-specific target ────────────────────────────────
+                if category != .manual {
+                    Section("Target") {
+                        switch category {
+                        case .steps:
+                            Picker("Step Goal", selection: $stepTarget) {
+                                ForEach(stepOptions, id: \.self) { n in
+                                    Text(n.formatted()).tag(n)
+                                }
+                            }
+                        case .calories:
+                            Picker("Active Calories", selection: $calTarget) {
+                                ForEach(calOptions, id: \.self) { n in
+                                    Text("\(n) kcal").tag(n)
+                                }
+                            }
+                        case .sleep:
+                            Picker("Hours of Sleep", selection: $sleepTarget) {
+                                ForEach(sleepOptions, id: \.self) { h in
+                                    Text(String(format: "%.1fh", h)).tag(h)
+                                }
+                            }
+                        case .workout:
+                            Picker("Workout Type", selection: $workoutType) {
+                                ForEach(WorkoutType.allCases) { type in
+                                    Label(type.displayName, systemImage: type.icon).tag(type)
+                                }
+                            }
+                        case .manual:
+                            EmptyView()
+                        }
+                    }
+                }
+
+                // ── Difficulty ──────────────────────────────────────────────
+                Section("Difficulty") {
+                    Picker("Difficulty", selection: $difficulty) {
+                        ForEach(QuestDifficulty.allCases) { d in
+                            Text(d.displayName).foregroundColor(d.color).tag(d)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                // ── XP Preview (read-only) ───────────────────────────────────
+                Section {
+                    HStack {
+                        Label("Stat Boost", systemImage: "bolt.fill")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(category.statTarget.capitalized)
+                            .foregroundColor(.cyan)
+                            .fontWeight(.semibold)
+                    }
+                    HStack {
+                        Label("XP Reward", systemImage: "star.fill")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("+\(calculatedXP) XP")
+                            .foregroundColor(.yellow)
+                            .fontWeight(.bold)
+                    }
+                    HStack {
+                        Label("Verified By", systemImage: "lock.shield.fill")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(category == .manual ? "Manual tap" : "HealthKit")
+                            .foregroundColor(category == .manual ? .orange : .green)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                } header: {
+                    Text("Reward Preview")
+                } footer: {
+                    Text("XP is calculated automatically based on category and difficulty. It cannot be set manually.")
+                        .font(.caption)
+                }
+
+                // ── Create button ────────────────────────────────────────────
+                Section {
+                    Button(action: createQuest) {
+                        HStack {
+                            Spacer()
+                            Label("Add Quest", systemImage: "plus.circle.fill")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                    }
+                    .listRowBackground(isValid ? Color.cyan : Color.gray)
+                    .disabled(!isValid)
+                }
+            }
+            .navigationTitle("New Quest")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func createQuest() {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmedTitle.isEmpty else { return }
+
         let quest = Quest(
-            title: randomQuest.0,
-            details: randomQuest.1,
-            type: .daily,
-            xpReward: randomQuest.2,
+            title: trimmedTitle,
+            details: details.trimmingCharacters(in: .whitespaces),
+            type: questType,
+            xpReward: calculatedXP,
+            statTarget: category.statTarget,
+            completionCondition: completionCondition,
             dateTag: selectedDay
         )
         context.insert(quest)
+        dismiss()
+    }
+}
+
+private extension Int {
+    func clamped(to range: ClosedRange<Int>) -> Int {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }
 

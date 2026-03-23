@@ -8,7 +8,6 @@ final class RecipeAPI: ObservableObject {
     private init() {}
     
     enum APIError: Error {
-        case missingAPIKey
         case badURL
         case requestFailed
         case decodingFailed
@@ -17,8 +16,6 @@ final class RecipeAPI: ObservableObject {
         
         var localizedDescription: String {
             switch self {
-            case .missingAPIKey:
-                return "API key is missing"
             case .badURL:
                 return "Invalid URL"
             case .requestFailed:
@@ -35,41 +32,31 @@ final class RecipeAPI: ObservableObject {
     
     @MainActor
     func fetchRecipes(query: String? = nil, limit: Int = 10) async throws -> [Recipe] {
-        let apiKey = Secrets.apiNinjasKey
-        guard !apiKey.isEmpty else { throw APIError.missingAPIKey }
-        
-        var urlComponents = URLComponents(string: "https://api.api-ninjas.com/v2/recipe")
-        
-        var queryItems: [URLQueryItem] = []
-        if let query = query, !query.isEmpty {
-            queryItems.append(URLQueryItem(name: "query", value: query))
-        }
-        if limit > 0 {
-            queryItems.append(URLQueryItem(name: "limit", value: "\(limit)"))
-        }
-        
-        urlComponents?.queryItems = queryItems.isEmpty ? nil : queryItems
-        
-        guard let url = urlComponents?.url else {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/recipe-proxy") else {
             throw APIError.badURL
         }
-        
+
+        var body: [String: String] = [:]
+        if let query, !query.isEmpty { body["query"] = query }
+        body["limit"] = String(limit)
+
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
         request.timeoutInterval = 30
-        
+        request.httpBody = try? JSONEncoder().encode(body)
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            
+
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
                 throw APIError.http(httpResponse.statusCode)
             }
-            
-            // The API returns an array of recipe objects
+
             let decoder = JSONDecoder()
             let recipes = try decoder.decode([Recipe].self, from: data)
-            
             return recipes
         } catch is DecodingError {
             throw APIError.decodingFailed

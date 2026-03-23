@@ -5,11 +5,13 @@ import Combine
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
 
     @State private var selectedTab = 0
     @StateObject private var dataManager = DataManager.shared
     @State private var now = Date()
+    @State private var showingSettings = false
     private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -73,6 +75,28 @@ struct ContentView: View {
             setupTabBarAppearance(for: newScheme)
         }
         .onReceive(timer) { now = $0 }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                dataManager.refreshHealthOnForeground()
+            }
+        }
+        // Notification deep-link routing
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
+            selectedTab = 0
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToQuests)) { _ in
+            selectedTab = 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToHealth)) { _ in
+            // Health data surfaces on the Home tab
+            selectedTab = 0
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToProfile)) { _ in
+            showingSettings = true
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
+        }
     }
 
     // MARK: - Countdown Timer View
@@ -91,7 +115,10 @@ struct ContentView: View {
 
     private func timeToMidnightString() -> String {
         let calendar = Calendar.current
-        let startOfTomorrow = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: now)!)
+        guard let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) else {
+            return "Reset in 00:00:00"
+        }
+        let startOfTomorrow = calendar.startOfDay(for: tomorrow)
         let comps = calendar.dateComponents([.hour, .minute, .second], from: now, to: startOfTomorrow)
         let h = comps.hour ?? 0, m = comps.minute ?? 0, s = comps.second ?? 0
         return String(format: "Reset in %02d:%02d:%02d", h, m, s)
@@ -126,5 +153,11 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Quest.self, Profile.self, FoodItem.self, FoodEntry.self, CustomMeal.self], inMemory: true)
+        .modelContainer(for: [
+            Quest.self, Profile.self,
+            FoodItem.self, FoodEntry.self, CustomMeal.self, CustomMealItem.self,
+            WorkoutSession.self, ExerciseSet.self, ExerciseItem.self, ActiveRoutine.self,
+            PersonalRecord.self, PatrolRoute.self, InventoryItem.self,
+            Achievement.self, BodyMeasurement.self, PlannedMeal.self, CustomWorkoutPlan.self
+        ], inMemory: true)
 }
