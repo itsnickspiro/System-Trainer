@@ -9,14 +9,13 @@ import Combine
 @MainActor
 class HealthManager: ObservableObject {
     // MARK: - Configuration
-    private let useMockData = true // Change to false for production
+    private let useMockData = false // Change to false for production
     
     // MARK: - HealthKit Setup
     let healthStore = HKHealthStore()
     
     // MARK: - Published State
     @Published var isAuthorized = false
-    @Published var authorizationStatus: HKAuthorizationStatus = .notDetermined
     @Published var healthDataAvailable = false
     
     // MARK: - Health Data Types
@@ -69,14 +68,20 @@ class HealthManager: ObservableObject {
             // Mock authorization success
             print("Using mock health data")
             isAuthorized = true
-            authorizationStatus = .sharingAuthorized
             return
         }
         
         do {
-            try await healthStore.requestAuthorization(toShare: [], read: readTypes)
-            authorizationStatus = healthStore.authorizationStatus(for: HKQuantityType(.stepCount))
-            isAuthorized = authorizationStatus == .sharingAuthorized
+            // Write types we log from the app
+            let writeTypes: Set<HKSampleType> = [
+                HKObjectType.workoutType(),
+                HKQuantityType(.bodyMass),
+                HKQuantityType(.dietaryWater),
+                HKQuantityType(.dietaryEnergyConsumed),
+                HKQuantityType(.dietaryProtein)
+            ]
+            try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
+            isAuthorized = true
         } catch {
             print("HealthKit authorization failed: \(error)")
             isAuthorized = false
@@ -161,18 +166,28 @@ class HealthManager: ObservableObject {
     }
     
     private func fetchSleepData(for profile: Profile) async {
-        // Sleep data fetching logic
-        _ = HKCategoryType(.sleepAnalysis)
+        let sleepType = HKCategoryType(.sleepAnalysis)
+        // Query the last 24 hours (previous night's sleep window)
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
         let startOfYesterday = Calendar.current.startOfDay(for: yesterday)
-        let endOfYesterday = Calendar.current.date(byAdding: .day, value: 1, to: startOfYesterday)!
-        
-        _ = HKQuery.predicateForSamples(withStart: startOfYesterday, end: endOfYesterday)
-        
-        // Implementation would go here for real HealthKit
-        // For now, keeping mock data
-        if useMockData {
-            profile.sleepHours = Double.random(in: 6...9)
+        let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!
+        let predicate = HKQuery.predicateForSamples(withStart: startOfYesterday, end: endOfToday)
+
+        do {
+            let samples = try await queryCategoryData(type: sleepType, predicate: predicate)
+            // Sum durations for asleep stages only (exclude .inBed and .awake)
+            let asleepValues: Set<Int> = [
+                HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+                HKCategoryValueSleepAnalysis.asleepREM.rawValue
+            ]
+            let totalSeconds = samples
+                .filter { asleepValues.contains($0.value) }
+                .reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) }
+            profile.sleepHours = totalSeconds / 3600.0
+        } catch {
+            print("Failed to fetch sleep data: \(error)")
         }
     }
     
@@ -233,6 +248,25 @@ class HealthManager: ObservableObject {
     }
     
     // MARK: - Helper Methods
+    private func queryCategoryData(type: HKCategoryType, predicate: NSPredicate) async throws -> [HKCategorySample] {
+        return try await withCheckedThrowingContinuation { continuation in
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, samples, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: samples as? [HKCategorySample] ?? [])
+                }
+            }
+            self.healthStore.execute(query)
+        }
+    }
+
     private func queryHealthData(type: HKQuantityType, predicate: NSPredicate) async throws -> [HKQuantitySample] {
         return try await withCheckedThrowingContinuation { continuation in
             let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
@@ -290,6 +324,54 @@ class HealthManager: ObservableObject {
         
         // Clean up observers
         print("Stopping health monitoring")
+    }
+}
+
+// MARK: - Write-back to Apple Health
+extension HealthManager {
+
+    /// Save a completed workout to Apple Health using HKWorkoutBuilder.
+    func saveWorkout(type workoutType: WorkoutType, start: Date, durationMinutes: Int) async {
+        guard isAuthorized, !useMockData, HKHealthStore.isHealthDataAvailable() else { return }
+        let end = start.addingTimeInterval(Double(durationMinutes) * 60)
+        let config = HKWorkoutConfiguration()
+        config.activityType = hkActivityType(for: workoutType)
+        config.locationType = .indoor
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: config, device: .local())
+        do {
+            try await builder.beginCollection(at: start)
+            try await builder.endCollection(at: end)
+            _ = try await builder.finishWorkout()
+        } catch {
+            print("[HealthManager] saveWorkout failed: \(error)")
+        }
+    }
+
+    /// Save a body weight reading to Apple Health.
+    func saveBodyWeight(_ kg: Double, date: Date = Date()) async {
+        guard isAuthorized, !useMockData, HKHealthStore.isHealthDataAvailable() else { return }
+        let type = HKQuantityType(.bodyMass)
+        let qty = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg)
+        let sample = HKQuantitySample(type: type, quantity: qty, start: date, end: date)
+        try? await healthStore.save(sample)
+    }
+
+    /// Save logged food calories to Apple Health.
+    func saveCalories(_ kcal: Double, date: Date = Date()) async {
+        guard isAuthorized, !useMockData, HKHealthStore.isHealthDataAvailable() else { return }
+        let type = HKQuantityType(.dietaryEnergyConsumed)
+        let qty = HKQuantity(unit: .kilocalorie(), doubleValue: kcal)
+        let sample = HKQuantitySample(type: type, quantity: qty, start: date, end: date)
+        try? await healthStore.save(sample)
+    }
+
+    private func hkActivityType(for type: WorkoutType) -> HKWorkoutActivityType {
+        switch type {
+        case .strength: return .traditionalStrengthTraining
+        case .cardio: return .running
+        case .flexibility: return .yoga
+        case .mixed: return .highIntensityIntervalTraining
+        }
     }
 }
 

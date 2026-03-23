@@ -27,6 +27,84 @@ struct QuestFlavorText: Decodable {
     var xpReward: Int
 }
 
+/// A fully structured custom workout plan generated from a user questionnaire.
+@Generable
+struct AIPlanSuggestion: Decodable {
+    /// Plan name. Short, evocative. E.g. "Iron Discipline Protocol" or "Lean Warrior Program".
+    @Guide(description: "Short, memorable workout plan name. 3-5 words, RPG-style.")
+    var name: String
+
+    /// One-sentence description of the plan's philosophy.
+    @Guide(description: "One sentence describing the plan's core philosophy and target outcome.")
+    var description: String
+
+    /// Difficulty: Beginner, Intermediate, Advanced, or Elite.
+    @Guide(description: "Difficulty tier: exactly one of Beginner, Intermediate, Advanced, Elite")
+    var difficulty: String
+
+    /// Daily calorie target as an integer.
+    @Guide(description: "Daily calorie target as an integer between 1400 and 5000")
+    var dailyCalories: Int
+
+    /// Daily protein target in grams.
+    @Guide(description: "Daily protein target in grams as an integer")
+    var proteinGrams: Int
+
+    /// Daily carbohydrate target in grams.
+    @Guide(description: "Daily carbohydrate target in grams as an integer")
+    var carbGrams: Int
+
+    /// Daily fat target in grams.
+    @Guide(description: "Daily fat target in grams as an integer")
+    var fatGrams: Int
+
+    /// Daily water glasses (8 oz each).
+    @Guide(description: "Daily water intake in 8oz glasses, integer between 6 and 16")
+    var waterGlasses: Int
+
+    /// Monday focus. E.g. "Push — Chest & Shoulders" or "Rest".
+    @Guide(description: "Monday training focus. Can be Rest or a specific muscle group/style.")
+    var mondayFocus: String
+
+    /// Tuesday focus.
+    @Guide(description: "Tuesday training focus.")
+    var tuesdayFocus: String
+
+    /// Wednesday focus.
+    @Guide(description: "Wednesday training focus.")
+    var wednesdayFocus: String
+
+    /// Thursday focus.
+    @Guide(description: "Thursday training focus.")
+    var thursdayFocus: String
+
+    /// Friday focus.
+    @Guide(description: "Friday training focus.")
+    var fridayFocus: String
+
+    /// Saturday focus.
+    @Guide(description: "Saturday training focus.")
+    var saturdayFocus: String
+
+    /// Sunday focus.
+    @Guide(description: "Sunday training focus. Often Rest or Active Recovery.")
+    var sundayFocus: String
+
+    /// 3 meal prep tips suited to the plan's goals.
+    @Guide(description: "Exactly 3 practical meal prep tips suited to the plan's nutrition targets.")
+    var mealPrepTip1: String
+
+    @Guide(description: "Second meal prep tip.")
+    var mealPrepTip2: String
+
+    @Guide(description: "Third meal prep tip.")
+    var mealPrepTip3: String
+
+    /// Foods to avoid on this plan (comma-separated, 3-5 items).
+    @Guide(description: "3 to 5 foods to avoid on this plan, comma-separated.")
+    var avoidFoods: String
+}
+
 /// An RPG-flavored item analysis generated from an Open Food Facts product.
 @Generable
 struct FoodItemFlavorText: Decodable {
@@ -150,6 +228,25 @@ final class AIManager: ObservableObject {
         nutrition values. Assign a rarity tier based on nutritional density.
         """
         return try await generate(FoodItemFlavorText.self, prompt: prompt)
+    }
+
+    /// Generate a custom workout plan from a questionnaire answer set.
+    ///
+    /// - Parameter answers: Dictionary of question keys to user answers.
+    ///   Expected keys: goal, experience, daysPerWeek, sessionLength, equipment, limitations, bodyWeight, targetWeight
+    /// - Returns: An `AIPlanSuggestion` ready to be converted into a `CustomWorkoutPlan`.
+    func generatePlan(from answers: [String: String]) async throws -> AIPlanSuggestion {
+        let answerBlock = answers.map { "\($0.key): \($0.value)" }.sorted().joined(separator: "\n")
+        let prompt = """
+        PLAYER QUESTIONNAIRE DATA (use ONLY this — invent nothing about the player):
+        \(answerBlock)
+
+        Task: Design a personalised 7-day workout program for this player based solely on \
+        the answers above. Provide specific training focuses for each day of the week. \
+        Provide realistic nutrition targets consistent with their stated goal and body weight. \
+        Apply the System's cold, analytical methodology — no fluff, no motivational language.
+        """
+        return try await generate(AIPlanSuggestion.self, prompt: prompt)
     }
 
     /// Free-form chat with the System persona, for CoachView.

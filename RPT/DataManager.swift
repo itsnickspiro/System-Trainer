@@ -3,6 +3,7 @@ import SwiftData
 import Combine
 import Network
 import HealthKit
+import UIKit
 
 /// Centralized data manager that coordinates between local SwiftData and APIs
 @MainActor
@@ -156,6 +157,22 @@ final class DataManager: ObservableObject {
             profile.registerCompletion()
         }
 
+        // Haptic feedback for quest completion
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        saveLocalChanges()
+        refreshTodaysQuests()
+    }
+
+    func uncompleteQuest(_ quest: Quest) {
+        quest.isCompleted = false
+        quest.completedAt = nil
+
+        // Refund XP — the player didn't actually earn it
+        if let profile = currentProfile {
+            profile.subtractXP(quest.xpReward)
+        }
+
         saveLocalChanges()
         refreshTodaysQuests()
     }
@@ -170,6 +187,92 @@ final class DataManager: ObservableObject {
         } catch {
             print("Failed to delete quest: \(error)")
         }
+    }
+
+    // MARK: - Workout Quest Auto-Complete
+
+    /// Called immediately after a user logs a workout. Finds today's incomplete quests
+    /// that match the workout type and marks them complete, awarding XP.
+    ///
+    /// Matching logic (system quests keyed on statTarget):
+    ///   - strength    → statTarget "strength"
+    ///   - cardio      → statTarget "endurance"
+    ///   - flexibility → statTarget "energy"
+    ///   - mixed       → statTarget "strength" OR "endurance"
+    ///   - Any type    → plan training quest (title starts with "[")
+    ///
+    /// Custom quests are matched via completionCondition "workout:<type>" or "workout:any".
+    @discardableResult
+    func autoCompleteWorkoutQuests(for workoutType: WorkoutType) -> Int {
+        let matchingTargets: Set<String>
+        switch workoutType {
+        case .strength:    matchingTargets = ["strength"]
+        case .cardio:      matchingTargets = ["endurance"]
+        case .flexibility: matchingTargets = ["energy"]
+        case .mixed:       matchingTargets = ["strength", "endurance"]
+        }
+
+        var completed = 0
+        for quest in todaysQuests where !quest.isCompleted {
+            // Custom quests: check completionCondition
+            if let condition = quest.completionCondition, condition.hasPrefix("workout:") {
+                let required = String(condition.dropFirst("workout:".count))
+                if required == "any" || required == workoutType.rawValue {
+                    completeQuest(quest)
+                    completed += 1
+                }
+                continue
+            }
+
+            // System quests: match by statTarget
+            let targetMatches = quest.statTarget.map { matchingTargets.contains($0) } ?? false
+            // Plan training quests (no completionCondition, title starts with "[")
+            let isPlanTrainingQuest = quest.completionCondition == nil
+                && quest.title.hasPrefix("[")
+                && !quest.title.contains("Rest")
+            if targetMatches || isPlanTrainingQuest {
+                completeQuest(quest)
+                completed += 1
+            }
+        }
+        return completed
+    }
+
+    // MARK: - Health Quest Auto-Complete
+
+    /// Checks all of today's incomplete quests that have a HealthKit-backed
+    /// completionCondition and auto-completes them when the threshold is met.
+    /// Called from handleHealthDataUpdate() every time new health data arrives.
+    @discardableResult
+    func autoCompleteHealthQuests() -> Int {
+        guard let profile = currentProfile else { return 0 }
+        var completed = 0
+
+        for quest in todaysQuests where !quest.isCompleted {
+            guard let condition = quest.completionCondition else { continue }
+            let parts = condition.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2,
+                  let target = Double(parts[1]) else { continue }
+            let kind = String(parts[0])
+
+            let met: Bool
+            switch kind {
+            case "steps":
+                met = Double(profile.dailySteps) >= target
+            case "calories":
+                met = Double(profile.dailyActiveCalories) >= target
+            case "sleep":
+                met = profile.sleepHours >= target
+            default:
+                continue  // "workout" and "manual" are not health-triggered
+            }
+
+            if met {
+                completeQuest(quest)
+                completed += 1
+            }
+        }
+        return completed
     }
 
     // MARK: - Daily Quest Generation
@@ -193,6 +296,31 @@ final class DataManager: ObservableObject {
         )
         if let staleQuests = try? context.fetch(staleDescriptor) {
             staleQuests.filter { !$0.isCompleted }.forEach { context.delete($0) }
+        }
+
+        // Active plan override: use plan quests instead of generic health-driven ones
+        let activePlanID = profile.activePlanID
+        if !activePlanID.isEmpty {
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)
+            let animePlan = AnimeWorkoutPlans.plan(id: activePlanID)
+            let resolvedPlan: AnimeWorkoutPlan?
+            if let p = animePlan {
+                resolvedPlan = p
+            } else {
+                // Try fetching from SwiftData as a custom plan
+                let descriptor = FetchDescriptor<CustomWorkoutPlan>(
+                    predicate: #Predicate { $0.id == activePlanID }
+                )
+                resolvedPlan = (try? context.fetch(descriptor))?.first?.asAnimeWorkoutPlan()
+            }
+            if let plan = resolvedPlan {
+                let planQuests = QuestManager.shared.buildPlanQuests(
+                    plan: plan, profile: profile, date: today, dueDate: tomorrow
+                )
+                planQuests.forEach { addQuest($0) }
+                UserDefaults.standard.set(today, forKey: key)
+                return
+            }
         }
 
         // Build quest list driven by the player's health data gaps
@@ -336,6 +464,12 @@ final class DataManager: ObservableObject {
         profile.updateDailyStats()
 
         saveLocalChanges()
+
+        // Reload quests so we have the latest state before checking conditions
+        refreshTodaysQuests()
+
+        // Auto-complete any custom quests whose HealthKit threshold is now met
+        autoCompleteHealthQuests()
     }
 
     // MARK: - HealthKit Background Observer Setup
@@ -393,6 +527,11 @@ final class DataManager: ObservableObject {
     /// registered immediately without waiting for the next app launch.
     func registerHealthKitObserversAfterAuthorization() {
         startHealthKitBackgroundDelivery()
+    }
+
+    /// Call when app returns to foreground to ensure health data is fresh.
+    func refreshHealthOnForeground() {
+        Task { await handleHealthDataUpdate() }
     }
     
     func recordHealthAction(_ action: HealthAction) {

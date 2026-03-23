@@ -10,131 +10,77 @@ import SwiftUI
 class WeatherstackAPI: ObservableObject {
     static let shared = WeatherstackAPI()
 
-    private let baseURL = "http://api.weatherstack.com"
-    private let apiKey: String
-
     @Published var isLoading = false
     @Published var error: WeatherstackError?
     @Published var currentWeather: WeatherData?
 
-    private init() {
-        self.apiKey = Secrets.weatherstackAPIKey
+    private init() {}
+
+    // MARK: - Private proxy call
+
+    private func fetchWeather(query: String) async throws -> WeatherData {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/weather-proxy") else {
+            throw WeatherstackError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+        request.timeoutInterval = 15
+        request.httpBody = try? JSONEncoder().encode(["query": query])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw WeatherstackError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            throw WeatherstackError.httpError(statusCode: httpResponse.statusCode)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let result = try decoder.decode(WeatherResponse.self, from: data)
+
+        if let error = result.error {
+            throw WeatherstackError.apiError(message: error.info ?? "Unknown error")
+        }
+
+        guard let weather = result.current, let location = result.location else {
+            throw WeatherstackError.invalidData
+        }
+
+        return WeatherData(
+            location: location.name,
+            region: location.region,
+            country: location.country,
+            temperature: weather.temperature,
+            feelsLike: weather.feelslike,
+            weatherDescription: weather.weatherDescriptions.first ?? "Unknown",
+            weatherIcon: weather.weatherIcons.first,
+            windSpeed: weather.windSpeed,
+            humidity: weather.humidity,
+            uvIndex: weather.uvIndex,
+            visibility: weather.visibility,
+            precipitation: weather.precip,
+            cloudCover: weather.cloudcover,
+            observationTime: weather.observationTime
+        )
     }
 
     // MARK: - Current Weather
 
     /// Fetch current weather by city name
     func fetchCurrentWeather(city: String) async throws -> WeatherData {
-        var components = URLComponents(string: "\(baseURL)/current")!
-        components.queryItems = [
-            URLQueryItem(name: "access_key", value: apiKey),
-            URLQueryItem(name: "query", value: city),
-            URLQueryItem(name: "units", value: "f") // Fahrenheit
-        ]
-
-        guard let url = components.url else {
-            throw WeatherstackError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw WeatherstackError.invalidResponse
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            throw WeatherstackError.httpError(statusCode: httpResponse.statusCode)
-        }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let result = try decoder.decode(WeatherResponse.self, from: data)
-
-        // Check for API errors
-        if let error = result.error {
-            throw WeatherstackError.apiError(message: error.info ?? "Unknown error")
-        }
-
-        guard let weather = result.current, let location = result.location else {
-            throw WeatherstackError.invalidData
-        }
-
-        return WeatherData(
-            location: location.name,
-            region: location.region,
-            country: location.country,
-            temperature: weather.temperature,
-            feelsLike: weather.feelslike,
-            weatherDescription: weather.weatherDescriptions.first ?? "Unknown",
-            weatherIcon: weather.weatherIcons.first,
-            windSpeed: weather.windSpeed,
-            humidity: weather.humidity,
-            uvIndex: weather.uvIndex,
-            visibility: weather.visibility,
-            precipitation: weather.precip,
-            cloudCover: weather.cloudcover,
-            observationTime: weather.observationTime
-        )
+        try await fetchWeather(query: city)
     }
 
     /// Fetch current weather by coordinates
     func fetchCurrentWeather(latitude: Double, longitude: Double) async throws -> WeatherData {
-        let query = "\(latitude),\(longitude)"
-        var components = URLComponents(string: "\(baseURL)/current")!
-        components.queryItems = [
-            URLQueryItem(name: "access_key", value: apiKey),
-            URLQueryItem(name: "query", value: query),
-            URLQueryItem(name: "units", value: "f")
-        ]
-
-        guard let url = components.url else {
-            throw WeatherstackError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw WeatherstackError.invalidResponse
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            throw WeatherstackError.httpError(statusCode: httpResponse.statusCode)
-        }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let result = try decoder.decode(WeatherResponse.self, from: data)
-
-        if let error = result.error {
-            throw WeatherstackError.apiError(message: error.info ?? "Unknown error")
-        }
-
-        guard let weather = result.current, let location = result.location else {
-            throw WeatherstackError.invalidData
-        }
-
-        return WeatherData(
-            location: location.name,
-            region: location.region,
-            country: location.country,
-            temperature: weather.temperature,
-            feelsLike: weather.feelslike,
-            weatherDescription: weather.weatherDescriptions.first ?? "Unknown",
-            weatherIcon: weather.weatherIcons.first,
-            windSpeed: weather.windSpeed,
-            humidity: weather.humidity,
-            uvIndex: weather.uvIndex,
-            visibility: weather.visibility,
-            precipitation: weather.precip,
-            cloudCover: weather.cloudcover,
-            observationTime: weather.observationTime
-        )
+        try await fetchWeather(query: "\(latitude),\(longitude)")
     }
 
     // MARK: - Workout Suggestions

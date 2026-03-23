@@ -7,6 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		013B98272F70787200F50F41 /* AnimeWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98262F70787200F50F41 /* AnimeWorkouts.swift */; };
+		013B98282F70787200F50F41 /* AnimeWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98262F70787200F50F41 /* AnimeWorkouts.swift */; };
+		013B98292F70787200F50F41 /* AnimeWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98262F70787200F50F41 /* AnimeWorkouts.swift */; };
+		013B982F2F70C6F700F50F41 /* AchievementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B982E2F70C6F700F50F41 /* AchievementManager.swift */; };
+		013B98302F70C6F700F50F41 /* AchievementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B982E2F70C6F700F50F41 /* AchievementManager.swift */; };
+		013B98312F70C6F700F50F41 /* AchievementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B982E2F70C6F700F50F41 /* AchievementManager.swift */; };
+		013B98372F70CB4400F50F41 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98362F70CB4400F50F41 /* BodyMetricsView.swift */; };
+		013B98382F70CB4400F50F41 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98362F70CB4400F50F41 /* BodyMetricsView.swift */; };
+		013B98392F70CB4400F50F41 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98362F70CB4400F50F41 /* BodyMetricsView.swift */; };
 		0176B6D62EAC6D5400ADF2A8 /* WorkoutKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; };
 		0176B6D72EAC6D5400ADF2A8 /* WorkoutKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		01BC56A42ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
@@ -67,6 +76,9 @@
 		011D8F8E2EA40A0100609E51 /* RPT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RPT.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		011D8F9D2EA40A0200609E51 /* RPTTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		011D8FA72EA40A0200609E51 /* RPTUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		013B98262F70787200F50F41 /* AnimeWorkouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimeWorkouts.swift; sourceTree = "<group>"; };
+		013B982E2F70C6F700F50F41 /* AchievementManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementManager.swift; sourceTree = "<group>"; };
+		013B98362F70CB4400F50F41 /* BodyMetricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyMetricsView.swift; sourceTree = "<group>"; };
 		0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WorkoutKit.framework; path = System/Library/Frameworks/WorkoutKit.framework; sourceTree = SDKROOT; };
 		0176B6DD2EAC6D8600ADF2A8 /* HealthKitUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKitUI.framework; path = System/Library/Frameworks/HealthKitUI.framework; sourceTree = SDKROOT; };
 		0176B6DE2EAC6D8600ADF2A8 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
@@ -82,6 +94,20 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		013B983A2F70D20000F50F41 /* Exceptions for "RPT" folder in "RPTTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ProgressChartsView.swift,
+			);
+			target = 011D8F9C2EA40A0200609E51 /* RPTTests */;
+		};
+		013B983B2F70D20000F50F41 /* Exceptions for "RPT" folder in "RPTUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				ProgressChartsView.swift,
+			);
+			target = 011D8FA62EA40A0200609E51 /* RPTUITests */;
+		};
 		0176B5EE2EABF59C00ADF2A8 /* Exceptions for "RPT" folder in "RPT" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -96,6 +122,8 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				0176B5EE2EABF59C00ADF2A8 /* Exceptions for "RPT" folder in "RPT" target */,
+				013B983A2F70D20000F50F41 /* Exceptions for "RPT" folder in "RPTTests" target */,
+				013B983B2F70D20000F50F41 /* Exceptions for "RPT" folder in "RPTUITests" target */,
 			);
 			path = RPT;
 			sourceTree = "<group>";
@@ -154,6 +182,9 @@
 				01CB9C7E2F5BA384000CF421 /* PatrolMapView.swift */,
 				01CB9C822F5BA3D2000CF421 /* ActiveWorkoutView.swift */,
 				01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */,
+				013B98262F70787200F50F41 /* AnimeWorkouts.swift */,
+				013B982E2F70C6F700F50F41 /* AchievementManager.swift */,
+				013B98362F70CB4400F50F41 /* BodyMetricsView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -338,6 +369,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				01CB9C8C2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
+				013B98372F70CB4400F50F41 /* BodyMetricsView.swift in Sources */,
+				013B98282F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
+				013B982F2F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 				01CB9C852F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
 				01CB9C7C2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
 				01CB9C802F5BA384000CF421 /* PatrolMapView.swift in Sources */,
@@ -349,11 +383,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				013B98292F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
 				01CB9C8B2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
 				01CB9C832F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
 				01CB9C792F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
 				01CB9C7F2F5BA384000CF421 /* PatrolMapView.swift in Sources */,
 				01CB9C7D2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
+				013B98392F70CB4400F50F41 /* BodyMetricsView.swift in Sources */,
+				013B98302F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -361,11 +398,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				013B98272F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
 				01CB9C8D2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
 				01CB9C842F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
 				01CB9C782F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
 				01CB9C812F5BA384000CF421 /* PatrolMapView.swift in Sources */,
 				01CB9C7B2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
+				013B98382F70CB4400F50F41 /* BodyMetricsView.swift in Sources */,
+				013B98312F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -389,6 +429,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_SECRET = REDACTED_OLD_APP_SECRET;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -446,6 +487,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = REDACTED_OLD_SUPABASE_ANON_KEY;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -455,6 +497,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_SECRET = REDACTED_OLD_APP_SECRET;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -505,6 +548,7 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPABASE_ANON_KEY = REDACTED_OLD_SUPABASE_ANON_KEY;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -515,6 +559,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -534,7 +579,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -556,6 +601,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -575,7 +621,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

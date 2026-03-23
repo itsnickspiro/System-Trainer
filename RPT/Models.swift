@@ -68,6 +68,7 @@ final class Profile {
     var age: Int = 25
     var genderRaw: String = PlayerGender.male.rawValue
     var gymEnvironmentRaw: String = GymEnvironment.fullGym.rawValue
+    var fitnessGoalRaw: String = FitnessGoal.generalHealth.rawValue
 
     var gender: PlayerGender {
         get { PlayerGender(rawValue: genderRaw) ?? .male }
@@ -79,6 +80,19 @@ final class Profile {
         set { gymEnvironmentRaw = newValue.rawValue }
     }
 
+    var fitnessGoal: FitnessGoal {
+        get { FitnessGoal(rawValue: fitnessGoalRaw) ?? .generalHealth }
+        set { fitnessGoalRaw = newValue.rawValue }
+    }
+
+    /// Short shareable code friends use to find this player (e.g. "A3F9K2").
+    /// Generated once from the CloudKit user record ID and stored persistently.
+    var friendCode: String = ""
+
+    /// The ID of the currently active anime workout plan (e.g. "saitama").
+    /// Empty string means no plan is active — use the generic quest/workout system.
+    var activePlanID: String = ""
+
     // Penalty System State
     /// True when the player has an active exemption protecting against the midnight reset.
     var hasActiveExemption: Bool = false
@@ -87,6 +101,57 @@ final class Profile {
     // Double XP state
     var doubleXPActiveUntil: Date?
     var hasDoubleXP: Bool { doubleXPActiveUntil.map { $0 > Date() } ?? false }
+
+    // Custom Nutrition Goals — 0 means "use TDEE / plan default"
+    /// Activity level multiplier index: 0=sedentary, 1=light, 2=moderate, 3=active, 4=very active
+    var activityLevelIndex: Int = 1
+    var customCalorieGoal: Int = 0   // 0 = auto-calculate from BMR × activity
+    var customProteinGoal: Int = 0   // 0 = auto (0.8 g/kg bodyweight)
+    var customCarbGoal: Int = 0      // 0 = auto (fill remaining calories)
+    var customFatGoal: Int = 0       // 0 = auto (25% of calories)
+
+    /// TDEE = BMR × activity multiplier
+    var tdee: Double {
+        let multipliers = [1.2, 1.375, 1.55, 1.725, 1.9]
+        let idx = max(0, min(multipliers.count - 1, activityLevelIndex))
+        return bmr * multipliers[idx]
+    }
+
+    /// Effective calorie goal: custom if set, else TDEE adjusted for fitness goal
+    var effectiveCalorieGoal: Int {
+        if customCalorieGoal > 0 { return customCalorieGoal }
+        let base = tdee
+        switch fitnessGoal {
+        case .loseFat:        return Int((base - 500).rounded())
+        case .buildMuscle:    return Int((base + 300).rounded())
+        case .generalHealth, .endurance:
+            return Int(base.rounded())
+        }
+    }
+
+    /// Effective protein goal in grams
+    var effectiveProteinGoal: Int {
+        if customProteinGoal > 0 { return customProteinGoal }
+        // 1.6 g/kg for muscle building, 1.2 g/kg otherwise
+        let ratio = fitnessGoal == .buildMuscle ? 1.6 : 1.2
+        return Int((weight * ratio).rounded())
+    }
+
+    /// Effective carb goal in grams
+    var effectiveCarbGoal: Int {
+        if customCarbGoal > 0 { return customCarbGoal }
+        let proteinCals = Double(effectiveProteinGoal) * 4
+        let fatCals = Double(effectiveFatGoal) * 9
+        let carbCals = max(0, Double(effectiveCalorieGoal) - proteinCals - fatCals)
+        return Int((carbCals / 4).rounded())
+    }
+
+    /// Effective fat goal in grams
+    var effectiveFatGoal: Int {
+        if customFatGoal > 0 { return customFatGoal }
+        // 25% of total calories from fat
+        return Int((Double(effectiveCalorieGoal) * 0.25 / 9).rounded())
+    }
     
     // Computed Health Metrics
     var bmi: Double { weight / pow(height / 100, 2) }
@@ -163,14 +228,33 @@ final class Profile {
         }
     }
 
-    func levelXPThreshold(level: Int) -> Int { 
-        // Exponential scaling: each level requires significantly more XP
-        // Level 1: 100 XP, Level 2: 150 XP, Level 5: 300 XP, Level 10: 750 XP, Level 20: 2000 XP
-        let baseXP = 100
-        let exponentialFactor = 1.15 // 15% increase per level
-        let levelBonus = max(0, level - 1) * 25 // Additional linear component
-        
-        return Int(Double(baseXP) * pow(exponentialFactor, Double(level - 1))) + levelBonus
+    /// Removes XP, handling level-down if the subtraction would push XP below zero.
+    func subtractXP(_ amount: Int) {
+        xp -= amount
+        // Level down if XP goes negative (can only drop to level 1)
+        while xp < 0 && level > 1 {
+            level -= 1
+            xp += levelXPThreshold(level: level)
+        }
+        // Floor at 0 XP on level 1
+        xp = max(0, xp)
+    }
+
+    func levelXPThreshold(level: Int) -> Int {
+        // RPG-style steep exponential curve — levelling should feel meaningful at every tier.
+        //
+        // Rank E (1-5):   150 → ~330 XP   — accessible, motivating early gains
+        // Rank D (6-15):  ~400 → ~2,200 XP — consistent effort required
+        // Rank C (16-30): ~2,700 → ~32,000 XP — serious grind, real commitment
+        // Rank B (31-50): ~39k → ~550k XP  — elite territory, months of work
+        // Rank A (51-80): ~670k → ~huge    — legendary status
+        // Rank S (81+):   astronomical     — true endgame
+        //
+        // Formula: 150 × 1.22^(level−1)
+        // No linear bonus — pure exponential so each rank feels distinct.
+        let baseXP: Double = 150
+        let exponent: Double = 1.22
+        return max(150, Int(baseXP * pow(exponent, Double(level - 1))))
     }
 
     func registerCompletion(on date: Date = Date()) {
@@ -387,30 +471,49 @@ final class Profile {
     
     func recordWorkout(type: WorkoutType, duration: Int) {
         lastWorkoutTime = Date()
-        
+
+        // Level-tier scaling: higher levels have denser muscle/cardio adaptation curves,
+        // so they need more volume to move stats — but discipline and focus scale up instead.
+        // Tier E (1-5): full multiplier, easy gains
+        // Tier D (6-15): 90% — base gains start tapering
+        // Tier C (16-30): 80%
+        // Tier B (31-50): 70% — veteran, must work harder for marginal gains
+        // Tier A (51-80): 60%
+        // Tier S (81+):   50% — elite diminishing returns
+        let tierMultiplier: Double
+        switch level {
+        case 1...5:   tierMultiplier = 1.0
+        case 6...15:  tierMultiplier = 0.9
+        case 16...30: tierMultiplier = 0.8
+        case 31...50: tierMultiplier = 0.7
+        case 51...80: tierMultiplier = 0.6
+        default:      tierMultiplier = 0.5
+        }
+        let d = Double(duration) * tierMultiplier
+
         switch type {
         case .strength:
-            adjustStat(\.strength, by: Double(duration) * 0.5)
-            adjustStat(\.endurance, by: Double(duration) * 0.2)
-            adjustStat(\.discipline, by: 2.0)
+            adjustStat(\.strength, by: d * 0.5)
+            adjustStat(\.endurance, by: d * 0.2)
+            adjustStat(\.discipline, by: 2.0 + Double(level) * 0.05) // discipline keeps scaling
         case .cardio:
-            adjustStat(\.endurance, by: Double(duration) * 0.8)
-            adjustStat(\.strength, by: Double(duration) * 0.1)
-            adjustStat(\.discipline, by: 2.0)
+            adjustStat(\.endurance, by: d * 0.8)
+            adjustStat(\.strength, by: d * 0.1)
+            adjustStat(\.discipline, by: 2.0 + Double(level) * 0.05)
         case .flexibility:
-            adjustStat(\.health, by: Double(duration) * 0.3)
-            adjustStat(\.focus, by: Double(duration) * 0.2)
-            adjustStat(\.discipline, by: 1.5)
+            adjustStat(\.health, by: d * 0.3)
+            adjustStat(\.focus, by: d * 0.2 + Double(level) * 0.03) // focus scales with level
+            adjustStat(\.discipline, by: 1.5 + Double(level) * 0.04)
         case .mixed:
-            adjustStat(\.strength, by: Double(duration) * 0.3)
-            adjustStat(\.endurance, by: Double(duration) * 0.4)
-            adjustStat(\.health, by: Double(duration) * 0.2)
-            adjustStat(\.discipline, by: 2.5)
+            adjustStat(\.strength, by: d * 0.3)
+            adjustStat(\.endurance, by: d * 0.4)
+            adjustStat(\.health, by: d * 0.2)
+            adjustStat(\.discipline, by: 2.5 + Double(level) * 0.05)
         }
-        
-        // General workout benefits
-        adjustStat(\.health, by: 3.0)
-        adjustStat(\.energy, by: 5.0)
+
+        // General workout benefits — scale slightly with tier
+        adjustStat(\.health, by: 3.0 * tierMultiplier)
+        adjustStat(\.energy, by: 5.0 * tierMultiplier)
     }
     
     func recordMeal(healthiness: MealHealthiness) {
@@ -629,8 +732,15 @@ final class Quest {
     var xpReward: Int = 20
     var dateTag: Date = Date()
     var statTarget: String?
+    /// Encodes how the quest is verified automatically. Format:
+    ///   "steps:10000"    — complete when HealthKit steps >= target
+    ///   "calories:400"   — complete when active calories >= target
+    ///   "workout:strength|cardio|flexibility|mixed|any" — complete when matching workout is logged
+    ///   "sleep:8"        — complete when sleep hours >= target
+    ///   "manual"         — user taps to confirm (default for system quests)
+    var completionCondition: String?
 
-    init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, statTarget: String? = nil, dateTag: Date = Calendar.current.startOfDay(for: Date())) {
+    init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, statTarget: String? = nil, completionCondition: String? = nil, dateTag: Date = Calendar.current.startOfDay(for: Date())) {
         self.id = UUID()
         self.title = title
         self.details = details
@@ -642,6 +752,7 @@ final class Quest {
         self.repeatDays = repeatDays
         self.xpReward = xpReward
         self.statTarget = statTarget
+        self.completionCondition = completionCondition
         self.dateTag = dateTag
     }
 }
@@ -668,6 +779,53 @@ final class FoodItem {
     var sugar: Double = 0.0
     var sodium: Double = 0.0
 
+    // Micronutrients (per 100g) — 0 = not available
+    var potassiumMg: Double = 0.0
+    var calciumMg: Double = 0.0
+    var ironMg: Double = 0.0
+    var magnesiumMg: Double = 0.0
+    var zincMg: Double = 0.0
+    var vitaminCMg: Double = 0.0    // Ascorbic acid
+    var vitaminB12Mcg: Double = 0.0 // Cobalamin (mcg)
+    var vitaminDMcg: Double = 0.0   // D3 (mcg)
+    var cholesterolMg: Double = 0.0
+    var saturatedFatG: Double = 0.0
+
+    /// Nutrition score 0–100 and A–F grade (per 100 kcal basis, Nutri-Score inspired).
+    /// Positive points: protein, fiber, potassium, calcium, iron, vitamins.
+    /// Negative points: sugar, saturated fat, sodium, calories.
+    var nutritionScore: Int {
+        guard caloriesPer100g > 0 else { return 0 }
+        var score = 50 // baseline
+
+        // Positive nutrients (per 100 kcal)
+        let kcal = max(1, caloriesPer100g)
+        score += min(15, Int(protein / kcal * 100 * 1.5))       // protein density
+        score += min(10, Int(fiber / kcal * 100 * 3))            // fiber density
+        if potassiumMg > 0  { score += min(5, Int(potassiumMg / kcal * 0.5)) }
+        if calciumMg > 0    { score += min(5, Int(calciumMg / kcal * 0.3)) }
+        if ironMg > 0       { score += min(5, Int(ironMg / kcal * 8)) }
+        if vitaminCMg > 0   { score += min(5, Int(vitaminCMg / kcal * 2)) }
+
+        // Negative nutrients
+        score -= min(20, Int(sugar / kcal * 100 * 2))            // sugar density
+        score -= min(15, Int(saturatedFatG / kcal * 100 * 3))    // sat fat density
+        score -= min(10, Int(sodium / kcal * 0.3))               // sodium
+        if caloriesPer100g > 400 { score -= 5 }                  // calorie-dense processed foods
+
+        return max(0, min(100, score))
+    }
+
+    var nutritionGrade: String {
+        switch nutritionScore {
+        case 80...: return "A"
+        case 65..<80: return "B"
+        case 50..<65: return "C"
+        case 35..<50: return "D"
+        default:      return "F"
+        }
+    }
+
     // Categories
     var category: FoodCategory = FoodCategory.other
     var isCustom: Bool = true
@@ -675,6 +833,7 @@ final class FoodItem {
 
     var createdAt: Date = Date()
     var lastUsed: Date?
+    var isFavorite: Bool = false
 
     // Inverses required by CloudKit — must exist for all relationships pointing at FoodItem
     @Relationship var entries: [FoodEntry]?
@@ -744,6 +903,22 @@ final class FoodEntry {
         let multiplier = unit == .grams ? quantity / 100.0 : (quantity * foodItem.servingSize / 100.0)
         return foodItem.fiber * multiplier
     }
+
+    // Micronutrient totals (scaled by quantity)
+    private var microMultiplier: Double {
+        guard let foodItem else { return 0 }
+        return unit == .grams ? quantity / 100.0 : (quantity * foodItem.servingSize / 100.0)
+    }
+    var totalPotassium: Double  { (foodItem?.potassiumMg  ?? 0) * microMultiplier }
+    var totalCalcium: Double    { (foodItem?.calciumMg    ?? 0) * microMultiplier }
+    var totalIron: Double       { (foodItem?.ironMg       ?? 0) * microMultiplier }
+    var totalMagnesium: Double  { (foodItem?.magnesiumMg  ?? 0) * microMultiplier }
+    var totalZinc: Double       { (foodItem?.zincMg       ?? 0) * microMultiplier }
+    var totalVitaminC: Double   { (foodItem?.vitaminCMg   ?? 0) * microMultiplier }
+    var totalVitaminB12: Double { (foodItem?.vitaminB12Mcg ?? 0) * microMultiplier }
+    var totalVitaminD: Double   { (foodItem?.vitaminDMcg  ?? 0) * microMultiplier }
+    var totalCholesterol: Double{ (foodItem?.cholesterolMg ?? 0) * microMultiplier }
+    var totalSaturatedFat: Double { (foodItem?.saturatedFatG ?? 0) * microMultiplier }
 
     init(foodItem: FoodItem, quantity: Double, unit: FoodUnit = .grams, meal: MealType, dateConsumed: Date = Date(), notes: String? = nil) {
         self.id = UUID()
@@ -1090,8 +1265,14 @@ final class ExerciseSet {
     var weightKg: Double = 0.0
     var reps: Int = 0
     var isWarmUp: Bool = false
-    var rpe: Double = 0.0       // Rate of Perceived Exertion 1–10
+    var rpe: Double = 0.0           // Rate of Perceived Exertion 1–10
     var loggedAt: Date = Date()
+    // Cardio extras (only populated for cardio sets)
+    var paceMinPerKm: Double = 0.0  // 0 = not tracked
+    var heartRateZone: Int = 0      // 1-5, 0 = not tracked
+    // Superset / circuit flagging
+    var isSuperset: Bool = false
+    var supersetGroupID: String = "" // same ID = paired exercises in a superset
     var session: WorkoutSession?  // inverse of WorkoutSession.sets — required by CloudKit
 
     init(exerciseName: String, exerciseWgerID: Int, setNumber: Int,
@@ -1359,6 +1540,40 @@ enum PlayerGender: String, Codable, CaseIterable {
     }
 }
 
+enum FitnessGoal: String, Codable, CaseIterable {
+    case loseFat      = "lose_fat"
+    case buildMuscle  = "build_muscle"
+    case endurance    = "endurance"
+    case generalHealth = "general_health"
+
+    var displayName: String {
+        switch self {
+        case .loseFat:      return "Lose Fat"
+        case .buildMuscle:  return "Build Muscle"
+        case .endurance:    return "Improve Endurance"
+        case .generalHealth: return "General Health"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .loseFat:      return "flame.fill"
+        case .buildMuscle:  return "dumbbell.fill"
+        case .endurance:    return "figure.run"
+        case .generalHealth: return "heart.fill"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .loseFat:      return "Cut body fat while preserving muscle"
+        case .buildMuscle:  return "Maximize muscle growth and strength"
+        case .endurance:    return "Build cardiovascular fitness and stamina"
+        case .generalHealth: return "Balanced fitness and well-being"
+        }
+    }
+}
+
 enum GymEnvironment: String, Codable, CaseIterable {
     case fullGym        = "full_gym"
     case planetFitness  = "planet_fitness"
@@ -1405,6 +1620,401 @@ enum GymEnvironment: String, Codable, CaseIterable {
         case .bodyweightOnly:
             return [4, 5, 6, 99]
         }
+    }
+}
+
+// MARK: - Custom Workout Plan helpers
+// Defined before the @Model class so their Codable conformances are synthesised
+// outside the @MainActor context and can be used freely from nonisolated code.
+
+struct CustomDayPlan: Codable, Sendable {
+    var dayName: String = ""
+    var focus: String = ""
+    var isRest: Bool = false
+    var exercises: [CustomPlannedExercise] = []
+    var questTitle: String = ""
+    var questDetails: String = ""
+    var xpReward: Int = 100
+
+    static func restDay(name: String) -> CustomDayPlan {
+        CustomDayPlan(dayName: name, focus: "Rest", isRest: true,
+                      exercises: [], questTitle: "Active Recovery",
+                      questDetails: "Rest day — stretch, walk, hydrate.",
+                      xpReward: 50)
+    }
+}
+
+struct CustomPlannedExercise: Codable, Sendable {
+    var name: String = ""
+    var sets: Int = 3
+    var reps: String = "10"
+    var restSeconds: Int = 90
+    var notes: String = ""
+}
+
+struct CustomPlanNutrition: Sendable {
+    var dailyCalories: Int = 2000
+    var proteinGrams: Int = 150
+    var carbGrams: Int = 200
+    var fatGrams: Int = 65
+    var waterGlasses: Int = 8
+    var mealPrepTips: [String] = []
+    var avoidList: [String] = []
+}
+
+extension CustomPlanNutrition: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case dailyCalories, proteinGrams, carbGrams, fatGrams, waterGlasses, mealPrepTips, avoidList
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dailyCalories = try c.decodeIfPresent(Int.self, forKey: .dailyCalories) ?? 2000
+        proteinGrams  = try c.decodeIfPresent(Int.self, forKey: .proteinGrams)  ?? 150
+        carbGrams     = try c.decodeIfPresent(Int.self, forKey: .carbGrams)     ?? 200
+        fatGrams      = try c.decodeIfPresent(Int.self, forKey: .fatGrams)      ?? 65
+        waterGlasses  = try c.decodeIfPresent(Int.self, forKey: .waterGlasses)  ?? 8
+        mealPrepTips  = try c.decodeIfPresent([String].self, forKey: .mealPrepTips) ?? []
+        avoidList     = try c.decodeIfPresent([String].self, forKey: .avoidList)    ?? []
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(dailyCalories, forKey: .dailyCalories)
+        try c.encode(proteinGrams,  forKey: .proteinGrams)
+        try c.encode(carbGrams,     forKey: .carbGrams)
+        try c.encode(fatGrams,      forKey: .fatGrams)
+        try c.encode(waterGlasses,  forKey: .waterGlasses)
+        try c.encode(mealPrepTips,  forKey: .mealPrepTips)
+        try c.encode(avoidList,     forKey: .avoidList)
+    }
+}
+
+// MARK: - Custom Workout Plan (SwiftData)
+//
+// User-created plans stored locally. Mirrors the AnimeWorkoutPlan shape so the
+// same QuestManager / DietView / WorkoutView code can render both interchangeably.
+// IDs are prefixed "custom-" to distinguish from anime plan IDs.
+
+@Model
+final class CustomWorkoutPlan {
+    var id: String = "custom-\(UUID().uuidString)"
+    var name: String = ""
+    var planDescription: String = ""
+    var difficultyRaw: String = "Intermediate"
+    var accentColorHex: String = "#5E5CE6"  // stored as hex; converted to Color at runtime
+    var iconSymbol: String = "figure.strengthtraining.traditional"
+    var createdAt: Date = Date()
+
+    /// JSON-encoded [CustomDayPlan]
+    var weeklyScheduleJSON: String = "[]"
+    /// JSON-encoded CustomPlanNutrition
+    var nutritionJSON: String = "{}"
+
+    /// Whether this plan was generated by Apple Intelligence (vs manual)
+    var isAIGenerated: Bool = false
+
+    /// The questionnaire answers used to generate the plan (for display)
+    var aiPromptSummary: String = ""
+
+    init(name: String = "", description: String = "") {
+        self.id = "custom-\(UUID().uuidString)"
+        self.name = name
+        self.planDescription = description
+    }
+
+    var difficulty: AnimeWorkoutPlan.PlanDifficulty {
+        AnimeWorkoutPlan.PlanDifficulty(rawValue: difficultyRaw) ?? .intermediate
+    }
+
+    var accentColor: Color {
+        Color(hex: accentColorHex) ?? .indigo
+    }
+
+    /// Decode the weekly schedule from JSON.
+    var weeklySchedule: [CustomDayPlan] {
+        get {
+            (try? JSONDecoder().decode([CustomDayPlan].self, from: Data(weeklyScheduleJSON.utf8))) ?? []
+        }
+        set {
+            weeklyScheduleJSON = (try? String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "[]"
+        }
+    }
+
+    /// Decode the nutrition from JSON.
+    var nutrition: CustomPlanNutrition {
+        get {
+            (try? JSONDecoder().decode(CustomPlanNutrition.self, from: Data(nutritionJSON.utf8))) ?? CustomPlanNutrition()
+        }
+        set {
+            nutritionJSON = (try? String(data: JSONEncoder().encode(newValue), encoding: .utf8)) ?? "{}"
+        }
+    }
+
+    /// Convert to an AnimeWorkoutPlan-compatible value so all existing rendering code works unchanged.
+    func asAnimeWorkoutPlan() -> AnimeWorkoutPlan {
+        AnimeWorkoutPlan(
+            id: id,
+            character: name,
+            anime: "Custom",
+            tagline: isAIGenerated ? "AI-generated for you" : "Your plan",
+            description: planDescription,
+            difficulty: difficulty,
+            accentColor: accentColor,
+            iconSymbol: iconSymbol,
+            weeklySchedule: weeklySchedule.map { day in
+                AnimeWorkoutPlan.DayPlan(
+                    dayName: day.dayName,
+                    focus: day.focus,
+                    isRest: day.isRest,
+                    exercises: day.exercises.map { ex in
+                        AnimeWorkoutPlan.PlannedExercise(
+                            name: ex.name,
+                            sets: ex.sets,
+                            reps: ex.reps,
+                            restSeconds: ex.restSeconds,
+                            notes: ex.notes
+                        )
+                    },
+                    questTitle: day.questTitle,
+                    questDetails: day.questDetails,
+                    xpReward: day.xpReward
+                )
+            },
+            nutrition: AnimeWorkoutPlan.PlanNutrition(
+                dailyCalories: nutrition.dailyCalories,
+                proteinGrams: nutrition.proteinGrams,
+                carbGrams: nutrition.carbGrams,
+                fatGrams: nutrition.fatGrams,
+                waterGlasses: nutrition.waterGlasses,
+                mealPrepTips: nutrition.mealPrepTips,
+                avoidList: nutrition.avoidList
+            ),
+            targetGender: nil  // custom plans are gender-neutral
+        )
+    }
+}
+
+// MARK: - Custom Plan Supporting Types (Codable for JSON storage)
+
+// MARK: - Achievement System
+
+enum AchievementID: String, CaseIterable {
+    // Streaks
+    case streak3        = "streak_3"
+    case streak7        = "streak_7"
+    case streak30       = "streak_30"
+    case streak100      = "streak_100"
+    // Workouts
+    case firstWorkout   = "first_workout"
+    case workouts10     = "workouts_10"
+    case workouts50     = "workouts_50"
+    case workouts100    = "workouts_100"
+    // Levels
+    case level5         = "level_5"
+    case level10        = "level_10"
+    case level25        = "level_25"
+    case level50        = "level_50"
+    // Rank ups
+    case rankD          = "rank_d"
+    case rankC          = "rank_c"
+    case rankB          = "rank_b"
+    case rankA          = "rank_a"
+    case rankS          = "rank_s"
+    // Nutrition
+    case loggedFood7    = "logged_food_7"
+    case waterGoal7     = "water_goal_7"
+    // Other
+    case earlyBird      = "early_bird"      // workout before 7 am
+    case nightOwl       = "night_owl"       // workout after 9 pm
+
+    var title: String {
+        switch self {
+        case .streak3:      return "On a Roll"
+        case .streak7:      return "Week Warrior"
+        case .streak30:     return "30-Day Legend"
+        case .streak100:    return "Century Streak"
+        case .firstWorkout: return "First Blood"
+        case .workouts10:   return "Getting Started"
+        case .workouts50:   return "Halfway Hero"
+        case .workouts100:  return "Centurion"
+        case .level5:       return "Rising Star"
+        case .level10:      return "Double Digits"
+        case .level25:      return "Quarter Century"
+        case .level50:      return "Halfway Legend"
+        case .rankD:        return "Rank Up: D"
+        case .rankC:        return "Rank Up: C"
+        case .rankB:        return "Rank Up: B"
+        case .rankA:        return "Rank Up: A"
+        case .rankS:        return "Rank Up: S"
+        case .loggedFood7:  return "Nutrition Nerd"
+        case .waterGoal7:   return "Hydration Hero"
+        case .earlyBird:    return "Early Bird"
+        case .nightOwl:     return "Night Owl"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .streak3:      return "Complete quests 3 days in a row"
+        case .streak7:      return "Complete quests 7 days in a row"
+        case .streak30:     return "Complete quests 30 days in a row"
+        case .streak100:    return "Maintain a 100-day streak"
+        case .firstWorkout: return "Log your first workout"
+        case .workouts10:   return "Complete 10 workouts"
+        case .workouts50:   return "Complete 50 workouts"
+        case .workouts100:  return "Complete 100 workouts"
+        case .level5:       return "Reach level 5"
+        case .level10:      return "Reach level 10"
+        case .level25:      return "Reach level 25"
+        case .level50:      return "Reach level 50"
+        case .rankD:        return "Advance to Rank D"
+        case .rankC:        return "Advance to Rank C"
+        case .rankB:        return "Advance to Rank B"
+        case .rankA:        return "Advance to Rank A"
+        case .rankS:        return "Achieve Rank S — the pinnacle"
+        case .loggedFood7:  return "Log your food 7 days in a row"
+        case .waterGoal7:   return "Hit your water goal 7 days in a row"
+        case .earlyBird:    return "Complete a workout before 7 AM"
+        case .nightOwl:     return "Complete a workout after 9 PM"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .streak3:      return "flame"
+        case .streak7:      return "flame.fill"
+        case .streak30:     return "calendar.badge.checkmark"
+        case .streak100:    return "crown.fill"
+        case .firstWorkout: return "bolt.fill"
+        case .workouts10:   return "figure.strengthtraining.traditional"
+        case .workouts50:   return "medal"
+        case .workouts100:  return "medal.fill"
+        case .level5:       return "star"
+        case .level10:      return "star.fill"
+        case .level25:      return "star.circle.fill"
+        case .level50:      return "rosette"
+        case .rankD:        return "d.circle.fill"
+        case .rankC:        return "c.circle.fill"
+        case .rankB:        return "b.circle.fill"
+        case .rankA:        return "a.circle.fill"
+        case .rankS:        return "s.circle.fill"
+        case .loggedFood7:  return "fork.knife"
+        case .waterGoal7:   return "drop.fill"
+        case .earlyBird:    return "sunrise.fill"
+        case .nightOwl:     return "moon.stars.fill"
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .streak3, .streak7:   return "#FF6B35"
+        case .streak30, .streak100: return "#FFD700"
+        case .firstWorkout:        return "#00FFCC"
+        case .workouts10, .workouts50: return "#4A90E2"
+        case .workouts100:         return "#7B2FBE"
+        case .level5, .level10:    return "#4CAF50"
+        case .level25, .level50:   return "#F44336"
+        case .rankD:               return "#9E9E9E"
+        case .rankC:               return "#2196F3"
+        case .rankB:               return "#4CAF50"
+        case .rankA:               return "#FF9800"
+        case .rankS:               return "#F44336"
+        case .loggedFood7:         return "#8BC34A"
+        case .waterGoal7:          return "#03A9F4"
+        case .earlyBird:           return "#FF9800"
+        case .nightOwl:            return "#673AB7"
+        }
+    }
+}
+
+@Model
+final class Achievement {
+    var id: String = ""
+    var unlockedAt: Date = Date()
+
+    var achievementID: AchievementID? { AchievementID(rawValue: id) }
+
+    init(id: AchievementID) {
+        self.id = id.rawValue
+        self.unlockedAt = Date()
+    }
+}
+
+// MARK: - Body Measurement
+
+/// A single timestamped body measurement entry (weight + optional measurements).
+@Model
+final class BodyMeasurement {
+    var id: UUID = UUID()
+    var date: Date = Date()
+    var weightKg: Double = 0.0
+    // Optional tape measurements in cm
+    var chestCm: Double? = nil
+    var waistCm: Double? = nil
+    var hipsCm: Double? = nil
+    var bodyFatPercent: Double? = nil
+    var note: String = ""
+
+    init(date: Date = Date(), weightKg: Double, chestCm: Double? = nil, waistCm: Double? = nil, hipsCm: Double? = nil, bodyFatPercent: Double? = nil, note: String = "") {
+        self.id = UUID()
+        self.date = date
+        self.weightKg = weightKg
+        self.chestCm = chestCm
+        self.waistCm = waistCm
+        self.hipsCm = hipsCm
+        self.bodyFatPercent = bodyFatPercent
+        self.note = note
+    }
+}
+
+// MARK: - Meal Planning
+
+/// A meal planned for a future date (used by MealPlanCalendarView).
+@Model
+final class PlannedMeal {
+    var id: UUID = UUID()
+    /// The calendar day this meal is planned for.
+    var plannedDate: Date = Date()
+    /// Which meal slot (breakfast, lunch, etc.)
+    var mealSlot: String = "Lunch"
+    /// Free-text description or recipe/food name.
+    var title: String = ""
+    var notes: String = ""
+    /// Optional calorie estimate for planning purposes.
+    var estimatedCalories: Int = 0
+    var isCompleted: Bool = false
+
+    init(plannedDate: Date, mealSlot: String, title: String, notes: String = "", estimatedCalories: Int = 0) {
+        self.id = UUID()
+        self.plannedDate = plannedDate
+        self.mealSlot = mealSlot
+        self.title = title
+        self.notes = notes
+        self.estimatedCalories = estimatedCalories
+        self.isCompleted = false
+    }
+}
+
+// MARK: - Color hex helper (used by CustomWorkoutPlan)
+
+extension Color {
+    init?(hex: String) {
+        var h = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if h.hasPrefix("#") { h = String(h.dropFirst()) }
+        guard h.count == 6, let value = UInt64(h, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8)  & 0xFF) / 255
+        let b = Double(value         & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+
+    /// Returns a 6-digit hex string (no alpha).
+    var hexString: String {
+        let ui = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: nil)
+        return String(format: "#%02X%02X%02X", Int(r*255), Int(g*255), Int(b*255))
     }
 }
 

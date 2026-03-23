@@ -73,17 +73,14 @@ final class NutritionAPI: ObservableObject {
     private init() {}
     
     enum APIError: Error {
-        case missingAPIKey
         case badURL
         case requestFailed
         case decodingFailed
         case http(Int)
         case noData
-        
+
         var localizedDescription: String {
             switch self {
-            case .missingAPIKey:
-                return "API key is missing"
             case .badURL:
                 return "Invalid URL"
             case .requestFailed:
@@ -100,31 +97,29 @@ final class NutritionAPI: ObservableObject {
     
     @MainActor
     func fetchNutrition(for query: String) async throws -> [NutritionInfo] {
-        let apiKey = Secrets.apiNinjasKey
-        guard !apiKey.isEmpty else { throw APIError.missingAPIKey }
         guard !query.isEmpty else { throw APIError.noData }
-        
-        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://api.api-ninjas.com/v1/nutrition?query=\(encodedQuery)") else {
+
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/nutrition-proxy") else {
             throw APIError.badURL
         }
-        
+
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
         request.timeoutInterval = 30
-        
+        request.httpBody = try? JSONEncoder().encode(["query": query])
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            
+
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
                 throw APIError.http(httpResponse.statusCode)
             }
-            
-            // The API returns an array of nutrition objects
+
             let decoder = JSONDecoder()
             let nutritionItems = try decoder.decode([NutritionInfo].self, from: data)
-            
             return nutritionItems
         } catch is DecodingError {
             throw APIError.decodingFailed

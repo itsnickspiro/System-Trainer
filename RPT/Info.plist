@@ -4,19 +4,19 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>The System requires camera access to scan and decrypt consumable items.</string>
-	<key>API_NINJAS_KEY</key>
-	<string>IIIBmDmTltT3vx/lRjHRNw==F2hkiByjXjvHtWNR</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string></string>
+			<string>com.SpiroTechnologies.RPT.friend</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>rpt</string>
+			</array>
 		</dict>
 	</array>
-	<key>WeatherStack_API</key>
-	<string>b182ee2f7bcbd368b58c9c5b8d2b6444</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>RPT reads your steps, workouts, heart rate, sleep, and activity data to calculate your RPG stats and award XP for real-world fitness progress.</string>
 	<key>NSHealthUpdateUsageDescription</key>

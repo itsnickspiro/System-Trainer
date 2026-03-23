@@ -83,19 +83,25 @@ struct NutritionSearchView: View {
     }
     
     private func searchNutrition() {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+
         isLoading = true
         errorMessage = nil
-        
+
         Task {
             do {
-                let results = try await nutritionAPI.fetchNutrition(for: searchText)
+                let results = try await nutritionAPI.fetchNutrition(for: query)
                 await MainActor.run {
-                    self.nutritionResults = results
+                    // Fuzzy-sort so "chiken" still surfaces "chicken" at the top
+                    self.nutritionResults = FuzzySearch.sort(
+                        query: query,
+                        items: results,
+                        string: { $0.name }
+                    )
                     self.isLoading = false
                     if results.isEmpty {
-                        self.errorMessage = "No nutrition data found for '\(searchText)'"
+                        self.errorMessage = "No nutrition data found for '\(query)'"
                     }
                 }
             } catch {
@@ -300,19 +306,30 @@ struct NutritionRecipeSearchView: View {
     }
     
     private func searchRecipes(showPopular: Bool = false) {
-        let query = showPopular ? nil : (searchText.isEmpty ? nil : searchText)
-        
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = showPopular ? nil : (trimmed.isEmpty ? nil : trimmed)
+
         isLoading = true
         errorMessage = nil
-        
+
         Task {
             do {
-                let results = try await recipeAPI.fetchRecipes(query: query, limit: 10)
+                let results = try await recipeAPI.fetchRecipes(query: query, limit: 20)
                 await MainActor.run {
-                    self.recipeResults = results
+                    if let q = query, !q.isEmpty {
+                        // Fuzzy-sort by title and ingredients so typos still surface good results
+                        self.recipeResults = FuzzySearch.sort(
+                            query: q,
+                            items: results,
+                            string: { $0.title },
+                            additionalStrings: { [$0.ingredients] }
+                        )
+                    } else {
+                        self.recipeResults = results
+                    }
                     self.isLoading = false
                     if results.isEmpty {
-                        self.errorMessage = showPopular ? "No recipes available" : "No recipes found for '\(searchText)'"
+                        self.errorMessage = showPopular ? "No recipes available" : "No recipes found for '\(trimmed)'"
                     }
                 }
             } catch {

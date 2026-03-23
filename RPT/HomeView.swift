@@ -6,11 +6,17 @@ struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var dataManager = DataManager.shared
+    @StateObject private var achievementManager = AchievementManager.shared
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var recentSessions: [WorkoutSession]
     @State private var now: Date = Date()
     @State private var rotationAngle: Double = 0
     @State private var showingHealthPermissions = false
     @State private var showingSettingsSheet = false
     @State private var selectedStatForDetails: RPGStatsBar.StatType? = nil
+    // Level-up animation state
+    @State private var showingLevelUp = false
+    @State private var levelUpLevel: Int = 0
+    @State private var levelUpParticleScale: CGFloat = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     var profile: Profile? {
@@ -45,6 +51,16 @@ struct HomeView: View {
                     // Player Card (now contains core attributes)
                     playerCard
 
+                    // Motivational coaching banner
+                    if let currentProfile = profile {
+                        coachingBanner(for: currentProfile)
+                    }
+
+                    // Recovery / deload recommendation
+                    if let currentProfile = profile {
+                        recoveryRecommendationCard(for: currentProfile)
+                    }
+
                     // Quests to complete
                     questSummaryCard
                     
@@ -53,14 +69,55 @@ struct HomeView: View {
                 .padding()
             }
         }
+        .overlay(alignment: .top) {
+            // Achievement unlock banner
+            if let id = achievementManager.recentlyUnlocked {
+                AchievementUnlockBanner(id: id)
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(100)
+                    .id(id)
+            }
+        }
+        .overlay {
+            // Level-up overlay
+            if showingLevelUp {
+                LevelUpOverlay(level: levelUpLevel, particleScale: $levelUpParticleScale) {
+                    withAnimation(.easeOut) {
+                        showingLevelUp = false
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(200)
+            }
+        }
         .onReceive(timer) { t in
             now = t
             
             guard let currentProfile = profile else { return }
             
+            let prevLevel = currentProfile.level
             currentProfile.applyHardcoreResetIfNeeded(now: now)
             currentProfile.updateDailyStats()
             
+            // Trigger level-up animation if level changed
+            if currentProfile.level > prevLevel {
+                levelUpLevel = currentProfile.level
+                // Haptic feedback for level-up milestone
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                withAnimation(.spring()) {
+                    showingLevelUp = true
+                    levelUpParticleScale = 1
+                }
+                // Auto-dismiss after 3s
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_500_000_000)
+                    await MainActor.run {
+                        withAnimation { showingLevelUp = false; levelUpParticleScale = 0 }
+                    }
+                }
+            }
+
             // Subtle rotation animation for UI elements
             withAnimation(.linear(duration: 1)) {
                 rotationAngle += 1
@@ -125,7 +182,7 @@ struct HomeView: View {
                         )
                     
                     VStack(spacing: 20) {
-                        // Header with avatar and name only
+                        // Header with avatar, name, and rank badge
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("PLAYER")
@@ -137,6 +194,22 @@ struct HomeView: View {
                             }
 
                             Spacer()
+
+                            // Tier rank badge
+                            let tier = QuestManager.tier(for: currentProfile.level)
+                            Text(tier.rank.displayName)
+                                .font(.system(size: 13, weight: .black, design: .monospaced))
+                                .foregroundColor(tierRankColor(tier.rank))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(tierRankColor(tier.rank).opacity(0.15))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(tierRankColor(tier.rank).opacity(0.6), lineWidth: 1.5)
+                                        )
+                                )
 
                             Button {
                                 showingSettingsSheet = true
@@ -273,6 +346,92 @@ struct HomeView: View {
         )
     }
     
+    // MARK: - Recovery / Deload Recommendation Card
+
+    /// Returns a recommendation level based on HRV, sleep, and recent workout frequency.
+    /// - Returns: .rest, .deload, .train, or nil (not enough data)
+    private enum RecoveryStatus { case train, rest, deload }
+
+    private func recoveryStatus(for profile: Profile) -> RecoveryStatus {
+        let cal = Calendar.current
+        let sevenDaysAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let workoutsThisWeek = recentSessions.filter { $0.startedAt >= sevenDaysAgo }.count
+
+        let hrv = profile.heartRateVariability   // ms SDNN, 0 = no data
+        let sleep = profile.sleepHours            // hours last night
+        let rhr = Double(profile.restingHeartRate) // bpm, 0 = no data
+
+        // Deload signals: 5+ workouts in 7 days AND (low HRV OR poor sleep OR elevated RHR)
+        let highFrequency = workoutsThisWeek >= 5
+        let lowHRV = hrv > 0 && hrv < 30          // below 30 ms = suppressed recovery
+        let poorSleep = sleep > 0 && sleep < 6.5
+        let elevatedRHR = rhr > 0 && rhr > 72
+
+        if highFrequency && (lowHRV || elevatedRHR) {
+            return .deload
+        }
+        if (lowHRV && poorSleep) || (poorSleep && workoutsThisWeek >= 4) {
+            return .rest
+        }
+        return .train
+    }
+
+    @ViewBuilder
+    private func recoveryRecommendationCard(for profile: Profile) -> some View {
+        let status = recoveryStatus(for: profile)
+        let cal = Calendar.current
+        let sevenDaysAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let workoutsThisWeek = recentSessions.filter { $0.startedAt >= sevenDaysAgo }.count
+
+        // Only show if there's something meaningful to say
+        if status == .rest || status == .deload || workoutsThisWeek >= 3 {
+            let (icon, title, message, accentColor): (String, String, String, Color) = {
+                switch status {
+                case .deload:
+                    return ("battery.25", "Deload Recommended",
+                            "You've trained \(workoutsThisWeek)× this week with signs of fatigue. Consider a lighter session — reduce weight by 40–50% and focus on form.",
+                            .orange)
+                case .rest:
+                    return ("moon.zzz.fill", "Rest Day Recommended",
+                            "Low sleep or suppressed HRV detected. An active recovery walk, stretching, or a full rest day will accelerate adaptation.",
+                            .blue)
+                case .train:
+                    return ("bolt.heart.fill", "Ready to Train",
+                            "\(workoutsThisWeek) workout\(workoutsThisWeek == 1 ? "" : "s") this week. Recovery signals look good — push hard today.",
+                            .green)
+                }
+            }()
+
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(accentColor)
+                    .frame(width: 40)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundColor(accentColor)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(accentColor.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(accentColor.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
     private var questSummaryCard: some View {
         let todays = todaysQuests
         let completed = todays.filter { $0.isCompleted }.count
@@ -359,6 +518,165 @@ struct HomeView: View {
         )
     }
     
+    // MARK: - Coaching Banner
+
+    /// Returns a card that surfaces the player's weakest stat with tier-appropriate motivation.
+    @ViewBuilder
+    private func coachingBanner(for currentProfile: Profile) -> some View {
+        let tier = QuestManager.tier(for: currentProfile.level)
+        let weak = weakestStat(for: currentProfile)
+        let message = coachingMessage(stat: weak.name, tier: tier.rank, value: weak.value)
+
+        HStack(spacing: 14) {
+            // Icon
+            Image(systemName: weak.icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(weak.color)
+                .frame(width: 36)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(message.headline)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                    .lineLimit(2)
+                Text(message.tip)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            // Stat value pill
+            Text(String(format: "%.0f", weak.value))
+                .font(.system(size: 15, weight: .black, design: .monospaced))
+                .foregroundColor(weak.color)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(weak.color.opacity(0.15))
+                )
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(weak.color.opacity(0.45), lineWidth: 1)
+                )
+        )
+    }
+
+    private struct WeakStat {
+        let name: String
+        let value: Double
+        let icon: String
+        let color: Color
+    }
+
+    private func weakestStat(for p: Profile) -> WeakStat {
+        let candidates: [(name: String, value: Double, icon: String, color: Color)] = [
+            ("Strength",   p.strength,   "dumbbell.fill",      RPGStatsBar.StatType.strength.color),
+            ("Endurance",  p.endurance,  "heart.fill",         RPGStatsBar.StatType.endurance.color),
+            ("Focus",      p.focus,      "brain.head.profile", RPGStatsBar.StatType.focus.color),
+            ("Discipline", p.discipline, "bolt.fill",          RPGStatsBar.StatType.discipline.color),
+            ("Health",     p.health,     "cross.fill",         RPGStatsBar.StatType.health.color),
+            ("Energy",     p.energy,     "flame.fill",         RPGStatsBar.StatType.energy.color),
+        ]
+        let weakest = candidates.min(by: { $0.value < $1.value }) ?? candidates[0]
+        return WeakStat(name: weakest.name, value: weakest.value, icon: weakest.icon, color: weakest.color)
+    }
+
+    private struct CoachingMessage {
+        let headline: String
+        let tip: String
+    }
+
+    private func coachingMessage(stat: String, tier: QuestManager.TierRank, value: Double) -> CoachingMessage {
+        switch tier {
+        case .e:
+            // Rank E — beginner, encouraging and educational
+            let tips: [String: CoachingMessage] = [
+                "Strength":   .init(headline: "Build your foundation.", tip: "Start with bodyweight or light resistance. Consistency beats intensity."),
+                "Endurance":  .init(headline: "Your lungs need training too.", tip: "Add a 15-minute walk or jog to your next session."),
+                "Focus":      .init(headline: "The mind leads the body.", tip: "Try 5 minutes of deep breathing before your workout."),
+                "Discipline": .init(headline: "Show up even when you don't feel like it.", tip: "Discipline is a skill — train it daily."),
+                "Health":     .init(headline: "Recovery is part of training.", tip: "Sleep 7–9 hours and stay hydrated every day."),
+                "Energy":     .init(headline: "Fuel your training.", tip: "Eat a balanced meal 1–2 hours before workouts."),
+            ]
+            return tips[stat] ?? .init(headline: "Keep showing up.", tip: "Every rep counts at this stage.")
+
+        case .d:
+            let tips: [String: CoachingMessage] = [
+                "Strength":   .init(headline: "\(stat) is your weak link.", tip: "Add one strength session per week with progressive overload."),
+                "Endurance":  .init(headline: "\(stat) needs attention.", tip: "Push your cardio sessions to 30+ minutes consistently."),
+                "Focus":      .init(headline: "Your mental edge is lagging.", tip: "Reduce distractions — quality reps over quantity."),
+                "Discipline": .init(headline: "Break the inconsistency cycle.", tip: "Schedule workouts like appointments. No skipping."),
+                "Health":     .init(headline: "Your recovery is falling behind.", tip: "Prioritise sleep and manage stress — it directly affects gains."),
+                "Energy":     .init(headline: "Energy is flagging.", tip: "Review your nutrition timing and cut excessive cardio frequency."),
+            ]
+            return tips[stat] ?? .init(headline: "Address your \(stat) gap.", tip: "Targeted work now prevents a bigger gap later.")
+
+        case .c:
+            let tips: [String: CoachingMessage] = [
+                "Strength":   .init(headline: "\(stat) is holding you back.", tip: "Introduce periodisation — heavy weeks followed by deload weeks."),
+                "Endurance":  .init(headline: "Cardiovascular deficit detected.", tip: "Add zone-2 cardio (conversational pace) 2× per week."),
+                "Focus":      .init(headline: "Cognitive performance is subpar.", tip: "Sleep quality and single-tasking before sessions matter most here."),
+                "Discipline": .init(headline: "Rank C demands more consistency.", tip: "Your streak data shows gaps — analyse the pattern and close it."),
+                "Health":     .init(headline: "Structural health check needed.", tip: "Incorporate mobility work and soft-tissue maintenance into your routine."),
+                "Energy":     .init(headline: "Energy output is inconsistent.", tip: "Track your sleep cycles and pre-workout nutrition more precisely."),
+            ]
+            return tips[stat] ?? .init(headline: "Rank C requires balanced stats.", tip: "Neglecting \(stat) will cap your progression.")
+
+        case .b:
+            let tips: [String: CoachingMessage] = [
+                "Strength":   .init(headline: "Elite \(stat) requires elite programming.", tip: "Add accessory work targeting your weakest movement patterns."),
+                "Endurance":  .init(headline: "Cardiovascular base needs rebuilding.", tip: "Dedicate a full training block to aerobic base development."),
+                "Focus":      .init(headline: "Mental performance matters at Rank B.", tip: "Visualisation and pre-session routines sharpen execution."),
+                "Discipline": .init(headline: "Rank B athletes don't miss sessions.", tip: "Review your schedule and eliminate obstacles to consistency."),
+                "Health":     .init(headline: "Longevity requires structural integrity.", tip: "Add a dedicated mobility and recovery protocol this week."),
+                "Energy":     .init(headline: "Energy regulation is an elite skill.", tip: "Audit your sleep, nutrition, and training load — balance all three."),
+            ]
+            return tips[stat] ?? .init(headline: "\(stat) is the bottleneck.", tip: "Rank B requires no obvious weak points.")
+
+        case .a:
+            let tips: [String: CoachingMessage] = [
+                "Strength":   .init(headline: "Rank A: every kilogram matters.", tip: "Optimise your training max percentages and recovery between heavy days."),
+                "Endurance":  .init(headline: "Aerobic capacity is your limiter.", tip: "Structured polarised training — 80% easy, 20% threshold intensity."),
+                "Focus":      .init(headline: "At Rank A, the mind is the edge.", tip: "Develop pre-competition focus protocols and review them daily."),
+                "Discipline": .init(headline: "Rank A athletes operate on systems.", tip: "Build non-negotiable habits that execute regardless of motivation."),
+                "Health":     .init(headline: "Injury prevention is performance.", tip: "Schedule regular soft tissue work and do not skip deload weeks."),
+                "Energy":     .init(headline: "Energy management is a discipline.", tip: "Periodise your training load to match your recovery capacity precisely."),
+            ]
+            return tips[stat] ?? .init(headline: "Fix the \(stat) gap — Rank S demands it.", tip: "Balanced attributes unlock the next tier.")
+
+        case .s:
+            let tips: [String: CoachingMessage] = [
+                "Strength":   .init(headline: "Rank S — even marginal \(stat) gains matter.", tip: "At this level, specificity and sleep are your final levers."),
+                "Endurance":  .init(headline: "Aerobic ceiling: push it.", tip: "Sub-maximal volume combined with high-quality threshold work is your path."),
+                "Focus":      .init(headline: "The elite compete in their minds first.", tip: "Every session, every rep — full intentionality. No autopilot."),
+                "Discipline": .init(headline: "Rank S is built on relentless consistency.", tip: "You've earned this rank by showing up. Now protect it."),
+                "Health":     .init(headline: "Longevity is the Rank S meta-game.", tip: "Protect your joints, tendons, and sleep above all else."),
+                "Energy":     .init(headline: "At Rank S, energy management is mastery.", tip: "Micro-periodisation and sleep architecture are your last performance levers."),
+            ]
+            return tips[stat] ?? .init(headline: "Rank S. Maintain all stats — decline is not an option.", tip: "You are the standard.")
+        }
+    }
+
+    // MARK: - Tier Rank Color
+
+    private func tierRankColor(_ rank: QuestManager.TierRank) -> Color {
+        switch rank {
+        case .e: return .gray
+        case .d: return .green
+        case .c: return .blue
+        case .b: return .purple
+        case .a: return .orange
+        case .s: return .yellow
+        }
+    }
+
     // MARK: - Helper Functions
     
     private func timeToMidnightString() -> String {
@@ -370,6 +688,87 @@ struct HomeView: View {
         let comps = Calendar.current.dateComponents([.hour, .minute, .second], from: now, to: date)
         let h = comps.hour ?? 0, m = comps.minute ?? 0, s = comps.second ?? 0
         return String(format: "%02d:%02d:%02d", h, m, s)
+    }
+}
+
+// MARK: - Level Up Overlay
+
+struct LevelUpOverlay: View {
+    let level: Int
+    @Binding var particleScale: CGFloat
+    let onDismiss: () -> Void
+
+    @State private var glowOpacity: Double = 0
+    @State private var textScale: CGFloat = 0.1
+
+    var body: some View {
+        ZStack {
+            // Dim backdrop
+            Color.black.opacity(0.75)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
+
+            // Radial glow
+            RadialGradient(
+                colors: [.cyan.opacity(0.5), .clear],
+                center: .center, startRadius: 10, endRadius: 300
+            )
+            .scaleEffect(particleScale * 2)
+            .opacity(glowOpacity)
+            .ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                // Animated star burst
+                ZStack {
+                    ForEach(0..<8, id: \.self) { i in
+                        Rectangle()
+                            .fill(LinearGradient(colors: [.cyan, .clear], startPoint: .center, endPoint: .trailing))
+                            .frame(width: 120, height: 2)
+                            .rotationEffect(.degrees(Double(i) * 45))
+                            .scaleEffect(particleScale)
+                    }
+                    Circle()
+                        .fill(LinearGradient(colors: [.cyan, .blue], startPoint: .top, endPoint: .bottom))
+                        .frame(width: 90, height: 90)
+                        .shadow(color: .cyan, radius: 20)
+                        .overlay(
+                            Text("⭐")
+                                .font(.system(size: 40))
+                        )
+                }
+
+                VStack(spacing: 8) {
+                    Text("LEVEL UP!")
+                        .font(.system(size: 36, weight: .black, design: .rounded))
+                        .foregroundStyle(LinearGradient(colors: [.cyan, .white], startPoint: .leading, endPoint: .trailing))
+                        .shadow(color: .cyan, radius: 10)
+
+                    Text("Level \(level)")
+                        .font(.system(size: 56, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .shadow(color: .cyan, radius: 15)
+
+                    Text("All stats +2")
+                        .font(.title3)
+                        .foregroundColor(.cyan.opacity(0.9))
+                }
+                .scaleEffect(textScale)
+
+                Button("Continue") { onDismiss() }
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 12)
+                    .background(Capsule().fill(.cyan))
+                    .shadow(color: .cyan.opacity(0.5), radius: 8)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
+                textScale = 1.0
+                glowOpacity = 1.0
+            }
+        }
     }
 }
 

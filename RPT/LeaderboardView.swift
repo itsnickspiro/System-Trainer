@@ -10,11 +10,20 @@ final class CloudKitLeaderboardManager {
     static let shared = CloudKitLeaderboardManager()
 
     var players: [LeaderboardPlayer] = []
+    var friends: [LeaderboardPlayer] = []
     var isLoading = false
+    var isFriendsLoading = false
     var errorMessage: String?
+    var friendsErrorMessage: String?
 
     private let recordType = "LeaderboardEntry"
     private let publicDB = CKContainer.default().publicCloudDatabase
+
+    /// Saved friend codes the user has added (stored in UserDefaults).
+    var savedFriendCodes: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "savedFriendCodes") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "savedFriendCodes") }
+    }
 
     /// The user's iCloud-account-bound CloudKit record ID.
     /// Cached after the first successful fetch. Persists across app reinstalls and
@@ -40,9 +49,37 @@ final class CloudKitLeaderboardManager {
         return idString
     }
 
+    // MARK: - Friend Code Generation
+
+    /// Derives a stable 6-character alphanumeric friend code from a CloudKit user ID string.
+    /// Uses a simple hash so the same ID always produces the same code.
+    static func friendCode(from cloudKitUserID: String) -> String {
+        let charset = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") // 32 chars, no ambiguous I/O/0/1
+        var hash: UInt64 = 14695981039346656037 // FNV-1a offset basis
+        for byte in cloudKitUserID.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 1099511628211
+        }
+        var code = ""
+        var h = hash
+        for _ in 0..<6 {
+            code.append(charset[Int(h % 32)])
+            h >>= 5
+        }
+        return code
+    }
+
+    /// Ensures the profile has a friend code set. Generates one from the CloudKit ID if missing.
+    func ensureFriendCode(for profile: Profile) async {
+        guard profile.friendCode.isEmpty else { return }
+        if let userID = try? await resolveUserID() {
+            profile.friendCode = Self.friendCode(from: userID)
+        }
+    }
+
     // MARK: - Push local player to CloudKit
 
-    func pushScore(name: String, level: Int, xp: Int, streak: Int) async {
+    func pushScore(name: String, level: Int, xp: Int, streak: Int, friendCode: String) async {
         do {
             let userID = try await resolveUserID()
             let record = try await fetchOwnRecord(userID: userID) ?? CKRecord(recordType: recordType)
@@ -51,6 +88,7 @@ final class CloudKitLeaderboardManager {
             record["xp"] = xp as CKRecordValue
             record["streak"] = streak as CKRecordValue
             record["cloudKitUserID"] = userID as CKRecordValue
+            record["friendCode"] = friendCode as CKRecordValue
             record["updatedAt"] = Date() as CKRecordValue
             _ = try await publicDB.save(record)
             errorMessage = nil
@@ -76,7 +114,8 @@ final class CloudKitLeaderboardManager {
             let predicate = NSPredicate(value: true)
             let query = CKQuery(recordType: recordType, predicate: predicate)
             query.sortDescriptors = [NSSortDescriptor(key: "xp", ascending: false)]
-            let records = try await performQuery(query, desiredKeys: ["playerName", "level", "xp", "streak", "cloudKitUserID"], limit: 100)
+            let keys = ["playerName", "level", "xp", "streak", "cloudKitUserID", "friendCode"]
+            let records = try await performQuery(query, desiredKeys: keys, limit: 100)
             let resolvedUserID = await userIDResult
 
             var fetched: [LeaderboardPlayer] = []
@@ -88,9 +127,11 @@ final class CloudKitLeaderboardManager {
                     let streak = record["streak"] as? Int,
                     let ckUserID = record["cloudKitUserID"] as? String
                 else { continue }
+                let code = record["friendCode"] as? String ?? ""
                 fetched.append(LeaderboardPlayer(
                     id: record.recordID.recordName,
                     cloudKitUserID: ckUserID,
+                    friendCode: code,
                     name: name,
                     level: level,
                     xp: xp,
@@ -100,14 +141,75 @@ final class CloudKitLeaderboardManager {
                 ))
             }
             players = fetched.enumerated().map { idx, p in
-                LeaderboardPlayer(id: p.id, cloudKitUserID: p.cloudKitUserID, name: p.name,
-                                  level: p.level, xp: p.xp, streak: p.streak,
+                LeaderboardPlayer(id: p.id, cloudKitUserID: p.cloudKitUserID, friendCode: p.friendCode,
+                                  name: p.name, level: p.level, xp: p.xp, streak: p.streak,
                                   rank: idx + 1, isCurrentUser: p.isCurrentUser)
             }
         } catch let ckError as CKError where ckError.code == .unknownItem {
             players = []
         } catch {
             errorMessage = "Could not load leaderboard: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Friends
+
+    func addFriend(code: String) async {
+        let normalized = code.uppercased().trimmingCharacters(in: .whitespaces)
+        guard !normalized.isEmpty, !savedFriendCodes.contains(normalized) else { return }
+        savedFriendCodes.append(normalized)
+        await fetchFriends()
+    }
+
+    func removeFriend(code: String) {
+        savedFriendCodes.removeAll { $0 == code }
+        friends.removeAll { $0.friendCode == code }
+    }
+
+    func fetchFriends() async {
+        let codes = savedFriendCodes
+        guard !codes.isEmpty else { friends = []; return }
+        isFriendsLoading = true
+        friendsErrorMessage = nil
+        defer { isFriendsLoading = false }
+
+        do {
+            let predicate = NSPredicate(format: "friendCode IN %@", codes)
+            let query = CKQuery(recordType: recordType, predicate: predicate)
+            query.sortDescriptors = [NSSortDescriptor(key: "xp", ascending: false)]
+            let keys = ["playerName", "level", "xp", "streak", "cloudKitUserID", "friendCode"]
+            let records = try await performQuery(query, desiredKeys: keys, limit: 200)
+            let myID = try? await resolveUserID()
+
+            let fetched: [LeaderboardPlayer] = records.compactMap { record -> LeaderboardPlayer? in
+                guard
+                    let name = record["playerName"] as? String,
+                    let level = record["level"] as? Int,
+                    let xp = record["xp"] as? Int,
+                    let streak = record["streak"] as? Int,
+                    let ckUserID = record["cloudKitUserID"] as? String
+                else { return nil }
+                let code = record["friendCode"] as? String ?? ""
+                return LeaderboardPlayer(
+                    id: record.recordID.recordName,
+                    cloudKitUserID: ckUserID,
+                    friendCode: code,
+                    name: name,
+                    level: level,
+                    xp: xp,
+                    streak: streak,
+                    rank: 0,
+                    isCurrentUser: ckUserID == myID
+                )
+            }
+            let sorted = fetched.sorted { $0.xp > $1.xp }
+            friends = sorted.enumerated().map { idx, p in
+                LeaderboardPlayer(id: p.id, cloudKitUserID: p.cloudKitUserID, friendCode: p.friendCode,
+                                  name: p.name, level: p.level, xp: p.xp, streak: p.streak,
+                                  rank: idx + 1, isCurrentUser: p.isCurrentUser)
+            }
+        } catch {
+            friendsErrorMessage = "Could not load friends: \(error.localizedDescription)"
         }
     }
 
@@ -156,6 +258,7 @@ final class CloudKitLeaderboardManager {
 struct LeaderboardPlayer: Identifiable {
     let id: String
     let cloudKitUserID: String
+    let friendCode: String
     let name: String
     let level: Int
     let xp: Int
@@ -175,11 +278,13 @@ struct LeaderboardView: View {
 
     enum LeaderboardTab: String, CaseIterable {
         case world = "World"
+        case friends = "Friends"
         case you = "You"
 
         var icon: String {
             switch self {
             case .world: return "globe"
+            case .friends: return "person.2.fill"
             case .you: return "person.fill"
             }
         }
@@ -193,6 +298,8 @@ struct LeaderboardView: View {
                 TabView(selection: $selectedTab) {
                     WorldLeaderboardView()
                         .tag(LeaderboardTab.world)
+                    FriendsLeaderboardView()
+                        .tag(LeaderboardTab.friends)
                     YourRankView()
                         .tag(LeaderboardTab.you)
                 }
@@ -206,11 +313,13 @@ struct LeaderboardView: View {
                     Button {
                         Task {
                             if let profile = dataManager.currentProfile {
+                                await leaderboard.ensureFriendCode(for: profile)
                                 await leaderboard.pushScore(
                                     name: profile.name,
                                     level: profile.level,
                                     xp: profile.xp,
-                                    streak: profile.currentStreak
+                                    streak: profile.currentStreak,
+                                    friendCode: profile.friendCode
                                 )
                             }
                             await leaderboard.fetchLeaderboard()
@@ -230,13 +339,13 @@ struct LeaderboardView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.3)) { selectedTab = tab }
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: tab.icon).font(.system(size: 16, weight: .semibold))
-                        Text(tab.rawValue).font(.system(size: 16, weight: .semibold))
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.icon).font(.system(size: 14, weight: .semibold))
+                        Text(tab.rawValue).font(.system(size: 14, weight: .semibold))
                     }
                     .foregroundColor(selectedTab == tab ? .white : .secondary)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
@@ -334,14 +443,25 @@ struct YourRankView: View {
     @Environment(\.colorScheme) private var colorScheme
     private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
     private var dataManager: DataManager { DataManager.shared }
+    @State private var showCopied = false
 
     private var ownEntry: LeaderboardPlayer? {
         leaderboard.players.first { $0.isCurrentUser }
     }
 
+    private var friendCode: String {
+        dataManager.currentProfile?.friendCode ?? ""
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 24) {
+                // Friend code card — always shown
+                if !friendCode.isEmpty {
+                    friendCodeCard
+                        .padding(.top, 20)
+                }
+
                 if let player = ownEntry {
                     VStack(spacing: 8) {
                         Text("YOUR RANK")
@@ -351,7 +471,6 @@ struct YourRankView: View {
                         PodiumCard(player: player, position: player.rank)
                             .scaleEffect(1.05)
                     }
-                    .padding(.top, 20)
                 } else if let profile = dataManager.currentProfile {
                     // Not yet synced
                     VStack(spacing: 16) {
@@ -369,6 +488,7 @@ struct YourRankView: View {
                         let preview = LeaderboardPlayer(
                             id: "preview",
                             cloudKitUserID: leaderboard.currentUserID ?? "",
+                            friendCode: profile.friendCode,
                             name: profile.name,
                             level: profile.level,
                             xp: profile.xp,
@@ -388,6 +508,187 @@ struct YourRankView: View {
             .padding(.top, 16)
         }
         .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
+        .task {
+            // Generate friend code if needed when this tab appears
+            if let profile = dataManager.currentProfile {
+                await leaderboard.ensureFriendCode(for: profile)
+            }
+        }
+    }
+
+    private var friendCodeCard: some View {
+        VStack(spacing: 10) {
+            Text("YOUR FRIEND CODE")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyan.opacity(0.8))
+
+            Text(friendCode)
+                .font(.system(size: 32, weight: .bold, design: .monospaced))
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .tracking(6)
+
+            HStack(spacing: 16) {
+                Button {
+                    UIPasteboard.general.string = friendCode
+                    withAnimation { showCopied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        withAnimation { showCopied = false }
+                    }
+                } label: {
+                    Label(showCopied ? "Copied!" : "Copy Code", systemImage: showCopied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(showCopied ? .green : .cyan)
+                }
+
+                if let shareURL = URL(string: "rpt://addfriend/\(friendCode)") {
+                    ShareLink(
+                        item: shareURL,
+                        subject: Text("Add me on RPT!"),
+                        message: Text("Use my friend code \(friendCode) to add me on RPT — the fitness RPG app! Tap the link or enter the code manually: \(shareURL.absoluteString)")
+                    ) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.cyan)
+                    }
+                }
+            }
+
+            Text("Share this code with friends so they can add you")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.cyan.opacity(0.4), lineWidth: 1))
+        )
+    }
+}
+
+// MARK: - Friends Leaderboard View
+
+struct FriendsLeaderboardView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
+    @State private var enteredCode = ""
+    @State private var showAddField = false
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                // Add friend section
+                addFriendSection
+                    .padding(.top, 8)
+
+                if let msg = leaderboard.friendsErrorMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                        Text(msg).font(.caption).foregroundColor(.secondary)
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
+                }
+
+                if leaderboard.isFriendsLoading {
+                    ProgressView("Loading friends...")
+                        .foregroundColor(.cyan)
+                        .padding()
+                } else if leaderboard.friends.isEmpty && leaderboard.savedFriendCodes.isEmpty {
+                    emptyState
+                } else {
+                    friendsList
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal, 16)
+        }
+        .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
+        .task { await leaderboard.fetchFriends() }
+        .refreshable { await leaderboard.fetchFriends() }
+        .onReceive(NotificationCenter.default.publisher(for: .rptAddFriendDeepLink)) { notification in
+            guard let code = notification.userInfo?["code"] as? String, code.count == 6 else { return }
+            Task {
+                await leaderboard.addFriend(code: code)
+            }
+        }
+    }
+
+    private var addFriendSection: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("FRIENDS")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan.opacity(0.8))
+                Spacer()
+                Button {
+                    withAnimation { showAddField.toggle() }
+                } label: {
+                    Label("Add Friend", systemImage: "person.badge.plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.cyan)
+                }
+            }
+
+            if showAddField {
+                HStack(spacing: 10) {
+                    TextField("Enter friend code (e.g. A3F9K2)", text: $enteredCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 15, design: .monospaced))
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.05))
+                        )
+
+                    Button("Add") {
+                        let code = enteredCode.uppercased().trimmingCharacters(in: .whitespaces)
+                        guard code.count == 6 else { return }
+                        Task {
+                            await leaderboard.addFriend(code: code)
+                            enteredCode = ""
+                            withAnimation { showAddField = false }
+                        }
+                    }
+                    .disabled(enteredCode.trimmingCharacters(in: .whitespaces).count != 6)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "person.2")
+                .font(.system(size: 48))
+                .foregroundColor(.cyan.opacity(0.4))
+            Text("No Friends Added Yet")
+                .font(.headline)
+            Text("Tap \"Add Friend\" and enter a friend's 6-character code to follow their progress.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, 60)
+    }
+
+    private var friendsList: some View {
+        ForEach(leaderboard.friends) { player in
+            LeaderboardRow(player: player, isCurrentUser: player.isCurrentUser)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        leaderboard.removeFriend(code: player.friendCode)
+                    } label: {
+                        Label("Remove", systemImage: "person.badge.minus")
+                    }
+                }
+        }
     }
 }
 
