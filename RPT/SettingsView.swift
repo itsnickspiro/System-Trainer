@@ -97,6 +97,22 @@ struct SettingsView: View {
                 
                 // App Settings Section
                 Section("App Settings") {
+                    HStack {
+                        Image(systemName: "scalemass.fill")
+                            .foregroundColor(.teal)
+                        Text("Units")
+                        Spacer()
+                        Picker("Units", selection: Binding(
+                            get: { profile.useMetric },
+                            set: { profile.useMetric = $0; try? context.save() }
+                        )) {
+                            Text("Metric (kg)").tag(true)
+                            Text("Imperial (lbs)").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 190)
+                    }
+
                     NavigationLink(destination: NotificationSettingsView()) {
                         HStack {
                             Image(systemName: "bell.fill")

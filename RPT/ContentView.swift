@@ -12,6 +12,7 @@ struct ContentView: View {
     @StateObject private var dataManager = DataManager.shared
     @State private var now = Date()
     @State private var showingSettings = false
+    @State private var showingTrainer = false
     private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -47,14 +48,6 @@ struct ContentView: View {
                 LeaderboardView()
                     .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
                     .tag(4)
-
-                InventoryAndShopView()
-                    .tabItem { Label("Inventory", systemImage: "bag.fill") }
-                    .tag(5)
-
-                CoachView()
-                    .tabItem { Label("System", systemImage: "waveform.badge.magnifyingglass") }
-                    .tag(6)
             }
             .background(
                 (colorScheme == .dark ? Color.black : Color.white)
@@ -75,6 +68,16 @@ struct ContentView: View {
             setupTabBarAppearance(for: newScheme)
         }
         .onReceive(timer) { now = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: .rptNavigateToTab)) { notification in
+            if let tab = notification.userInfo?["tab"] as? String {
+                switch tab {
+                case "quests":   selectedTab = 1
+                case "diet":     selectedTab = 2
+                case "training": selectedTab = 3
+                default: break
+                }
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 dataManager.refreshHealthOnForeground()
@@ -97,6 +100,9 @@ struct ContentView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView()
         }
+        .sheet(isPresented: $showingTrainer) {
+            CoachView()
+        }
     }
 
     // MARK: - Countdown Timer View
@@ -108,6 +114,39 @@ struct ContentView: View {
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.cyan)
             Spacer()
+            HStack(spacing: 8) {
+                // System Trainer quick-access button
+                Button(action: { showingTrainer = true }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "waveform.badge.magnifyingglass")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("SYSTEM")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(.cyan)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(Color.cyan.opacity(0.12))
+                            .overlay(Capsule().stroke(Color.cyan.opacity(0.4), lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // Settings quick-access button
+                Button(action: { showingSettings = true }) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                        .background(
+                            Circle()
+                                .fill(Color(.systemGray6))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 6)

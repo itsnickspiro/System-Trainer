@@ -1,130 +1,271 @@
-# Supabase Edge Functions — Deployment Guide
+# Supabase Deployment Guide
 
-API keys for API Ninjas and WeatherStack are stored in Supabase Vault and never
-leave the server. The iOS app calls these Edge Functions, which proxy the request
-and return the result.
+All secrets live server-side in Supabase Vault. The iOS app calls Edge Functions
+which proxy/query as needed — no third-party API keys ever reach the client.
 
 ---
 
-## One-time setup
-
-### 1. Install Supabase CLI
+## Prerequisites
 
 ```bash
 brew install supabase/tap/supabase
-```
-
-### 2. Log in
-
-```bash
 supabase login
-```
-
-### 3. Link this project
-
-```bash
 supabase link --project-ref erghbsnxtsbnmfuycnyb
+pip install requests  # for data pipeline scripts
 ```
 
 ---
 
-## Store secrets in Supabase Vault
+## 1. Run the Database Migration
 
-Run these once. Values are stored server-side and injected as environment
-variables into the Edge Functions at runtime — never transmitted to clients.
+Creates the `exercises` table, tsvector + GIN full-text index, fuzzy trigram
+index, RLS policy, storage bucket, and `search_exercises` RPC:
 
 ```bash
-# API Ninjas key (nutrition lookups)
-supabase secrets set API_NINJAS_KEY="<your-api-ninjas-key>"
+supabase db push
+# or run the file directly against your DB:
+supabase db execute < supabase/migrations/20240101000000_create_exercises.sql
+```
 
-# WeatherStack key (weather data)
+---
+
+## 2. Store Secrets in Supabase Vault
+
+```bash
+# Required for Edge Functions to query the exercises table
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<your-service-role-key>"
+
+# Shared secret — the iOS app sends this header on every request
+supabase secrets set RPT_APP_SECRET="<your-app-secret>"
+
+# Legacy secrets (still used by nutrition/weather proxies)
+supabase secrets set API_NINJAS_KEY="<your-api-ninjas-key>"
 supabase secrets set WEATHERSTACK_API_KEY="<your-weatherstack-key>"
 ```
 
-To add a new third-party key in the future:
-```bash
-supabase secrets set MY_NEW_KEY="<value>"
-```
-Then read it inside the relevant Edge Function via `Deno.env.get("MY_NEW_KEY")`.
-
-Verify secrets are set:
+Verify:
 ```bash
 supabase secrets list
 ```
 
+Get your service role key:
+```
+Dashboard → https://supabase.com/dashboard/project/erghbsnxtsbnmfuycnyb → Settings → API → service_role (secret)
+```
+
 ---
 
-## Deploy the Edge Functions
+## 3. Populate the Exercise Database
+
+### Step 3a — Merge & Upload Exercise Data (~870–1,300 exercises)
 
 ```bash
+cd supabase/scripts
+
+# Set credentials
+export SUPABASE_URL="https://erghbsnxtsbnmfuycnyb.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="<your-service-role-key>"
+
+# Dry run first to verify output
+python3 build_exercise_db.py --dry-run
+
+# Full run (fetches from 3 GitHub sources, merges, upserts to Supabase)
+python3 build_exercise_db.py
+
+# Optional: save merged JSON locally
+python3 build_exercise_db.py --output merged_exercises.json
+```
+
+**What this does:**
+- Fetches `yuhonas/free-exercise-db` (870+ exercises with static images, public domain)
+- Fetches `wrkout/exercises.json` (structured exercises with tips, Unlicense)
+- Maps GIF URLs from the same repo's animated preview files
+- Merges and deduplicates by slug (URL-safe name)
+- Upserts everything to `public.exercises` via the REST API
+
+### Step 3b — Upload Media to Supabase Storage (optional but recommended)
+
+This replaces raw GitHub CDN URLs with your own Supabase Storage URLs, giving
+you full control over availability and loading speed.
+
+> **Warning:** Images + GIFs total ~2–3 GB. This takes 20–40 minutes on a
+> typical broadband connection. Run with `--limit 10` first to verify it works.
+
+```bash
+# Test with 10 exercises first
+python3 upload_exercise_media.py --limit 10
+
+# Upload everything
+python3 upload_exercise_media.py
+
+# Skip GIFs (faster, images only)
+python3 upload_exercise_media.py --skip-gifs
+
+# Re-upload even if file already in Storage
+python3 upload_exercise_media.py --force
+```
+
+---
+
+## 4. Populate the Food Database
+
+### Step 4a — Run the Migration
+
+```bash
+supabase db push
+# or run directly:
+supabase db execute < supabase/migrations/20240102000000_create_foods.sql
+```
+
+### Step 4b — Seed Curated Foods (~200 items)
+
+```bash
+cd supabase/scripts
+
+export SUPABASE_URL="https://erghbsnxtsbnmfuycnyb.supabase.co"
+export DB_SERVICE_ROLE_KEY="<your-service-role-key>"
+
+# Dry run first
+python3 seed_foods.py --dry-run
+
+# Seed (idempotent — upserts on name conflict)
+python3 seed_foods.py
+```
+
+**What this does:**
+- Upserts ~200 curated foods from `SampleFoodData.swift` to the `public.foods` table
+- Marks all rows `is_verified=true`, `data_source="rpt"`
+- Idempotent — safe to re-run
+
+---
+
+## 5. Deploy the Edge Functions
+
+```bash
+# Deploy all at once
+supabase functions deploy
+
+# Or deploy individually
+supabase functions deploy exercises-proxy
 supabase functions deploy nutrition-proxy
 supabase functions deploy weather-proxy
-```
-
-To deploy all functions at once:
-```bash
-supabase functions deploy
+supabase functions deploy recipe-proxy
+supabase functions deploy foods-proxy
 ```
 
 ---
 
-## Add the Supabase anon key to Xcode
+## 5. Add Keys to Xcode
 
-The anon key is a **public** key (safe to ship in the app — it identifies the
-project but grants only RLS-scoped access). Add it as an Xcode build setting so
-it flows into Info.plist via `$(SUPABASE_ANON_KEY)`.
+### Supabase Anon Key (public — safe to ship)
 
 1. Open Xcode → RPT target → **Build Settings**
 2. Click **+** → **Add User-Defined Setting**
 3. Name: `SUPABASE_ANON_KEY`
-4. Value: your anon key from Supabase Dashboard → Settings → API
+4. Value: from Dashboard → Settings → API → `anon public`
 
-Alternatively, create `RPT/Config.xcconfig` (gitignored):
-```
-SUPABASE_ANON_KEY = eyJ...your-anon-key...
-```
-And set it as the configuration file for the RPT target in Xcode project settings.
+### App Secret (private — never commit)
+
+Add a second User-Defined Setting:
+- Name: `APP_SECRET`
+- Value: same value you set with `supabase secrets set RPT_APP_SECRET`
+
+Both flow into `Info.plist` and are read by `Secrets.swift` at runtime.
 
 Get your anon key:
 ```
-Supabase Dashboard → https://supabase.com/dashboard/project/erghbsnxtsbnmfuycnyb → Settings → API → Project API keys → anon public
+https://supabase.com/dashboard/project/erghbsnxtsbnmfuycnyb → Settings → API → anon public
 ```
 
 ---
 
-## Test a function locally
+## 6. Test the Exercise Search
 
 ```bash
-supabase functions serve nutrition-proxy --env-file .env.local
-```
+# Test exercises-proxy (queries Supabase exercises table)
+curl -X POST https://erghbsnxtsbnmfuycnyb.supabase.co/functions/v1/exercises-proxy \
+  -H "Authorization: Bearer <anon-key>" \
+  -H "x-app-secret: <app-secret>" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "squat", "limit": 5}'
 
-`.env.local` (never commit this file):
-```
-API_NINJAS_KEY=your-key-here
-WEATHERSTACK_API_KEY=your-key-here
-```
-
-Test with curl:
-```bash
-curl -X POST http://localhost:54321/functions/v1/nutrition-proxy \
+# Test nutrition proxy (unchanged)
+curl -X POST https://erghbsnxtsbnmfuycnyb.supabase.co/functions/v1/nutrition-proxy \
+  -H "Authorization: Bearer <anon-key>" \
+  -H "x-app-secret: <app-secret>" \
   -H "Content-Type: application/json" \
   -d '{"query": "chicken breast"}'
-
-curl -X POST http://localhost:54321/functions/v1/weather-proxy \
-  -H "Content-Type: application/json" \
-  -d '{"query": "New York"}'
 ```
 
 ---
 
-## Adding future API keys
+## 7. Test Locally
 
-For any new third-party API:
+```bash
+# Create .env.local (never commit this file)
+cat > .env.local <<EOF
+SUPABASE_URL=https://erghbsnxtsbnmfuycnyb.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+RPT_APP_SECRET=<your-app-secret>
+API_NINJAS_KEY=<your-api-ninjas-key>
+WEATHERSTACK_API_KEY=<your-weatherstack-key>
+EOF
 
-1. Store the key: `supabase secrets set NEW_SERVICE_KEY="<value>"`
-2. Create `supabase/functions/new-service-proxy/index.ts` following the same
-   pattern as the existing functions
+# Serve functions locally
+supabase functions serve --env-file .env.local
+
+# Test in another terminal
+curl -X POST http://localhost:54321/functions/v1/exercises-proxy \
+  -H "Content-Type: application/json" \
+  -H "x-app-secret: <app-secret>" \
+  -d '{"query": "bench press"}'
+```
+
+---
+
+## Architecture Overview
+
+```
+iOS App
+  └── ExercisesAPI.fetchExercises(name: "squat")
+        └── POST /functions/v1/exercises-proxy
+              └── Supabase Edge Function
+                    └── supabase.rpc("search_exercises", { query: "squat" })
+                          └── PostgreSQL
+                                ├── tsvector GIN index (full-text)
+                                └── pg_trgm GIN index (fuzzy/partial match)
+
+Exercise Data Sources (one-time import)
+  ├── yuhonas/free-exercise-db  →  870+ exercises + static images
+  ├── wrkout/exercises.json     →  enriched tips + mechanic fields
+  └── ExerciseDB GIF map        →  animated GIF previews
+
+Media Storage
+  └── Supabase Storage bucket: exercise-media
+        ├── exercises/<slug>/0.jpg  (static image 1)
+        ├── exercises/<slug>/1.jpg  (static image 2)
+        └── exercises/<slug>/<slug>.gif  (animation)
+```
+
+---
+
+## Refreshing Exercise Data
+
+To pull in updated exercises from the upstream sources:
+
+```bash
+python3 supabase/scripts/build_exercise_db.py
+python3 supabase/scripts/upload_exercise_media.py --skip-gifs  # only new images
+```
+
+The upsert uses `slug` as the conflict key so re-running is idempotent.
+
+---
+
+## Adding Future API Keys
+
+1. Store: `supabase secrets set NEW_SERVICE_KEY="<value>"`
+2. Create `supabase/functions/new-service-proxy/index.ts` (follow existing pattern)
 3. Deploy: `supabase functions deploy new-service-proxy`
-4. Call it from Swift via `Secrets.supabaseURL + "/functions/v1/new-service-proxy"`
-   with `Bearer \(Secrets.supabaseAnonKey)` as the Authorization header
-5. **Do not add the raw key to Info.plist or Secrets.swift**
+4. Call from Swift via `Secrets.supabaseURL + "/functions/v1/new-service-proxy"`
+5. **Never** put the raw key in `Info.plist` or `Secrets.swift`

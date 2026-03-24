@@ -2,8 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSCameraUsageDescription</key>
-	<string>The System requires camera access to scan and decrypt consumable items.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -17,14 +19,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSHealthShareUsageDescription</key>
-	<string>RPT reads your steps, workouts, heart rate, sleep, and activity data to calculate your RPG stats and award XP for real-world fitness progress.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>RPT may write workout sessions to Apple Health so your activity is reflected across your health apps.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>RPT tracks your outdoor patrol routes — runs, walks, and hikes — to calculate distance, pace, and award Endurance XP.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>RPT uses background location to continue tracking your patrol route when you switch apps, ensuring accurate distance and pace data.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

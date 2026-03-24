@@ -148,7 +148,7 @@ final class QuestManager {
         // When a plan is active, replace the generic strength/cardio quests with
         // the plan's quest for today (keyed by day-of-week, 0 = Monday).
         if !profile.activePlanID.isEmpty {
-            let activePlan = AnimeWorkoutPlans.plan(id: profile.activePlanID)
+            let activePlan = AnimeWorkoutPlanService.shared.plan(id: profile.activePlanID)
                 ?? customPlan(id: profile.activePlanID, context: modelContext)
             if let plan = activePlan {
                 return buildPlanQuests(plan: plan, profile: profile, date: today, dueDate: tomorrow)

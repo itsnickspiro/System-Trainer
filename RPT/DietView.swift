@@ -79,13 +79,21 @@ struct DietView: View {
     @State private var showingCopyConfirm = false
     @State private var showingMealPlanner = false
     @State private var showingRecipeCalculator = false
+    // Entry editing / nutrition detail
+    @State private var entryToEdit: FoodEntry? = nil
+    @State private var entryForNutrition: FoodEntry? = nil
+
+    /// True when the selected date is not today — diary and quests are read-only.
+    private var isDateLocked: Bool {
+        !Calendar.current.isDateInToday(selectedDate)
+    }
 
     private var waterGlasses: Int { profile.waterIntake }
 
     // Active plan (anime or custom) — nil = generic mode
     private var activePlan: AnimeWorkoutPlan? {
         guard !profile.activePlanID.isEmpty else { return nil }
-        if let anime = AnimeWorkoutPlans.plan(id: profile.activePlanID) { return anime }
+        if let anime = AnimeWorkoutPlanService.shared.plan(id: profile.activePlanID) { return anime }
         // Fall back to user-created custom plan
         let id = profile.activePlanID
         let descriptor = FetchDescriptor<CustomWorkoutPlan>(predicate: #Predicate { $0.id == id })
@@ -113,6 +121,26 @@ struct DietView: View {
                 VStack(spacing: 20) {
                     // Date Selector
                     dateSelectorView
+
+                    // Locked day banner
+                    if isDateLocked {
+                        HStack(spacing: 8) {
+                            Image(systemName: Calendar.current.isDateInFuture(selectedDate) ? "lock.fill" : "lock.fill")
+                                .foregroundColor(Calendar.current.isDateInFuture(selectedDate) ? .blue : .secondary)
+                            Text(Calendar.current.isDateInFuture(selectedDate)
+                                 ? "Future day — log opens when it arrives"
+                                 : "Past day — read-only. Log on today's date to earn XP.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemFill))
+                        )
+                    }
 
                     // Active Plan Nutrition Banner (shown when a plan is selected)
                     if let plan = activePlan {
@@ -154,6 +182,7 @@ struct DietView: View {
                         } label: {
                             Label("Copy Yesterday's Meals", systemImage: "doc.on.doc")
                         }
+                        .disabled(isDateLocked)
                         Button {
                             showingMealPlanner = true
                         } label: {
@@ -177,7 +206,9 @@ struct DietView: View {
                 Text("This will copy all food entries from \(yesterday.formatted(date: .abbreviated, time: .omitted)) to \(selectedDate.formatted(date: .abbreviated, time: .omitted)).")
             }
             .sheet(isPresented: $showingAddFood) {
-                AddFoodView(selectedMeal: $selectedMealForAdding, selectedDate: selectedDate)
+                if !isDateLocked {
+                    AddFoodView(selectedMeal: $selectedMealForAdding, selectedDate: selectedDate)
+                }
             }
             .sheet(isPresented: $showingNutritionGoals) {
                 NutritionGoalsView()
@@ -187,6 +218,12 @@ struct DietView: View {
             }
             .sheet(isPresented: $showingRecipeCalculator) {
                 RecipeNutritionCalculatorView()
+            }
+            .sheet(item: $entryToEdit) { entry in
+                FoodEntryEditSheet(entry: entry)
+            }
+            .sheet(item: $entryForNutrition) { entry in
+                FoodNutritionSheet(entry: entry, fitnessGoal: profile.fitnessGoal)
             }
         }
     }
@@ -492,6 +529,79 @@ struct DietView: View {
     private var todaysSaturatedFat: Double { todaysFoodEntries.reduce(0) { $0 + $1.totalSaturatedFat } }
 
     /// True only when at least one tracked food has micronutrient data
+    @ViewBuilder
+    private func goalAlignedSection(food: FoodItem, goal: FitnessGoal) -> some View {
+        let score = food.goalAlignedScore(for: goal)
+        let grade = food.goalAlignedGrade(for: goal)
+        let gradeCol: Color = {
+            switch grade {
+            case "A": return .green
+            case "B": return Color(red: 0.4, green: 0.8, blue: 0.2)
+            case "C": return .yellow
+            case "D": return .orange
+            default: return .red
+            }
+        }()
+
+        VStack(alignment: .leading, spacing: 10) {
+            Label("GOAL-ALIGNED SCORE", systemImage: "target")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 12) {
+                // Grade badge
+                ZStack {
+                    Circle()
+                        .fill(gradeCol.opacity(0.18))
+                        .frame(width: 52, height: 52)
+                    Text(grade)
+                        .font(.system(size: 24, weight: .black, design: .rounded))
+                        .foregroundColor(gradeCol)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("For \(goal.rawValue.capitalized)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.primary)
+                    // Score bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.gray.opacity(0.2))
+                                .frame(height: 8)
+                            Capsule().fill(gradeCol)
+                                .frame(width: geo.size.width * CGFloat(score) / 100, height: 8)
+                        }
+                    }
+                    .frame(height: 8)
+                    Text("\(score)/100")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+
+                // NOVA badge if available
+                if food.novaGroup > 0 {
+                    VStack(spacing: 2) {
+                        Text("NOVA")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Text("\(food.novaGroup)")
+                            .font(.system(size: 18, weight: .black, design: .rounded))
+                            .foregroundColor(food.novaGroup == 4 ? .red : food.novaGroup == 3 ? .orange : .green)
+                        Text(["", "Unprocessed", "Culinary", "Processed", "Ultra"][food.novaGroup])
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(width: 58)
+                    .padding(6)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
     private var hasMicroData: Bool {
         todaysPotassium + todaysCalcium + todaysIron + todaysMagnesium +
         todaysVitaminC + todaysVitaminB12 + todaysVitaminD > 0
@@ -586,25 +696,48 @@ struct DietView: View {
             }
             
             if !mealEntries.isEmpty {
-                // Show actual foods
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(mealEntries.prefix(3), id: \.id) { entry in
+                // List is required for .swipeActions to work
+                List {
+                    ForEach(mealEntries, id: \.id) { entry in
                         foodEntryRow(entry: entry)
-                    }
-                    if mealEntries.count > 3 {
-                        Text("+ \(mealEntries.count - 3) more items")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowSeparator(.hidden)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                entryForNutrition = entry
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if !isDateLocked {
+                                    Button(role: .destructive) {
+                                        deleteFoodEntry(entry)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    Button {
+                                        entryToEdit = entry
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    .tint(.orange)
+                                }
+                            }
                     }
                 }
-                
-                Button("Add Food") {
-                    selectedMealForAdding = mealType
-                    showingAddFood = true
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(mealEntries.count) * 62)
+
+                if !isDateLocked {
+                    Button("Add Food") {
+                        selectedMealForAdding = mealType
+                        showingAddFood = true
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.blue)
+                    .padding(.top, 4)
                 }
-                .font(.subheadline)
-                .foregroundColor(.blue)
-            } else {
+            } else if !isDateLocked {
                 Button("Add Food") {
                     selectedMealForAdding = mealType
                     showingAddFood = true
@@ -618,6 +751,12 @@ struct DietView: View {
                         .fill(color.opacity(0.1))
                         .stroke(color.opacity(0.3), lineWidth: 1)
                 )
+            } else {
+                Text("No meals logged")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
             }
         }
         .padding()
@@ -629,19 +768,59 @@ struct DietView: View {
     }
     
     private func foodEntryRow(entry: FoodEntry) -> some View {
-        HStack {
-            Text(entry.foodItem?.name ?? "Unknown")
-                .font(.subheadline)
-                .foregroundColor(.primary)
-                .lineLimit(1)
-            
+        HStack(spacing: 12) {
+            Image(systemName: "fork.knife")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.foodItem?.name ?? "Unknown")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    foodMacroChip(label: "P", value: entry.totalProtein, color: .blue)
+                    foodMacroChip(label: "C", value: entry.totalCarbs, color: .orange)
+                    foodMacroChip(label: "F", value: entry.totalFat, color: .yellow)
+                    if entry.quantity != 1 {
+                        Text("\(Int(entry.quantity))\(entry.unit == .grams ? "g" : "×")")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
             Spacer()
-            
-            Text("\(Int(entry.totalCalories)) cal")
-                .font(.caption.weight(.medium))
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(Int(entry.totalCalories))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                Text("kcal")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.5))
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+    }
+
+    private func foodMacroChip(label: String, value: Double, color: Color) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundColor(color)
+            Text("\(Int(value))g")
+                .font(.caption2)
                 .foregroundColor(.secondary)
         }
-        .padding(.vertical, 4)
     }
     
     // MARK: - Water Tracking
@@ -663,11 +842,10 @@ struct DietView: View {
                 ForEach(0..<waterGoal, id: \.self) { index in
                     Button {
                         if index < waterGlasses {
-                            // Remove water
+                            // Remove water — set directly, no stat bonus for removal
                             profile.waterIntake = index
                         } else {
-                            // Add water
-                            profile.waterIntake = index + 1
+                            // Add water — recordWaterIntake increments and awards stats
                             profile.recordWaterIntake()
                         }
                         try? context.save()
@@ -675,6 +853,9 @@ struct DietView: View {
                         Image(systemName: "drop.fill")
                             .foregroundColor(index < waterGlasses ? .blue : .gray.opacity(0.3))
                             .font(.title2)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 6)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -700,6 +881,11 @@ struct DietView: View {
     }
 
     // MARK: - Copy Yesterday's Meals
+    private func deleteFoodEntry(_ entry: FoodEntry) {
+        context.delete(entry)
+        try? context.save()
+    }
+
     private func copyYesterdaysMeals() {
         let cal = Calendar.current
         guard let yesterday = cal.date(byAdding: .day, value: -1, to: selectedDate) else { return }
@@ -719,6 +905,446 @@ struct DietView: View {
             context.insert(copy)
         }
         try? context.save()
+    }
+}
+
+// MARK: - Food Entry Edit Sheet
+
+/// Allows the user to change quantity/unit of an existing food entry, or replace the
+/// food entirely by opening the food search picker.
+struct FoodEntryEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+
+    let entry: FoodEntry
+
+    @State private var quantity: String = ""
+    @State private var selectedUnit: FoodUnit = .grams
+    @State private var showingReplace = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Food") {
+                    HStack {
+                        Text(entry.foodItem?.name ?? "Unknown")
+                            .font(.headline)
+                        Spacer()
+                        Button("Replace") {
+                            showingReplace = true
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    HStack {
+                        Text("Per \(Int(entry.quantity)) \(entry.unit.rawValue)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(Int(entry.totalCalories)) kcal · \(String(format: "%.0f", entry.totalProtein))g P · \(String(format: "%.0f", entry.totalCarbs))g C · \(String(format: "%.0f", entry.totalFat))g F")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+                    .opacity(entry.totalCalories > 0 ? 1 : 0.5)
+                }
+
+                Section("Amount") {
+                    HStack {
+                        TextField("Quantity", text: $quantity)
+                            .keyboardType(.decimalPad)
+                        Divider()
+                        Picker("Unit", selection: $selectedUnit) {
+                            ForEach(FoodUnit.allCases, id: \.self) { unit in
+                                Text(unit.rawValue).tag(unit)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+
+                Section {
+                    Button("Save Changes", action: save)
+                        .frame(maxWidth: .infinity)
+                        .foregroundColor(.white)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(.init())
+                        .padding(.horizontal)
+                }
+            }
+            .navigationTitle("Edit Entry")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Delete", role: .destructive) {
+                        context.delete(entry)
+                        try? context.save()
+                        dismiss()
+                    }
+                    .foregroundColor(.red)
+                }
+            }
+            .onAppear {
+                quantity = String(format: "%.0f", entry.quantity)
+                selectedUnit = entry.unit
+            }
+            .sheet(isPresented: $showingReplace) {
+                ReplaceEntryPicker(entry: entry, onReplaced: { dismiss() })
+            }
+        }
+    }
+
+    private func save() {
+        let newQty = Double(quantity) ?? entry.quantity
+        entry.quantity = newQty
+        entry.unit = selectedUnit
+        try? context.save()
+        dismiss()
+    }
+}
+
+/// Opens the existing food search UI so the user can pick a replacement item.
+/// On selection the original FoodEntry is updated in-place.
+struct ReplaceEntryPicker: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @Query(sort: \FoodItem.name) private var allFoods: [FoodItem]
+
+    let entry: FoodEntry
+    let onReplaced: () -> Void
+
+    @State private var searchText = ""
+
+    private var filtered: [FoodItem] {
+        if searchText.isEmpty { return Array(allFoods.prefix(40)) }
+        return allFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(filtered, id: \.id) { food in
+                    Button {
+                        entry.foodItem = food
+                        try? context.save()
+                        onReplaced()
+                        dismiss()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(food.name)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            Text("\(Int(food.caloriesPerServing)) kcal · \(String(format: "%.0f", food.protein))g P · \(String(format: "%.0f", food.carbohydrates))g C · \(String(format: "%.0f", food.fat))g F")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search foods…")
+            .navigationTitle("Replace Food")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Food Nutrition Sheet
+
+struct FoodNutritionSheet: View {
+    let entry: FoodEntry
+    var fitnessGoal: FitnessGoal? = nil
+    @Environment(\.dismiss) private var dismiss
+
+    private var food: FoodItem? { entry.foodItem }
+    private var qty: Double { entry.quantity }
+    private var gradeColor: Color {
+        switch food?.nutritionGrade ?? "C" {
+        case "A": return .green
+        case "B": return Color(red: 0.4, green: 0.8, blue: 0.2)
+        case "C": return .yellow
+        case "D": return .orange
+        default:  return .red
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Hero header
+                    ZStack {
+                        LinearGradient(
+                            colors: [gradeColor.opacity(0.25), gradeColor.opacity(0.05)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                        VStack(spacing: 10) {
+                            ZStack {
+                                Circle()
+                                    .fill(gradeColor.opacity(0.2))
+                                    .frame(width: 80, height: 80)
+                                Text(food?.nutritionGrade ?? "?")
+                                    .font(.system(size: 38, weight: .black, design: .rounded))
+                                    .foregroundColor(gradeColor)
+                            }
+                            .padding(.top, 16)
+
+                            Text(food?.name ?? "Unknown Food")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.center)
+
+                            if let brand = food?.brand, !brand.isEmpty {
+                                Text(brand)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Text("Nutrition Grade")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .padding(.bottom, 24)
+                        }
+                        .padding(.horizontal)
+                    }
+
+                    VStack(spacing: 20) {
+                        // Serving info
+                        servingSection
+
+                        // Macros
+                        macroSection
+
+                        // Goal-Aligned Score (if profile goal is available)
+                        if let goal = fitnessGoal, let f = food {
+                            goalAlignedSection(food: f, goal: goal)
+                        }
+
+                        // Micros (only if any data available)
+                        if hasMicroData { microSection }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Nutrition Facts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var servingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("SERVING", systemImage: "scalemass.fill")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 12) {
+                NutritionCell(label: "Amount", value: "\(Int(qty)) \(entry.unit.rawValue)", color: .blue)
+                NutritionCell(label: "Calories", value: "\(Int(entry.totalCalories))", color: .orange)
+                if let s = food?.servingSize, s > 0 {
+                    NutritionCell(label: "Serving Size", value: "\(Int(s))g", color: .secondary)
+                }
+            }
+        }
+    }
+
+    private var macroSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("MACRONUTRIENTS", systemImage: "chart.pie.fill")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                NutritionCell(label: "Protein", value: "\(String(format: "%.1f", entry.totalProtein))g", color: .blue)
+                NutritionCell(label: "Carbs", value: "\(String(format: "%.1f", entry.totalCarbs))g", color: .green)
+                NutritionCell(label: "Fat", value: "\(String(format: "%.1f", entry.totalFat))g", color: .yellow)
+                if let f = food?.fiber, f > 0 {
+                    NutritionCell(label: "Fiber", value: "\(String(format: "%.1f", scaledValue(f)))g", color: .mint)
+                }
+                if let s = food?.sugar, s > 0 {
+                    NutritionCell(label: "Sugar", value: "\(String(format: "%.1f", scaledValue(s)))g", color: .pink)
+                }
+                if let s = food?.saturatedFatG, s > 0 {
+                    NutritionCell(label: "Sat. Fat", value: "\(String(format: "%.1f", scaledValue(s)))g", color: .red)
+                }
+            }
+        }
+    }
+
+    private var microSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("MICRONUTRIENTS", systemImage: "atom")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                if let v = food?.sodium, v > 0 {
+                    NutritionCell(label: "Sodium", value: "\(Int(scaledValue(v)))mg", color: .orange)
+                }
+                if let v = food?.potassiumMg, v > 0 {
+                    NutritionCell(label: "Potassium", value: "\(Int(scaledValue(v)))mg", color: .purple)
+                }
+                if let v = food?.calciumMg, v > 0 {
+                    NutritionCell(label: "Calcium", value: "\(Int(scaledValue(v)))mg", color: .teal)
+                }
+                if let v = food?.ironMg, v > 0 {
+                    NutritionCell(label: "Iron", value: "\(String(format: "%.1f", scaledValue(v)))mg", color: .red)
+                }
+                if let v = food?.magnesiumMg, v > 0 {
+                    NutritionCell(label: "Magnesium", value: "\(Int(scaledValue(v)))mg", color: .green)
+                }
+                if let v = food?.zincMg, v > 0 {
+                    NutritionCell(label: "Zinc", value: "\(String(format: "%.1f", scaledValue(v)))mg", color: .cyan)
+                }
+                if let v = food?.vitaminCMg, v > 0 {
+                    NutritionCell(label: "Vitamin C", value: "\(Int(scaledValue(v)))mg", color: .yellow)
+                }
+                if let v = food?.vitaminB12Mcg, v > 0 {
+                    NutritionCell(label: "B12", value: "\(String(format: "%.1f", scaledValue(v)))mcg", color: .indigo)
+                }
+                if let v = food?.vitaminDMcg, v > 0 {
+                    NutritionCell(label: "Vitamin D", value: "\(String(format: "%.1f", scaledValue(v)))mcg", color: .orange)
+                }
+                if let v = food?.cholesterolMg, v > 0 {
+                    NutritionCell(label: "Cholesterol", value: "\(Int(scaledValue(v)))mg", color: .red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func goalAlignedSection(food: FoodItem, goal: FitnessGoal) -> some View {
+        let score = food.goalAlignedScore(for: goal)
+        let grade = food.goalAlignedGrade(for: goal)
+        let gradeCol: Color = {
+            switch grade {
+            case "A": return .green
+            case "B": return Color(red: 0.4, green: 0.8, blue: 0.2)
+            case "C": return .yellow
+            case "D": return .orange
+            default: return .red
+            }
+        }()
+
+        VStack(alignment: .leading, spacing: 10) {
+            Label("GOAL-ALIGNED SCORE", systemImage: "target")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 12) {
+                // Grade badge
+                ZStack {
+                    Circle()
+                        .fill(gradeCol.opacity(0.18))
+                        .frame(width: 52, height: 52)
+                    Text(grade)
+                        .font(.system(size: 24, weight: .black, design: .rounded))
+                        .foregroundColor(gradeCol)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("For \(goal.rawValue.capitalized)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.primary)
+                    // Score bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.gray.opacity(0.2))
+                                .frame(height: 8)
+                            Capsule().fill(gradeCol)
+                                .frame(width: geo.size.width * CGFloat(score) / 100, height: 8)
+                        }
+                    }
+                    .frame(height: 8)
+                    Text("\(score)/100")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+
+                // NOVA badge if available
+                if food.novaGroup > 0 {
+                    VStack(spacing: 2) {
+                        Text("NOVA")
+                            .font(.system(size: 8, weight: .black, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Text("\(food.novaGroup)")
+                            .font(.system(size: 18, weight: .black, design: .rounded))
+                            .foregroundColor(food.novaGroup == 4 ? .red : food.novaGroup == 3 ? .orange : .green)
+                        Text(["", "Unprocessed", "Culinary", "Processed", "Ultra"][food.novaGroup])
+                            .font(.system(size: 7, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(width: 58)
+                    .padding(6)
+                    .background(Color.gray.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private var hasMicroData: Bool {
+        guard let f = food else { return false }
+        return f.sodium > 0 || f.potassiumMg > 0 || f.calciumMg > 0 || f.ironMg > 0 ||
+               f.magnesiumMg > 0 || f.zincMg > 0 || f.vitaminCMg > 0 ||
+               f.vitaminB12Mcg > 0 || f.vitaminDMcg > 0 || f.cholesterolMg > 0
+    }
+
+    /// Scale a per-100g value to the actual quantity logged.
+    private func scaledValue(_ per100g: Double) -> Double {
+        let grams: Double
+        switch entry.unit {
+        case .grams:        grams = qty
+        case .servings:     grams = qty * (food?.servingSize ?? 100)
+        case .cups:         grams = qty * 240
+        case .tablespoons:  grams = qty * 15
+        case .teaspoons:    grams = qty * 5
+        case .ounces:       grams = qty * 28.35
+        case .pounds:       grams = qty * 453.6
+        case .milliliters:  grams = qty // water density ≈ 1g/ml
+        case .liters:       grams = qty * 1000
+        case .pieces:       grams = qty * (food?.servingSize ?? 100)
+        }
+        return per100g * grams / 100
+    }
+}
+
+struct NutritionCell: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(color.opacity(0.1))
+        )
     }
 }
 
@@ -1066,22 +1692,30 @@ struct AddFoodView: View {
                                 }
                             }
 
-                            // Remote search results from Open Food Facts
+                            // Remote search results (USDA + Open Food Facts)
                             if showingRemoteSection {
-                                HStack {
-                                    Text("FROM OPEN FOOD FACTS")
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
+                                HStack(spacing: 8) {
+                                    let hasUSDA = remoteSearchResults.contains { $0.dataSource == "USDA" }
+                                    let hasOFF  = remoteSearchResults.contains { $0.dataSource == "OpenFoodFacts" }
                                     Image(systemName: "network")
                                         .font(.caption2)
                                         .foregroundColor(.secondary)
+                                    if hasUSDA && hasOFF {
+                                        Text("USDA + OPEN FOOD FACTS")
+                                    } else if hasUSDA {
+                                        Text("USDA VERIFIED")
+                                    } else {
+                                        Text("OPEN FOOD FACTS")
+                                    }
                                 }
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
                                 .padding(.top, 8)
 
                                 ForEach(remoteSearchResults, id: \.id) { food in
-                                    FoodItemRow(food: food) { quantity, unit in
+                                    FoodItemRow(food: food, showSourceBadge: true) { quantity, unit in
                                         // Save to local DB on first use
                                         context.insert(food)
                                         try? context.save()
@@ -1290,6 +1924,35 @@ struct AddFoodView: View {
 // MARK: - Nutrition Grade Badge
 
 /// Yuka-style A/B/C/D/F grade badge for a food item.
+// MARK: - Food Source Badge
+
+struct FoodSourceBadge: View {
+    let source: String
+
+    private var label: String {
+        switch source {
+        case "USDA":          return "USDA"
+        case "OpenFoodFacts": return "OFF"
+        default:              return source.prefix(4).uppercased()
+        }
+    }
+
+    private var badgeColor: Color {
+        source == "USDA" ? .blue : .secondary
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 8, weight: .black, design: .monospaced))
+            .foregroundColor(.white)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(badgeColor.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .help(source == "USDA" ? "USDA FoodData Central — verified data" : "Open Food Facts — community data")
+    }
+}
+
 struct NutritionGradeBadge: View {
     let grade: String
     let score: Int
@@ -1347,6 +2010,23 @@ struct IngredientSafetyFlags: View {
         if food.category == .protein && food.protein < 10 {
             result.append(Flag(icon: "arrow.down.circle.fill", label: "Low Protein", color: .purple))
         }
+        // NOVA classification (ultra-processed food warning)
+        if food.novaGroup == 4 {
+            result.append(Flag(icon: "bolt.trianglebadge.exclamationmark.fill", label: "Ultra-Processed", color: .red))
+        } else if food.novaGroup == 3 {
+            result.append(Flag(icon: "staroflife.fill", label: "Processed", color: .orange))
+        }
+        // Additive risk
+        switch food.additiveRiskLevel {
+        case 3:
+            result.append(Flag(icon: "flask.fill", label: "High Additives", color: .red))
+        case 2:
+            result.append(Flag(icon: "flask.fill", label: "Some Additives", color: .orange))
+        case 1:
+            result.append(Flag(icon: "flask.fill", label: "Few Additives", color: .yellow))
+        default:
+            break
+        }
         return result
     }
 
@@ -1374,6 +2054,7 @@ struct IngredientSafetyFlags: View {
 
 struct FoodItemRow: View {
     let food: FoodItem
+    var showSourceBadge: Bool = false
     let onAdd: (Double, FoodUnit) -> Void
 
     @Environment(\.modelContext) private var context
@@ -1408,6 +2089,11 @@ struct FoodItemRow: View {
                             Image(systemName: "checkmark.seal.fill")
                                 .font(.caption)
                                 .foregroundColor(.green)
+                        }
+
+                        // Data source badge
+                        if showSourceBadge && !food.dataSource.isEmpty {
+                            FoodSourceBadge(source: food.dataSource)
                         }
                     }
 

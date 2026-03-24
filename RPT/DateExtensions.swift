@@ -11,3 +11,12 @@ extension Date {
         return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay())!
     }
 }
+
+extension Calendar {
+    /// True when `date` is strictly after today (start-of-day comparison).
+    func isDateInFuture(_ date: Date) -> Bool {
+        let todayStart = startOfDay(for: Date())
+        let dateStart  = startOfDay(for: date)
+        return dateStart > todayStart
+    }
+}

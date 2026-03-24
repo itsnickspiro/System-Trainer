@@ -93,10 +93,26 @@ final class Profile {
     /// Empty string means no plan is active — use the generic quest/workout system.
     var activePlanID: String = ""
 
+    /// Whether the user prefers metric (kg/km) or imperial (lbs/miles) units.
+    /// Defaults to the device locale on first launch.
+    var useMetric: Bool = (Locale.current.measurementSystem == .metric)
+
     // Penalty System State
     /// True when the player has an active exemption protecting against the midnight reset.
     var hasActiveExemption: Bool = false
     var exemptionExpiresAt: Date?
+
+    // Recovery Mode — activated automatically after a Level 1 hardcore reset
+    /// True when the player is in the Rehabilitation Arc (3-day post-reset recovery window).
+    var isInRecovery: Bool = false
+    /// Days remaining in the Rehabilitation Arc (counts down 3 → 2 → 1 → 0, then clears).
+    var recoveryDaysRemaining: Int = 0
+    /// Date of the most recent hardcore reset — used for Recovery Arc badge display.
+    var lastResetDate: Date?
+
+    // Earnable Exemption Passes (stored on profile for quick access, mirrored to InventoryItem)
+    /// Number of earned Hermit's Miracle Seeds in the player's possession (max 3).
+    var exemptionPassCount: Int = 0
 
     // Double XP state
     var doubleXPActiveUntil: Date?
@@ -266,6 +282,8 @@ final class Profile {
                 currentStreak += 1
                 // Boost discipline for maintaining streak
                 adjustStat(\.discipline, by: 1.5)
+                // Award Exemption Pass on 7-day streak milestones
+                checkAndAwardStreakPass()
             } else {
                 currentStreak = 1
                 // Slight discipline penalty for breaking streak
@@ -281,14 +299,22 @@ final class Profile {
     func applyHardcoreResetIfNeeded(now: Date = Date()) {
         guard let deadline = hardcoreResetDeadline, now >= deadline else { return }
 
-        // Check for active exemption item
-        if hasActiveExemption {
-            if let expiry = exemptionExpiresAt, now < expiry {
-                // Exemption pass still valid — defer deadline by 24 hours
+        // Check for active exemption item (via profile flag or pass count)
+        if hasActiveExemption || exemptionPassCount > 0 {
+            let exemptionValid = hasActiveExemption
+                ? (exemptionExpiresAt.map { now < $0 } ?? false)
+                : true // pass count ≥ 1 is always valid
+            if exemptionValid {
+                if exemptionPassCount > 0 {
+                    exemptionPassCount -= 1
+                }
+                hasActiveExemption = false
+                exemptionExpiresAt = nil
+                // Defer deadline by 24 hours — they consumed a pass
                 hardcoreResetDeadline = Calendar.current.date(byAdding: .day, value: 1, to: now)
                 return
             }
-            // Expired exemption — clear flag and apply reset
+            // Expired exemption flag — clear and fall through to reset
             hasActiveExemption = false
             exemptionExpiresAt = nil
         }
@@ -303,6 +329,33 @@ final class Profile {
         health = max(20.0, health - 30.0)
         energy = max(10.0, energy - 40.0)
         discipline = max(10.0, discipline - 50.0)
+
+        // Activate the Rehabilitation Arc — 3 days of easier quests
+        isInRecovery = true
+        recoveryDaysRemaining = 3
+        lastResetDate = now
+    }
+
+    /// Called once per day from updateDailyStats() — advances or clears the Rehabilitation Arc.
+    func advanceRecoveryIfNeeded() {
+        guard isInRecovery else { return }
+        recoveryDaysRemaining = max(0, recoveryDaysRemaining - 1)
+        if recoveryDaysRemaining == 0 {
+            isInRecovery = false
+        }
+    }
+
+    /// Checks if the player has earned a new Exemption Pass milestone and awards one if so.
+    /// Call after any streak increment. Max 3 passes stored.
+    /// Returns true if a pass was awarded this call.
+    @discardableResult
+    func checkAndAwardStreakPass() -> Bool {
+        // Award a pass every 7 consecutive days (7, 14, 21, …), cap at 3
+        guard currentStreak > 0,
+              currentStreak % 7 == 0,
+              exemptionPassCount < 3 else { return false }
+        exemptionPassCount += 1
+        return true
     }
 
     /// Consume an exemption item from inventory and mark the profile as protected.
@@ -331,6 +384,9 @@ final class Profile {
         
         // Reset daily counters
         resetDailyCounters()
+
+        // Advance Rehabilitation Arc countdown
+        advanceRecoveryIfNeeded()
         
         lastStatUpdate = now
     }
@@ -826,10 +882,80 @@ final class FoodItem {
         }
     }
 
+    /// Returns a 0–100 score aligned to the player's fitness goal.
+    /// Weights protein, carbs, and fat differently based on the goal.
+    func goalAlignedScore(for goal: FitnessGoal) -> Int {
+        guard caloriesPer100g > 0 else { return nutritionScore }
+        let kcal = max(1, caloriesPer100g)
+
+        // Base from objective score
+        var score = Double(nutritionScore)
+
+        switch goal {
+        case .buildMuscle:
+            // Reward high protein density; penalise saturated fat
+            let proteinDensity = min(20.0, protein / kcal * 100 * 2.0)
+            let satPenalty = min(10.0, saturatedFatG / kcal * 100 * 2.0)
+            score += proteinDensity - satPenalty
+
+        case .loseFat:
+            // Reward fiber and protein; penalise sugar and total calories
+            let fiberBonus = min(15.0, fiber / kcal * 100 * 3.0)
+            let proteinBonus = min(10.0, protein / kcal * 100 * 1.0)
+            let sugarPenalty = min(20.0, sugar / kcal * 100 * 3.0)
+            let calDensityPenalty = caloriesPer100g > 300 ? 10.0 : 0.0
+            score += fiberBonus + proteinBonus - sugarPenalty - calDensityPenalty
+
+        case .endurance:
+            // Reward complex carbs and low sugar; mild protein bonus
+            let carbBonus = min(15.0, carbohydrates / kcal * 100 * 1.0)
+            let sugarPenalty = min(10.0, sugar / kcal * 100 * 2.0)
+            score += carbBonus - sugarPenalty
+
+        case .generalHealth:
+            // Reward micronutrient density; penalise sodium and sat fat
+            let microBonus = min(15.0, (potassiumMg + calciumMg + ironMg) / kcal * 0.1)
+            let sodiumPenalty = min(10.0, sodium / kcal * 0.2)
+            score += microBonus - sodiumPenalty
+        }
+
+        // NOVA penalty: ultra-processed foods lose 10–20 points
+        if novaGroup == 4 { score -= 20 }
+        else if novaGroup == 3 { score -= 10 }
+
+        // Additive risk penalty
+        score -= Double(additiveRiskLevel) * 5
+
+        return max(0, min(100, Int(score.rounded())))
+    }
+
+    /// Goal-aligned grade letter.
+    func goalAlignedGrade(for goal: FitnessGoal) -> String {
+        let s = goalAlignedScore(for: goal)
+        switch s {
+        case 80...: return "A"
+        case 65..<80: return "B"
+        case 50..<65: return "C"
+        case 35..<50: return "D"
+        default:      return "F"
+        }
+    }
+
     // Categories
     var category: FoodCategory = FoodCategory.other
     var isCustom: Bool = true
     var isVerified: Bool = false
+
+    /// Source of the nutrition data: "USDA", "OpenFoodFacts", "User", or "" (unknown).
+    var dataSource: String = ""
+
+    /// NOVA food processing group (1–4). 0 = unknown.
+    /// 1=Unprocessed, 2=Culinary ingredients, 3=Processed, 4=Ultra-processed
+    var novaGroup: Int = 0
+
+    /// Additive risk level from Open Food Facts ingredient analysis.
+    /// 0=none/unknown, 1=low risk, 2=moderate risk, 3=high risk
+    var additiveRiskLevel: Int = 0
 
     var createdAt: Date = Date()
     var lastUsed: Date?

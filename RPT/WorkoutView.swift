@@ -43,56 +43,133 @@ struct WorkoutView: View {
     @State private var searchQuery = ""
     @State private var exercises: [Exercise] = []
     @State private var isSearching = false
+    @State private var searchError: String? = nil
     @State private var showingWorkoutLogger = false
     @State private var workoutDuration = 30 // minutes
     @State private var showingPlanPicker = false
     @State private var showingProgress = false
+    @State private var showingWeeklySchedule = false
+    @State private var selectedDay = Date()
+    @State private var sessionToEdit: WorkoutSession? = nil
+    @State private var showingPlanWorkoutLogger = false
+    @State private var planLoggerExercises: [LoggedExerciseEntry] = []
+    @State private var planLoggerRoutineName: String = ""
+    @State private var planLoggerDuration: Int = 45
+    @State private var selectedPlannedExercise: PlannedExerciseDetail? = nil
+    /// Exercises queued from the database to add to a new workout
+    @State private var pendingExercises: [LoggedExerciseEntry] = []
+    @State private var showingDatabaseLogger = false
     /// Debounce task so we don't fire a network call on every keystroke
     @State private var searchDebounceTask: Task<Void, Never>? = nil
 
+    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var allSessions: [WorkoutSession]
+
     private var profile: Profile? { profiles.first }
+    private var useMetric: Bool { profile?.useMetric ?? true }
+
+    /// Format a kg weight value per user preference
+    private func weightDisplay(_ kg: Double) -> String {
+        useMetric ? String(format: "%.0f kg", kg) : String(format: "%.0f lbs", kg * 2.20462)
+    }
+
+    /// True when the selected day is not today — sessions are view-only
+    private var isDayLocked: Bool {
+        !Calendar.current.isDateInToday(selectedDay)
+    }
+
+    /// Sessions that started on the selected day
+    private var sessionsForSelectedDay: [WorkoutSession] {
+        allSessions.filter {
+            Calendar.current.isDate($0.startedAt, inSameDayAs: selectedDay)
+        }
+    }
+
+    /// The plan day index for the selected day (0 = Monday)
+    private var planDayIndex: Int {
+        let weekday = Calendar.current.component(.weekday, from: selectedDay)
+        return (weekday + 5) % 7
+    }
 
     private var activePlan: AnimeWorkoutPlan? {
         guard let id = profile?.activePlanID, !id.isEmpty else { return nil }
-        return AnimeWorkoutPlans.plan(id: id)
+        return AnimeWorkoutPlanService.shared.plan(id: id)
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Active Program Banner (shown when a plan is selected)
-                    activeProgramSection
-
-                    // Workout Type Selector
-                    workoutTypeSelector
-
-                    // Quick Start Workout
-                    quickStartSection
-
-                    // Exercise Search
-                    exerciseSearchSection
-
-                    // Exercise Results
-                    if isSearching {
-                        ProgressView("Searching exercises...")
-                            .padding()
-                    } else if !exercises.isEmpty {
-                        exerciseResults
+            VStack(spacing: 0) {
+                // Pinned header: title row + week day selector
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Training")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(.primary)
+                        Spacer()
+                        Button {
+                            showingProgress = true
+                        } label: {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.system(size: 18))
+                                .foregroundColor(.primary)
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+
+                    WeekScroller(selectedDay: $selectedDay)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal)
                 }
-                .padding()
+                .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
+
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Active Program Banner (shown when a plan is selected)
+                        activeProgramSection
+
+                        // Workout Type Selector
+                        workoutTypeSelector
+
+                        // Quick Start: only show when no active plan is set
+                        // (the day plan section has its own Start button when a plan is active)
+                        if activePlan == nil {
+                            quickStartSection
+                        }
+
+                        // Today's (or selected day's) logged sessions
+                        sessionsSection
+
+                        // Selected day's plan from active program
+                        if let plan = activePlan {
+                            dayPlanSection(plan: plan)
+                        }
+
+                        // Exercise Search
+                        exerciseSearchSection
+
+                        // Exercise Results
+                        if isSearching {
+                            ProgressView("Loading exercises...")
+                                .padding(.vertical, 40)
+                        } else if let error = searchError {
+                            exerciseErrorView(message: error)
+                        } else if exercises.isEmpty {
+                            exerciseEmptyState
+                        } else {
+                            exerciseResults
+                        }
+                    }
+                    .padding()
+                }
             }
             .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
-            .navigationTitle("Training")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingProgress = true
-                    } label: {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                    }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
+            .onAppear {
+                if exercises.isEmpty {
+                    searchExercises(type: selectedWorkoutType.apiType)
                 }
             }
             .sheet(isPresented: $showingProgress) {
@@ -125,6 +202,44 @@ struct WorkoutView: View {
                         p.activePlanID = newID
                         try? context.save()
                     }
+                )
+            }
+            .onAppear {
+                // Auto-load exercises for the selected workout type on first open
+                if exercises.isEmpty && !isSearching {
+                    searchExercises(type: selectedWorkoutType.apiType)
+                }
+            }
+            .onChange(of: selectedWorkoutType) { _, newType in
+                // Reload exercises when the user switches workout type
+                searchQuery = ""
+                searchExercises(type: newType.apiType)
+            }
+            .sheet(isPresented: $showingWeeklySchedule) {
+                if let plan = activePlan {
+                    WeeklyScheduleView(plan: plan)
+                }
+            }
+            .sheet(item: $sessionToEdit) { session in
+                WorkoutSessionEditView(session: session)
+            }
+            .sheet(isPresented: $showingPlanWorkoutLogger) {
+                WorkoutLoggerView(
+                    workoutType: selectedWorkoutType,
+                    duration: $planLoggerDuration,
+                    preloadedExercises: planLoggerExercises,
+                    routineName: planLoggerRoutineName
+                )
+            }
+            .sheet(item: $selectedPlannedExercise) { detail in
+                PlannedExerciseDetailSheet(detail: detail, accentColor: detail.accentColor)
+            }
+            .sheet(isPresented: $showingDatabaseLogger, onDismiss: { pendingExercises = [] }) {
+                WorkoutLoggerView(
+                    workoutType: selectedWorkoutType,
+                    duration: $workoutDuration,
+                    preloadedExercises: pendingExercises,
+                    routineName: ""
                 )
             }
         }
@@ -198,7 +313,8 @@ struct WorkoutView: View {
                     Text(plan.tagline)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Text(plan.difficulty.rawValue.capitalized)
@@ -238,13 +354,9 @@ struct WorkoutView: View {
                             Text("\(ex.sets)×\(ex.reps) \(ex.name)")
                                 .font(.caption.weight(.medium))
                                 .foregroundColor(.primary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer()
-                            if !ex.notes.isEmpty {
-                                Text(ex.notes)
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
                         }
                     }
                     if dayPlan.exercises.count > 4 {
@@ -254,6 +366,25 @@ struct WorkoutView: View {
                     }
                 }
             }
+
+            Divider()
+
+            // Weekly schedule button
+            Button(action: { showingWeeklySchedule = true }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 13))
+                        .foregroundColor(plan.accentColor)
+                    Text("View Full 7-Day Schedule")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(plan.accentColor)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
         }
         .padding()
         .background(
@@ -265,41 +396,41 @@ struct WorkoutView: View {
 
     private var workoutTypeSelector: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("WORKOUT TYPE")
+            Text("BROWSE BY TYPE")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundColor(.secondary)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ForEach(WorkoutType.allCases, id: \.self) { type in
-                    workoutTypeCard(type)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(WorkoutType.allCases, id: \.self) { type in
+                        workoutTypeChip(type)
+                    }
                 }
+                .padding(.horizontal, 2)
             }
         }
     }
 
-    private func workoutTypeCard(_ type: WorkoutType) -> some View {
-        Button(action: {
+    private func workoutTypeChip(_ type: WorkoutType) -> some View {
+        let isSelected = selectedWorkoutType == type
+        return Button(action: {
             selectedWorkoutType = type
-            // Auto-search for this type
+            searchQuery = ""
             searchExercises(type: type.apiType)
         }) {
-            VStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: type.filledIcon)
-                    .font(.system(size: 32))
-                    .foregroundColor(selectedWorkoutType == type ? .white : type.uiColor)
-
+                    .font(.system(size: 15, weight: .semibold))
                 Text(type.displayName)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(selectedWorkoutType == type ? .white : .primary)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            .foregroundColor(isSelected ? .white : type.uiColor)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(selectedWorkoutType == type ?
-                          LinearGradient(colors: [type.uiColor, type.uiColor.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing) :
-                          LinearGradient(colors: [Color(.systemGray6), Color(.systemGray6)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    )
+                Capsule()
+                    .fill(isSelected ? type.uiColor : type.uiColor.opacity(0.12))
+                    .overlay(Capsule().stroke(type.uiColor.opacity(isSelected ? 0 : 0.4), lineWidth: 1))
             )
         }
         .buttonStyle(.plain)
@@ -343,6 +474,293 @@ struct WorkoutView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - Sessions for Selected Day
+
+    private var sessionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                let dayLabel = Calendar.current.isDateInToday(selectedDay)
+                    ? "TODAY'S SESSIONS"
+                    : selectedDay.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()).uppercased()
+                Text(dayLabel)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.secondary)
+
+                if isDayLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+
+            if sessionsForSelectedDay.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 20))
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text(isDayLocked ? "No sessions logged on this day" : "No sessions yet — start one above!")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
+            } else {
+                List {
+                    ForEach(sessionsForSelectedDay) { session in
+                        sessionRow(session)
+                            .listRowBackground(Color(.systemGray6))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowSeparatorTint(Color.gray.opacity(0.3))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if !isDayLocked {
+                                    Button(role: .destructive) {
+                                        deleteSession(session)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
+                            .swipeActions(edge: .leading) {
+                                if !isDayLocked {
+                                    Button {
+                                        sessionToEdit = session
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    .tint(.blue)
+                                }
+                            }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(sessionsForSelectedDay.count) * 70)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+            }
+        }
+    }
+
+    private func sessionRow(_ session: WorkoutSession) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.routineName.isEmpty ? "Workout" : session.routineName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                HStack(spacing: 10) {
+                    Label(session.durationDisplay, systemImage: "clock")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if session.totalVolumeKg > 0 {
+                        Label(weightDisplay(session.totalVolumeKg), systemImage: "scalemass")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                if session.xpAwarded > 0 {
+                    Text("+\(session.xpAwarded) XP")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.orange)
+                }
+                if !session.isComplete {
+                    Text("In Progress")
+                        .font(.caption2)
+                        .foregroundColor(.yellow)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(height: 70)
+    }
+
+    private func deleteSession(_ session: WorkoutSession) {
+        context.delete(session)
+        try? context.save()
+    }
+
+    // MARK: - Day Plan from Active Program
+
+    private func dayPlanSection(plan: AnimeWorkoutPlan) -> some View {
+        let dayPlan = plan.weeklySchedule[planDayIndex]
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                let dayLabel = Calendar.current.isDateInToday(selectedDay)
+                    ? "TODAY'S PLAN"
+                    : "\(selectedDay.formatted(.dateTime.weekday(.wide)).uppercased())'S PLAN"
+                Text(dayLabel)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(dayPlan.focus.uppercased())
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(plan.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(plan.accentColor.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+
+            if dayPlan.isRest {
+                HStack(spacing: 10) {
+                    Image(systemName: "moon.zzz.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.indigo)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Rest Day")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Active recovery: stretch, walk, and let adaptations compound.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding()
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(dayPlan.exercises.enumerated()), id: \.offset) { idx, ex in
+                        Button(action: {
+                            selectedPlannedExercise = PlannedExerciseDetail(
+                                exercise: ex,
+                                accentColor: plan.accentColor
+                            )
+                        }) {
+                            HStack(spacing: 10) {
+                                Text("\(idx + 1)")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(plan.accentColor)
+                                    .frame(width: 20, alignment: .center)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ex.name)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundColor(isDayLocked ? .secondary : .primary)
+                                    HStack(spacing: 6) {
+                                        Text("\(ex.sets) sets × \(ex.reps)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        if ex.restSeconds > 0 {
+                                            Text("· \(ex.restSeconds)s rest")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(plan.accentColor.opacity(0.7))
+                                if isDayLocked {
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary.opacity(0.5))
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if idx < dayPlan.exercises.count - 1 {
+                            Divider().padding(.leading, 44)
+                        }
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(plan.accentColor.opacity(0.25), lineWidth: 1)
+                )
+
+                if isDayLocked {
+                    Label(
+                        Calendar.current.isDateInFuture(selectedDay)
+                            ? "Future day — this plan unlocks when it arrives"
+                            : "Past day — read-only. Log workouts on today's date to earn XP.",
+                        systemImage: "lock.fill"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+                } else {
+                    // Today: show Start This Workout button
+                    Button(action: {
+                        startPlanWorkout(plan: plan, dayPlan: dayPlan)
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 18))
+                            Text("Start \(dayPlan.focus) Workout")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("+XP")
+                                .font(.caption.weight(.bold))
+                                .foregroundColor(.orange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.orange.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(plan.accentColor)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Converts a plan's DayPlan into LoggedExerciseEntry objects and opens the logger.
+    private func startPlanWorkout(plan: AnimeWorkoutPlan, dayPlan: AnimeWorkoutPlan.DayPlan) {
+        planLoggerRoutineName = "\(plan.character) — \(dayPlan.focus)"
+
+        // Detect workout type from the day's focus string
+        let focusLower = dayPlan.focus.lowercased()
+        if focusLower.contains("cardio") || focusLower.contains("run") || focusLower.contains("endurance") {
+            selectedWorkoutType = .cardio
+        } else if focusLower.contains("flex") || focusLower.contains("stretch") || focusLower.contains("yoga") || focusLower.contains("mobility") {
+            selectedWorkoutType = .flexibility
+        } else {
+            selectedWorkoutType = .strength
+        }
+
+        // Convert PlannedExercise → LoggedExerciseEntry
+        planLoggerExercises = dayPlan.exercises.map { ex in
+            var entry = LoggedExerciseEntry()
+            entry.name = ex.name
+            // Parse reps string — handle "10", "10-12", "Max", "100" etc.
+            if let repsInt = Int(ex.reps) {
+                entry.reps = repsInt
+            } else if ex.reps.contains("-"),
+                      let first = ex.reps.split(separator: "-").first,
+                      let repsInt = Int(first) {
+                entry.reps = repsInt
+            } else {
+                // "Max" or other non-numeric — default to 10
+                entry.reps = 10
+            }
+            entry.sets = ex.sets
+            entry.minutes = ex.restSeconds > 0 ? (ex.restSeconds / 60) + 1 : 10
+            return entry
+        }
+
+        planLoggerDuration = 45
+        showingPlanWorkoutLogger = true
     }
 
     private var exerciseSearchSection: some View {
@@ -395,18 +813,45 @@ struct WorkoutView: View {
 
     private var exerciseResults: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Pending exercises banner — tap to open the logger
+            if !pendingExercises.isEmpty {
+                Button(action: { showingDatabaseLogger = true }) {
+                    HStack {
+                        Image(systemName: "dumbbell.fill")
+                        Text("\(pendingExercises.count) exercise\(pendingExercises.count == 1 ? "" : "s") added — Start Workout")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(selectedWorkoutType.uiColor, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+            }
+
             Text("\(exercises.count) EXERCISES FOUND")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundColor(.secondary)
 
             ForEach(exercises) { exercise in
-                ExerciseCard(exercise: exercise, typeColor: selectedWorkoutType.uiColor)
+                ExerciseCard(
+                    exercise: exercise,
+                    typeColor: selectedWorkoutType.uiColor,
+                    onAdd: { ex in
+                        var entry = LoggedExerciseEntry()
+                        entry.name = ex.name
+                        pendingExercises.append(entry)
+                    }
+                )
             }
         }
     }
 
     private func searchExercises(type: String = "", query: String = "") {
         isSearching = true
+        searchError = nil
         exercises = []
 
         Task {
@@ -414,11 +859,9 @@ struct WorkoutView: View {
                 let results = try await ExercisesAPI.shared.fetchExercises(
                     type: type.isEmpty ? nil : type,
                     name: query.isEmpty ? nil : query,
-                    limit: 40  // fetch more so fuzzy re-ranking has enough to work with
+                    limit: 40
                 )
                 await MainActor.run {
-                    // If a text query was entered, fuzzy-sort the API results so
-                    // typos ("quafs") still surface the right exercises ("quads").
                     if query.isEmpty {
                         exercises = results
                     } else {
@@ -431,83 +874,153 @@ struct WorkoutView: View {
                             }
                         )
                     }
+                    // If API returned nothing, fall back to built-in database
+                    if exercises.isEmpty {
+                        exercises = BuiltInExercises.search(type: type, query: query)
+                    }
                     isSearching = false
                 }
             } catch {
-                print("Failed to fetch exercises: \(error)")
+                // API unavailable — use built-in offline database silently
                 await MainActor.run {
+                    exercises = BuiltInExercises.search(type: type, query: query)
                     isSearching = false
                 }
             }
         }
+    }
+
+    private func exerciseErrorView(message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 36))
+                .foregroundColor(.secondary)
+            Text("Couldn't reach exercise database")
+                .font(.headline)
+            Text(message)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try Again") {
+                searchExercises(type: selectedWorkoutType.apiType, query: searchQuery)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.vertical, 40)
+    }
+
+    private var exerciseEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "figure.strengthtraining.traditional")
+                .font(.system(size: 36))
+                .foregroundColor(.secondary.opacity(0.4))
+            Text("No exercises found")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            Text("Try a different type or search term")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 40)
     }
 }
 
 struct ExerciseCard: View {
     let exercise: Exercise
     let typeColor: Color
+    var onAdd: ((Exercise) -> Void)? = nil
     @State private var showingDetail = false
+    @State private var justAdded = false
 
     var body: some View {
-        Button(action: { showingDetail = true }) {
-            HStack(spacing: 14) {
-                // Muscle-group icon circle
-                ZStack {
-                    Circle()
-                        .fill(typeColor.opacity(0.12))
-                        .frame(width: 48, height: 48)
-                    Image(systemName: exercise.muscleIcon)
-                        .font(.system(size: 20))
-                        .foregroundColor(typeColor)
+        HStack(spacing: 0) {
+            // Add button on the left
+            if let onAdd {
+                Button(action: {
+                    onAdd(exercise)
+                    withAnimation(.spring(response: 0.3)) { justAdded = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        withAnimation { justAdded = false }
+                    }
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(justAdded ? Color.green.opacity(0.18) : typeColor.opacity(0.12))
+                            .frame(width: 48, height: 48)
+                        Image(systemName: justAdded ? "checkmark" : "plus")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(justAdded ? .green : typeColor)
+                    }
                 }
+                .buttonStyle(.plain)
+                .padding(.leading, 12)
+                .padding(.trailing, 4)
+            }
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(exercise.name)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-
-                    HStack(spacing: 6) {
-                        if let muscle = exercise.muscle {
-                            Tag(text: muscle.capitalized, color: .blue)
-                        }
-                        if let difficulty = exercise.difficulty {
-                            Tag(text: difficulty.capitalized, color: exercise.difficultyColor)
-                        }
-                        if let eq = exercise.equipment {
-                            Tag(text: eq.capitalized, color: .gray)
+            // Main tappable area → detail sheet
+            Button(action: { showingDetail = true }) {
+                HStack(spacing: 14) {
+                    // Only show icon when no add button
+                    if onAdd == nil {
+                        ZStack {
+                            Circle()
+                                .fill(typeColor.opacity(0.12))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: exercise.muscleIcon)
+                                .font(.system(size: 20))
+                                .foregroundColor(typeColor)
                         }
                     }
 
-                    if let instructions = exercise.instructions, !instructions.isEmpty {
-                        Text(instructions)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(exercise.name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.primary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
+
+                        HStack(spacing: 6) {
+                            if let muscle = exercise.muscle {
+                                Tag(text: muscle.capitalized, color: .blue)
+                            }
+                            if let difficulty = exercise.difficulty {
+                                Tag(text: difficulty.capitalized, color: exercise.difficultyColor)
+                            }
+                            if let eq = exercise.equipment {
+                                Tag(text: eq.capitalized, color: .gray)
+                            }
+                        }
+
+                        if let instructions = exercise.instructions, !instructions.isEmpty {
+                            Text(instructions)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
                     }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
                 }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(.secondary)
+                .padding()
+                .padding(.leading, onAdd != nil ? 0 : 0)
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(typeColor.opacity(0.15), lineWidth: 1)
-                    )
-            )
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(justAdded ? Color.green.opacity(0.4) : typeColor.opacity(0.15), lineWidth: 1)
+                )
+        )
         .sheet(isPresented: $showingDetail) {
-            ExerciseDetailView(exercise: exercise, accentColor: typeColor)
+            ExerciseDetailView(exercise: exercise, accentColor: typeColor, onAdd: onAdd)
         }
     }
 }
@@ -517,7 +1030,9 @@ struct ExerciseCard: View {
 struct ExerciseDetailView: View {
     let exercise: Exercise
     let accentColor: Color
+    var onAdd: ((Exercise) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var justAdded = false
 
     var body: some View {
         NavigationStack {
@@ -537,6 +1052,9 @@ struct ExerciseDetailView: View {
 
                         // Tips card
                         tipsSection
+
+                        // YouTube demo link
+                        videoDemoSection
                     }
                     .padding()
                 }
@@ -544,6 +1062,22 @@ struct ExerciseDetailView: View {
             .navigationTitle(exercise.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let onAdd {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: {
+                            onAdd(exercise)
+                            withAnimation(.spring(response: 0.3)) { justAdded = true }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dismiss() }
+                        }) {
+                            Label(
+                                justAdded ? "Added!" : "Add to Workout",
+                                systemImage: justAdded ? "checkmark.circle.fill" : "plus.circle.fill"
+                            )
+                            .foregroundColor(justAdded ? .green : accentColor)
+                            .fontWeight(.semibold)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
@@ -563,31 +1097,59 @@ struct ExerciseDetailView: View {
             )
 
             VStack(spacing: 16) {
-                // Big icon
-                ZStack {
-                    Circle()
-                        .fill(accentColor.opacity(0.2))
-                        .frame(width: 90, height: 90)
-                    Image(systemName: exercise.muscleIcon)
-                        .font(.system(size: 42))
-                        .foregroundColor(accentColor)
+                // Hero image from Supabase Storage, or fallback SF Symbol
+                if let imageURL = exercise.previewImageUrl {
+                    AsyncImage(url: imageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 140)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .padding(.horizontal, 24)
+                        case .failure, .empty:
+                            fallbackIcon
+                        @unknown default:
+                            fallbackIcon
+                        }
+                    }
+                    .padding(.top, 20)
+                } else {
+                    fallbackIcon
+                        .padding(.top, 28)
                 }
-                .padding(.top, 28)
 
                 // Tags row
-                HStack(spacing: 8) {
-                    if let type = exercise.type {
-                        DetailBadge(text: type.capitalized, icon: "figure.strengthtraining.traditional", color: accentColor)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        let cat = exercise.category ?? exercise.type
+                        if let cat {
+                            DetailBadge(text: cat.capitalized, icon: "figure.strengthtraining.traditional", color: accentColor)
+                        }
+                        let lvl = exercise.level ?? exercise.difficulty
+                        if let lvl {
+                            DetailBadge(text: lvl.capitalized, icon: difficultyIcon, color: exercise.difficultyColor)
+                        }
+                        if let eq = exercise.equipment {
+                            DetailBadge(text: eq.capitalized, icon: equipmentIcon(eq), color: .secondary)
+                        }
                     }
-                    if let difficulty = exercise.difficulty {
-                        DetailBadge(text: difficulty.capitalized, icon: difficultyIcon, color: exercise.difficultyColor)
-                    }
-                    if let eq = exercise.equipment {
-                        DetailBadge(text: eq.capitalized, icon: equipmentIcon(eq), color: .secondary)
-                    }
+                    .padding(.horizontal, 16)
                 }
                 .padding(.bottom, 24)
             }
+        }
+    }
+
+    private var fallbackIcon: some View {
+        ZStack {
+            Circle()
+                .fill(accentColor.opacity(0.2))
+                .frame(width: 90, height: 90)
+            Image(systemName: exercise.muscleIcon)
+                .font(.system(size: 42))
+                .foregroundColor(accentColor)
         }
     }
 
@@ -597,20 +1159,44 @@ struct ExerciseDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "MUSCLES WORKED", icon: "figure.arms.open")
 
-            HStack(spacing: 12) {
-                if let primary = exercise.muscle {
-                    MuscleGroupCard(
-                        label: "Primary",
-                        muscle: primary.capitalized,
-                        color: accentColor
-                    )
+            // Use full arrays when available, fall back to single-value legacy fields
+            let primaries   = exercise.primaryMuscles.isEmpty
+                              ? (exercise.muscle.map { [$0] } ?? [])
+                              : exercise.primaryMuscles
+            let secondaries = exercise.secondaryMuscles.isEmpty
+                              ? (exercise.secondaryMuscle.map { [$0] } ?? [])
+                              : exercise.secondaryMuscles
+
+            VStack(alignment: .leading, spacing: 8) {
+                if !primaries.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(primaries, id: \.self) { muscle in
+                                MuscleGroupCard(label: "Primary", muscle: muscle.capitalized, color: accentColor)
+                            }
+                        }
+                    }
                 }
-                if let secondary = exercise.secondaryMuscle {
-                    MuscleGroupCard(
-                        label: "Secondary",
-                        muscle: secondary.capitalized,
-                        color: .secondary
-                    )
+                if !secondaries.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(secondaries, id: \.self) { muscle in
+                                MuscleGroupCard(label: "Secondary", muscle: muscle.capitalized, color: .secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Mechanic + force chips
+            if exercise.mechanic != nil || exercise.force != nil {
+                HStack(spacing: 8) {
+                    if let mechanic = exercise.mechanic {
+                        Tag(text: mechanic.capitalized, color: .purple)
+                    }
+                    if let force = exercise.force {
+                        Tag(text: force.capitalized, color: .teal)
+                    }
                 }
             }
         }
@@ -654,11 +1240,19 @@ struct ExerciseDetailView: View {
     // MARK: Tips
 
     private var tipsSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // Prefer the DB-supplied tips paragraph; fall back to generated tips
+        let tipsList: [String] = {
+            if let dbTips = exercise.tips, !dbTips.isEmpty {
+                return [dbTips]
+            }
+            return proTips(for: exercise)
+        }()
+
+        return VStack(alignment: .leading, spacing: 14) {
             SectionHeader(title: "PRO TIPS", icon: "lightbulb.fill")
 
             VStack(spacing: 8) {
-                ForEach(proTips(for: exercise), id: \.self) { tip in
+                ForEach(tipsList, id: \.self) { tip in
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(accentColor)
@@ -676,6 +1270,53 @@ struct ExerciseDetailView: View {
                             .fill(accentColor.opacity(0.06))
                     )
                 }
+            }
+        }
+    }
+
+    // MARK: Video Demo
+
+    private var videoDemoSection: some View {
+        // Prefer server-generated URL, fall back to client-side construction
+        let ytURL: URL? = exercise.youtubeURL ?? {
+            guard let encoded = exercise.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+            return URL(string: "https://www.youtube.com/results?search_query=\(encoded)+proper+form+tutorial")
+        }()
+
+        return VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(title: "VIDEO DEMONSTRATION", icon: "play.rectangle.fill")
+
+            if let url = ytURL {
+                Link(destination: url) {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.red.opacity(0.12))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "play.rectangle.fill")
+                                .font(.system(size: 22))
+                                .foregroundColor(.red)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Watch \(exercise.name) Tutorial")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.primary)
+                            Text("Opens YouTube — proper form & technique")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(.systemGray6))
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.bottom, 30)
@@ -855,8 +1496,34 @@ struct WorkoutLoggerView: View {
     @Environment(\.modelContext) private var context
     @StateObject private var dataManager = DataManager.shared
     @Query private var personalRecords: [PersonalRecord]
+    @Query private var profiles: [Profile]
     let workoutType: WorkoutType
     @Binding var duration: Int
+    /// Optional exercises pre-populated from a program's day plan
+    var preloadedExercises: [LoggedExerciseEntry] = []
+    /// Optional routine name override (e.g. from a plan day)
+    var routineName: String = ""
+
+    private var useMetric: Bool { profiles.first?.useMetric ?? true }
+
+    /// Convert a kg value to display string respecting unit preference
+    private func weightDisplay(_ kg: Double) -> String {
+        if useMetric {
+            return kg == 0 ? "BW" : String(format: "%.1f kg", kg)
+        } else {
+            let lbs = kg * 2.20462
+            return kg == 0 ? "BW" : String(format: "%.0f lbs", lbs)
+        }
+    }
+
+    /// Convert a kg volume total to display string
+    private func volumeDisplay(_ kg: Double) -> String {
+        if useMetric {
+            return String(format: "%.0f kg", kg)
+        } else {
+            return String(format: "%.0f lbs", kg * 2.20462)
+        }
+    }
 
     @State private var exercises: [LoggedExerciseEntry] = []
     @State private var notes = ""
@@ -918,7 +1585,7 @@ struct WorkoutLoggerView: View {
                                     !entry.name.isEmpty &&
                                     $0.exerciseName.localizedCaseInsensitiveContains(entry.name)
                                 }
-                                StrengthExerciseRow(entry: $entry, accentColor: workoutType.uiColor, lastPR: pr)
+                                StrengthExerciseRow(entry: $entry, accentColor: workoutType.uiColor, lastPR: pr, useMetric: useMetric)
                             }
                         }
                         .onDelete { exercises.remove(atOffsets: $0) }
@@ -942,7 +1609,7 @@ struct WorkoutLoggerView: View {
                             let totalVolume = exercises.reduce(0.0) { $0 + $1.volume }
                             if totalVolume > 0 {
                                 LabeledContent("Total Volume") {
-                                    Text(String(format: "%.0f kg", totalVolume))
+                                    Text(volumeDisplay(totalVolume))
                                         .fontWeight(.semibold)
                                         .foregroundColor(workoutType.uiColor)
                                 }
@@ -981,8 +1648,13 @@ struct WorkoutLoggerView: View {
                     .listRowBackground(workoutType.uiColor)
                 }
             }
-            .navigationTitle("Log Workout")
+            .navigationTitle(routineName.isEmpty ? "Log Workout" : routineName)
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if exercises.isEmpty && !preloadedExercises.isEmpty {
+                    exercises = preloadedExercises
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -1097,7 +1769,8 @@ struct WorkoutLoggerView: View {
         let workoutStart = Date().addingTimeInterval(-Double(resolvedDuration) * 60)
 
         // ── 1. Create and persist WorkoutSession ─────────────────────────────
-        let session = WorkoutSession(routineName: workoutType.displayName + " Workout")
+        let sessionName = routineName.isEmpty ? workoutType.displayName + " Workout" : routineName
+        let session = WorkoutSession(routineName: sessionName)
         session.startedAt = workoutStart
         session.notes = notes
         // Insert session FIRST so relationship assignments have a persisted parent
@@ -1279,11 +1952,22 @@ private struct StrengthExerciseRow: View {
     @Binding var entry: LoggedExerciseEntry
     let accentColor: Color
     var lastPR: PersonalRecord? = nil
+    var useMetric: Bool = true
 
     /// Suggest ~2.5% more than last best weight (progressive overload)
     private var suggestedWeight: Double? {
         guard let pr = lastPR, pr.bestWeightKg > 0 else { return nil }
         return (pr.bestWeightKg * 1.025 / 2.5).rounded() * 2.5
+    }
+
+    private func fmt(_ kg: Double) -> String {
+        if useMetric { return String(format: "%.1f kg", kg) }
+        return String(format: "%.0f lbs", kg * 2.20462)
+    }
+
+    private func fmt1RM(_ kg: Double) -> String {
+        if useMetric { return String(format: "%.1f kg", kg) }
+        return String(format: "%.0f lbs", kg * 2.20462)
     }
 
     var body: some View {
@@ -1297,17 +1981,18 @@ private struct StrengthExerciseRow: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.caption)
                         .foregroundColor(.green)
-                    Text("Last: \(String(format: "%.1f", pr.bestWeightKg))kg × \(pr.bestReps)  →  Target: \(String(format: "%.1f", suggested))kg")
+                    Text("Last: \(fmt(pr.bestWeightKg)) × \(pr.bestReps)  →  Target: \(fmt(suggested))")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Spacer(minLength: 4)
                     // Stored 1RM badge
                     HStack(spacing: 2) {
                         Text("1RM")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
-                        Text(String(format: "%.0fkg", pr.oneRepMaxKg))
+                        Text(fmt1RM(pr.oneRepMaxKg))
                             .font(.system(size: 9, weight: .black))
                             .foregroundColor(.white)
                     }
@@ -1340,11 +2025,11 @@ private struct StrengthExerciseRow: View {
                     Text("Est. 1RM:")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Text("Epley \(String(format: "%.1f", liveEpley))kg")
+                    Text("Epley \(fmt1RM(liveEpley))")
                         .font(.caption2.weight(.semibold))
                         .foregroundColor(.purple)
                     if liveBrzycki > 0 {
-                        Text("· Brzycki \(String(format: "%.1f", liveBrzycki))kg")
+                        Text("· Brzycki \(fmt1RM(liveBrzycki))")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -1387,23 +2072,33 @@ private struct StrengthExerciseRow: View {
 
                 Divider().frame(height: 44)
 
-                // Weight
+                // Weight — stepper always in kg internally; display label uses preference
                 VStack(spacing: 2) {
-                    Text("KG")
+                    Text(useMetric ? "KG" : "LBS")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundColor(.secondary)
-                    Stepper("", value: $entry.weightKg, in: 0...500, step: 2.5)
+                    Stepper("", value: $entry.weightKg, in: 0...500, step: useMetric ? 2.5 : 1.0 / 2.20462)
                         .labelsHidden()
-                    Text(entry.weightKg == 0 ? "BW" : String(format: "%.1f", entry.weightKg))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(entry.weightKg == 0 ? .secondary : accentColor)
+                    // Display in the preferred unit
+                    Group {
+                        if entry.weightKg == 0 {
+                            Text("BW")
+                        } else if useMetric {
+                            Text(String(format: "%.1f", entry.weightKg))
+                        } else {
+                            Text(String(format: "%.0f", entry.weightKg * 2.20462))
+                        }
+                    }
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(entry.weightKg == 0 ? .secondary : accentColor)
                 }
                 .frame(maxWidth: .infinity)
             }
 
             HStack(spacing: 10) {
                 if entry.weightKg > 0 {
-                    Text("Volume: \(Int(entry.volume)) kg total")
+                    let vol = entry.volume
+                    Text("Volume: \(useMetric ? String(format: "%.0f kg", vol) : String(format: "%.0f lbs", vol * 2.20462)) total")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -1538,12 +2233,12 @@ struct AnimePlanPickerView: View {
     @State private var showingCustomBuilder = false
 
     private var currentPlan: AnimeWorkoutPlan? {
-        AnimeWorkoutPlans.plan(id: activePlanID)
+        AnimeWorkoutPlanService.shared.plan(id: activePlanID)
     }
 
     /// Plans intended for the player's gender (or unisex).
     private var myPlans: [AnimeWorkoutPlan] {
-        AnimeWorkoutPlans.all.filter { plan in
+        AnimeWorkoutPlanService.shared.all.filter { plan in
             plan.targetGender == nil || plan.targetGender == playerGender
         }
     }
@@ -1693,7 +2388,7 @@ struct AnimePlanPickerView: View {
             } message: {
                 let targetName: String = {
                     guard let id = pendingPlanID, !id.isEmpty else { return "no program" }
-                    if let plan = AnimeWorkoutPlans.plan(id: id) {
+                    if let plan = AnimeWorkoutPlanService.shared.plan(id: id) {
                         return "the \(plan.character) program"
                     }
                     if let cp = customPlans.first(where: { $0.id == id }) {
@@ -1760,11 +2455,13 @@ struct AnimePlanCard: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         Text(plan.tagline)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer()
@@ -1798,6 +2495,8 @@ struct AnimePlanCard: View {
                         .foregroundColor(.secondary)
                 }
                 .padding()
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -1805,10 +2504,11 @@ struct AnimePlanCard: View {
             if isExpanded {
                 Divider().padding(.horizontal)
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
                     Text(plan.description)
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     // Weekly schedule summary dots
                     HStack(spacing: 6) {
@@ -1957,7 +2657,8 @@ struct WorkoutTemplatePicker: View {
                                         Text(entries.map { $0.name.isEmpty ? "Exercise" : $0.name }.joined(separator: " · "))
                                             .font(.caption)
                                             .foregroundColor(.secondary)
-                                            .lineLimit(1)
+                                            .lineLimit(2)
+                                            .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
                             }
@@ -2006,6 +2707,490 @@ struct WorkoutTemplatePicker: View {
             entry.minutes = Int(dict["minutes"] ?? "10") ?? 10
             return entry
         }
+    }
+}
+
+// MARK: - Weekly Schedule View
+
+struct WeeklyScheduleView: View {
+    let plan: AnimeWorkoutPlan
+    @Environment(\.dismiss) private var dismiss
+
+    private let dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    /// Index of today in the weekly schedule (0 = Monday)
+    private var todayIndex: Int {
+        let calWeekday = Calendar.current.component(.weekday, from: Date())
+        return (calWeekday + 5) % 7
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Plan header
+                    ZStack {
+                        LinearGradient(
+                            colors: [plan.accentColor.opacity(0.25), plan.accentColor.opacity(0.05)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                        VStack(spacing: 8) {
+                            Image(systemName: plan.iconSymbol)
+                                .font(.system(size: 40))
+                                .foregroundColor(plan.accentColor)
+                                .padding(.top, 24)
+                            Text("\(plan.character) — \(plan.anime)")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text(plan.tagline)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 20)
+                        }
+                    }
+
+                    VStack(spacing: 12) {
+                        ForEach(Array(plan.weeklySchedule.enumerated()), id: \.offset) { index, dayPlan in
+                            DayScheduleCard(
+                                dayName: dayNames[index],
+                                dayPlan: dayPlan,
+                                accentColor: plan.accentColor,
+                                isToday: index == todayIndex
+                            )
+                        }
+                    }
+                    .padding()
+                    .padding(.bottom, 20)
+                }
+            }
+            .ignoresSafeArea(edges: .top)
+            .navigationTitle("7-Day Schedule")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+struct DayScheduleCard: View {
+    let dayName: String
+    let dayPlan: AnimeWorkoutPlan.DayPlan
+    let accentColor: Color
+    let isToday: Bool
+
+    @State private var isExpanded = false
+
+    private var cardColor: Color { isToday ? accentColor : .secondary }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row (always visible)
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                HStack(spacing: 12) {
+                    // Day indicator circle
+                    ZStack {
+                        Circle()
+                            .fill(cardColor.opacity(isToday ? 0.2 : 0.08))
+                            .frame(width: 42, height: 42)
+                        if dayPlan.isRest {
+                            Image(systemName: "moon.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(cardColor)
+                        } else {
+                            Image(systemName: "dumbbell.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(cardColor)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(dayName.uppercased())
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(isToday ? accentColor : .primary)
+                            if isToday {
+                                Text("TODAY")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(accentColor))
+                            }
+                        }
+                        Text(dayPlan.isRest ? "Rest & Recovery" : dayPlan.focus)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.primary)
+                    }
+
+                    Spacer()
+
+                    if !dayPlan.isRest {
+                        Text("\(dayPlan.exercises.count) exercises")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Expanded exercise list
+            if isExpanded {
+                Divider().padding(.horizontal)
+
+                if dayPlan.isRest {
+                    HStack(spacing: 10) {
+                        Image(systemName: "bed.double.fill")
+                            .foregroundColor(.secondary)
+                        Text("Active recovery: stretch, mobility, walk. Let adaptations compound.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding()
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(dayPlan.exercises, id: \.name) { ex in
+                            HStack(spacing: 12) {
+                                Text("•")
+                                    .foregroundColor(accentColor)
+                                    .font(.system(size: 16, weight: .bold))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ex.name)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                    HStack(spacing: 6) {
+                                        Text("\(ex.sets)×\(ex.reps)")
+                                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                            .foregroundColor(accentColor)
+                                        if !ex.notes.isEmpty {
+                                            Text("· \(ex.notes)")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(2)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                            }
+                        }
+
+                        if !dayPlan.questTitle.isEmpty {
+                            Divider()
+                            HStack(spacing: 8) {
+                                Image(systemName: "bolt.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.cyan)
+                                Text("Quest: \(dayPlan.questTitle)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.cyan)
+                                Spacer()
+                                Text("+\(dayPlan.xpReward) XP")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.cyan)
+                            }
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(isToday ? accentColor.opacity(0.06) : Color(.systemGray6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isToday ? accentColor.opacity(0.4) : Color.clear, lineWidth: 1.5)
+                )
+        )
+        .onAppear {
+            // Auto-expand today's card
+            if isToday { isExpanded = true }
+        }
+    }
+}
+
+// MARK: - Planned Exercise Detail
+
+struct PlannedExerciseDetail: Identifiable {
+    let id = UUID()
+    let exercise: AnimeWorkoutPlan.PlannedExercise
+    let accentColor: Color
+}
+
+struct PlannedExerciseDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let detail: PlannedExerciseDetail
+    let accentColor: Color
+
+    private var ex: AnimeWorkoutPlan.PlannedExercise { detail.exercise }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+
+                    // Header
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(ex.name)
+                            .font(.title2.weight(.bold))
+                            .foregroundColor(.primary)
+                        if !ex.notes.isEmpty {
+                            Text(ex.notes)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+
+                    // Stats chips
+                    HStack(spacing: 12) {
+                        statChip(icon: "repeat", label: "Sets", value: "\(ex.sets)")
+                        statChip(icon: "flame.fill", label: "Reps", value: ex.reps)
+                        if ex.restSeconds > 0 {
+                            statChip(icon: "timer", label: "Rest", value: "\(ex.restSeconds)s")
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    Divider().padding(.horizontal)
+
+                    // How to perform
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("How to Perform", systemImage: "list.number")
+                            .font(.headline)
+                            .foregroundColor(accentColor)
+                            .padding(.horizontal)
+
+                        let steps = exerciseSteps(for: ex.name)
+                        ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
+                            HStack(alignment: .top, spacing: 12) {
+                                Text("\(idx + 1)")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundColor(accentColor)
+                                    .frame(width: 22, alignment: .center)
+                                    .padding(.top, 1)
+                                Text(step)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+
+                    if ex.restSeconds > 0 {
+                        Divider().padding(.horizontal)
+                        HStack(spacing: 10) {
+                            Image(systemName: "timer")
+                                .foregroundColor(.orange)
+                            Text("Rest \(ex.restSeconds) seconds between sets to allow proper recovery.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+            .navigationTitle(ex.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func statChip(icon: String, label: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(accentColor)
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
+    }
+
+    /// Generic step-by-step instructions based on common exercise names.
+    private func exerciseSteps(for name: String) -> [String] {
+        let lower = name.lowercased()
+        if lower.contains("squat") {
+            return [
+                "Stand with feet shoulder-width apart, toes slightly out.",
+                "Brace your core and keep your chest tall.",
+                "Lower by pushing your hips back and bending your knees.",
+                "Descend until thighs are parallel to the floor (or deeper if mobility allows).",
+                "Drive through your heels to return to standing.",
+                "Lock out hips and knees fully at the top."
+            ]
+        } else if lower.contains("deadlift") {
+            return [
+                "Stand with the bar over your mid-foot, feet hip-width apart.",
+                "Hinge at the hips and grip the bar just outside your legs.",
+                "Flatten your back, brace your core, and take a deep breath.",
+                "Drive your feet into the floor while pulling the bar close to your body.",
+                "Lock out hips and knees simultaneously at the top.",
+                "Lower the bar under control by hinging at the hips first."
+            ]
+        } else if lower.contains("bench") || lower.contains("press") && lower.contains("chest") {
+            return [
+                "Lie on the bench with eyes under the bar, feet flat on the floor.",
+                "Grip the bar slightly wider than shoulder-width.",
+                "Unrack, position the bar over your lower chest.",
+                "Lower to the chest with elbows at roughly 45–75° from your torso.",
+                "Press the bar back up to the starting position.",
+                "Lock out elbows fully at the top."
+            ]
+        } else if lower.contains("pull-up") || lower.contains("pullup") || lower.contains("chin-up") {
+            return [
+                "Hang from the bar with arms fully extended, hands slightly wider than shoulders.",
+                "Engage your shoulder blades by pulling them down and back.",
+                "Drive your elbows toward your hips as you pull your chest to the bar.",
+                "Pause briefly at the top with your chin over the bar.",
+                "Lower yourself under control until arms are fully extended."
+            ]
+        } else if lower.contains("push-up") || lower.contains("pushup") {
+            return [
+                "Start in a high plank with hands just outside shoulder-width.",
+                "Keep your body in a straight line from head to heels.",
+                "Lower your chest to just above the floor, elbows at ~45°.",
+                "Press back up to full arm extension.",
+                "Squeeze your chest and triceps at the top."
+            ]
+        } else if lower.contains("row") {
+            return [
+                "Hinge forward at the hips to roughly 45°, keeping your back flat.",
+                "Hold the weight with an overhand or underhand grip.",
+                "Pull the weight toward your lower chest or navel.",
+                "Squeeze your shoulder blades together at the top.",
+                "Lower under control until arms are fully extended."
+            ]
+        } else if lower.contains("run") || lower.contains("jog") {
+            return [
+                "Warm up with a 5-minute brisk walk.",
+                "Maintain an upright posture with a slight forward lean.",
+                "Land with your foot under your hips, not out in front.",
+                "Keep a steady breathing rhythm — aim for conversational pace.",
+                "Cool down with a 5-minute walk and stretch."
+            ]
+        } else if lower.contains("plank") {
+            return [
+                "Start in a forearm plank — elbows under shoulders, body flat.",
+                "Engage your glutes, quads, and core simultaneously.",
+                "Keep your hips level — don't let them sag or pike up.",
+                "Breathe steadily throughout the hold.",
+                "Stop when form breaks down."
+            ]
+        } else {
+            // Generic fallback
+            return [
+                "Set up in the correct starting position as described by your trainer or program.",
+                "Brace your core and maintain proper posture throughout the movement.",
+                "Perform the movement through its full range of motion.",
+                "Control the weight on both the way up and the way down.",
+                "Complete all prescribed sets and reps before resting."
+            ]
+        }
+    }
+}
+
+// MARK: - Workout Session Edit View
+
+struct WorkoutSessionEditView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @Query private var profiles: [Profile]
+
+    let session: WorkoutSession
+    private var useMetric: Bool { profiles.first?.useMetric ?? true }
+
+    @State private var routineName: String = ""
+    @State private var notes: String = ""
+    @State private var durationMinutes: Int = 0
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Session Details") {
+                    TextField("Workout name", text: $routineName)
+                    Stepper("Duration: \(durationMinutes) min", value: $durationMinutes, in: 0...600, step: 5)
+                }
+                Section("Notes") {
+                    TextField("Add notes...", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+                if let sets = session.sets, !sets.isEmpty {
+                    Section("Sets Logged (\(sets.count))") {
+                        ForEach(sets.sorted { $0.setNumber < $1.setNumber }) { set in
+                            HStack {
+                                Text(set.exerciseName)
+                                    .font(.subheadline)
+                                Spacer()
+                                Text("Set \(set.setNumber)")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                                if set.weightKg > 0 {
+                                    let wt = useMetric
+                                        ? String(format: "%.0f kg", set.weightKg)
+                                        : String(format: "%.0f lbs", set.weightKg * 2.20462)
+                                    Text("\(wt) × \(set.reps)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Edit Session")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { saveChanges() }
+                        .fontWeight(.semibold)
+                }
+            }
+            .onAppear {
+                routineName = session.routineName
+                notes = session.notes
+                durationMinutes = session.durationMinutes
+            }
+        }
+    }
+
+    private func saveChanges() {
+        session.routineName = routineName
+        session.notes = notes
+        session.durationMinutes = durationMinutes
+        try? context.save()
+        dismiss()
     }
 }
 

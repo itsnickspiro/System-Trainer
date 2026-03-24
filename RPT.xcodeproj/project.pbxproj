@@ -13,9 +13,9 @@
 		013B982F2F70C6F700F50F41 /* AchievementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B982E2F70C6F700F50F41 /* AchievementManager.swift */; };
 		013B98302F70C6F700F50F41 /* AchievementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B982E2F70C6F700F50F41 /* AchievementManager.swift */; };
 		013B98312F70C6F700F50F41 /* AchievementManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B982E2F70C6F700F50F41 /* AchievementManager.swift */; };
-		013B98372F70CB4400F50F41 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98362F70CB4400F50F41 /* BodyMetricsView.swift */; };
-		013B98382F70CB4400F50F41 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98362F70CB4400F50F41 /* BodyMetricsView.swift */; };
-		013B98392F70CB4400F50F41 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98362F70CB4400F50F41 /* BodyMetricsView.swift */; };
+		017301CF2F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */; };
+		017301D02F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */; };
+		017301D12F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */; };
 		0176B6D62EAC6D5400ADF2A8 /* WorkoutKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; };
 		0176B6D72EAC6D5400ADF2A8 /* WorkoutKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		01BC56A42ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
@@ -78,7 +78,7 @@
 		011D8FA72EA40A0200609E51 /* RPTUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		013B98262F70787200F50F41 /* AnimeWorkouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimeWorkouts.swift; sourceTree = "<group>"; };
 		013B982E2F70C6F700F50F41 /* AchievementManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AchievementManager.swift; sourceTree = "<group>"; };
-		013B98362F70CB4400F50F41 /* BodyMetricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyMetricsView.swift; sourceTree = "<group>"; };
+		017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImpossibleDayDetector.swift; sourceTree = "<group>"; };
 		0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WorkoutKit.framework; path = System/Library/Frameworks/WorkoutKit.framework; sourceTree = SDKROOT; };
 		0176B6DD2EAC6D8600ADF2A8 /* HealthKitUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKitUI.framework; path = System/Library/Frameworks/HealthKitUI.framework; sourceTree = SDKROOT; };
 		0176B6DE2EAC6D8600ADF2A8 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
@@ -184,7 +184,7 @@
 				01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */,
 				013B98262F70787200F50F41 /* AnimeWorkouts.swift */,
 				013B982E2F70C6F700F50F41 /* AchievementManager.swift */,
-				013B98362F70CB4400F50F41 /* BodyMetricsView.swift */,
+				017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -369,7 +369,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				01CB9C8C2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
-				013B98372F70CB4400F50F41 /* BodyMetricsView.swift in Sources */,
+				017301D02F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */,
 				013B98282F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
 				013B982F2F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 				01CB9C852F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
@@ -387,9 +387,9 @@
 				01CB9C8B2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
 				01CB9C832F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
 				01CB9C792F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
+				017301CF2F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */,
 				01CB9C7F2F5BA384000CF421 /* PatrolMapView.swift in Sources */,
 				01CB9C7D2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
-				013B98392F70CB4400F50F41 /* BodyMetricsView.swift in Sources */,
 				013B98302F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -402,9 +402,9 @@
 				01CB9C8D2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
 				01CB9C842F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
 				01CB9C782F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
+				017301D12F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */,
 				01CB9C812F5BA384000CF421 /* PatrolMapView.swift in Sources */,
 				01CB9C7B2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
-				013B98382F70CB4400F50F41 /* BodyMetricsView.swift in Sources */,
 				013B98312F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -562,24 +562,29 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RPT/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSCameraUsageDescription = "This app requires access to your device’s camera to allow users to take photos and record videos directly within the app. This enables features such as real-time image capture, video recording, and content creation. Camera access is only used when you choose to take a photo or video — the app does not record or capture media without your explicit action.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "The System requires camera access to scan and decrypt consumable items.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "RPT reads your steps, workouts, heart rate, sleep, and activity data to calculate your RPG stats and award XP for real-world fitness progress.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "RPT may write workout sessions to Apple Health so your activity is reflected across your health apps.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "RPT uses background location to continue tracking your patrol route when you switch apps, ensuring accurate distance and pace data.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "RPT tracks your outdoor patrol routes — runs, walks, and hikes — to calculate distance, pace, and award Endurance XP.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to let users select, import, and use existing images or videos from their device. This enables functions such as editing, uploading, or sharing media within the app. Access is only used when you choose to pick files; no photos or videos are accessed automatically.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIStatusBarStyle = "";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -604,24 +609,29 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RPT/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSCameraUsageDescription = "This app requires access to your device’s camera to allow users to take photos and record videos directly within the app. This enables features such as real-time image capture, video recording, and content creation. Camera access is only used when you choose to take a photo or video — the app does not record or capture media without your explicit action.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "The System requires camera access to scan and decrypt consumable items.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "RPT reads your steps, workouts, heart rate, sleep, and activity data to calculate your RPG stats and award XP for real-world fitness progress.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "RPT may write workout sessions to Apple Health so your activity is reflected across your health apps.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "RPT uses background location to continue tracking your patrol route when you switch apps, ensuring accurate distance and pace data.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "RPT tracks your outdoor patrol routes — runs, walks, and hikes — to calculate distance, pace, and award Endurance XP.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to let users select, import, and use existing images or videos from their device. This enables functions such as editing, uploading, or sharing media within the app. Access is only used when you choose to pick files; no photos or videos are accessed automatically.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIStatusBarStyle = "";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

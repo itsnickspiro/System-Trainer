@@ -319,8 +319,8 @@ struct HealthSettingsView: View {
     @ObservedObject var healthManager: HealthManager
     let profile: Profile
     
-    @State private var autoSyncEnabled = true
-    @State private var syncFrequency = "hourly"
+    @AppStorage("healthAutoSync") private var autoSyncEnabled = true
+    @AppStorage("healthSyncFrequency") private var syncFrequency = "hourly"
     @State private var showingPermissions = false
     
     var body: some View {
