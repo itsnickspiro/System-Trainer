@@ -727,6 +727,7 @@ struct PodiumCard: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(colorScheme == .dark ? .white : .black)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
             VStack(spacing: 4) {
                 Text("LVL \(player.level)")

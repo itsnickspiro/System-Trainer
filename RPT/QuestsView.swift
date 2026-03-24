@@ -8,6 +8,12 @@ struct QuestsView: View {
     @StateObject private var dataManager = DataManager.shared
     @State private var selectedDay = Date()
     @State private var showingCreateQuest = false
+    @State private var impossibleWarnings: [ImpossibleDayDetector.ImpossibleWarning] = []
+
+    /// True when the selected day is not today — quests are view-only, no XP awarded.
+    private var isDayLocked: Bool {
+        !Calendar.current.isDateInToday(selectedDay)
+    }
     
     private var todaysQuests: [Quest] {
         quests.filter { Calendar.current.isDate($0.dateTag, inSameDayAs: selectedDay) }
@@ -30,8 +36,35 @@ struct QuestsView: View {
                 
                 ScrollView {
                     VStack(spacing: 16) {
+                        // Locked day banner
+                        if isDayLocked {
+                            HStack(spacing: 8) {
+                                Image(systemName: "lock.fill")
+                                    .foregroundColor(.secondary)
+                                Text(Calendar.current.isDateInFuture(selectedDay)
+                                     ? "Future day — quests unlock when it arrives"
+                                     : "Past day — read-only. Complete quests on today's date to earn XP.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(.systemFill))
+                            )
+                            .padding(.horizontal)
+                        }
+
                         // Real-World Data at the top to correlate with quests
                         RealWorldDataSummary()
+
+                        // Impossible-day warnings — flag quests that exceed physiological limits
+                        if !impossibleWarnings.isEmpty {
+                            ImpossibleDayBanner(warnings: impossibleWarnings)
+                                .padding(.horizontal)
+                        }
                         
                         if activeQuests.isEmpty && completedQuests.isEmpty {
                             // Empty state
@@ -108,12 +141,19 @@ struct QuestsView: View {
             .navigationTitle("Quests")
             .navigationBarTitleDisplayMode(.large)
             .background(colorScheme == .dark ? .black.opacity(0.95) : .white)
+            .onAppear {
+                impossibleWarnings = ImpossibleDayDetector.detect(in: todaysQuests)
+            }
+            .onChange(of: todaysQuests.count) {
+                impossibleWarnings = ImpossibleDayDetector.detect(in: todaysQuests)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Add", systemImage: "plus") {
                         showingCreateQuest = true
                     }
                     .foregroundColor(.cyan)
+                    .disabled(isDayLocked)
                 }
             }
             .sheet(isPresented: $showingCreateQuest) {
@@ -123,6 +163,8 @@ struct QuestsView: View {
     }
     
     private func toggleQuestCompletion(_ quest: Quest) {
+        // Only allow toggling on today — prevents retroactive XP farming
+        guard !isDayLocked else { return }
         if quest.isCompleted {
             // Un-complete: refund XP so the player doesn't keep what they didn't earn
             dataManager.uncompleteQuest(quest)
@@ -185,6 +227,79 @@ enum QuestCategory: String, CaseIterable, Identifiable {
         case .sleep:    return "Verified automatically via HealthKit sleep data"
         case .manual:   return "You confirm completion manually by tapping the quest"
         }
+    }
+}
+
+// MARK: - Impossible Day Banner
+
+/// Collapsible banner shown when one or more quests have targets that exceed
+/// physiological daily limits. Warns the player without blocking progress.
+struct ImpossibleDayBanner: View {
+    let warnings: [ImpossibleDayDetector.ImpossibleWarning]
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                        .font(.subheadline)
+                    Text(warnings.count == 1
+                         ? "1 quest has an extreme target"
+                         : "\(warnings.count) quests have extreme targets")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.yellow)
+                    Spacer()
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Expanded detail rows
+            if isExpanded {
+                Divider().opacity(0.3)
+                ForEach(warnings) { warning in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(warning.questTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.white)
+                        Text(warning.reason)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Suggestion: \(warning.suggestion)")
+                            .font(.caption2)
+                            .foregroundColor(.cyan.opacity(0.8))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    if warning.id != warnings.last?.id {
+                        Divider().opacity(0.2)
+                    }
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.yellow.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.yellow.opacity(0.3), lineWidth: 1)
+                )
+        )
     }
 }
 

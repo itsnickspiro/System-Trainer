@@ -107,11 +107,28 @@ final class DataManager: ObservableObject {
         
         do {
             todaysQuests = try context.fetch(questDescriptor)
+            refreshWidgetData(context: context)
         } catch {
             print("Failed to load today's quests: \(error)")
         }
     }
-    
+
+    /// Push a fresh snapshot to App Group UserDefaults so widgets can update.
+    private func refreshWidgetData(context: ModelContext) {
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let entryDescriptor = FetchDescriptor<FoodEntry>(
+            predicate: #Predicate<FoodEntry> { entry in
+                entry.dateConsumed >= todayStart
+            }
+        )
+        let todayEntries = (try? context.fetch(entryDescriptor)) ?? []
+        WidgetDataManager.shared.update(
+            profile: currentProfile,
+            quests: todaysQuests,
+            nutritionEntries: todayEntries
+        )
+    }
+
     // MARK: - Profile Management
     func updateProfile(_ updates: (Profile) -> Void) {
         guard let profile = currentProfile else { return }
@@ -153,8 +170,14 @@ final class DataManager: ObservableObject {
 
         // Award XP and register completion
         if let profile = currentProfile {
+            let prevPassCount = profile.exemptionPassCount
             profile.addXP(quest.xpReward)
             profile.registerCompletion()
+
+            // If registerCompletion awarded a streak pass, mirror it to InventoryItem
+            if profile.exemptionPassCount > prevPassCount {
+                syncExemptionPassToInventory(profile: profile)
+            }
         }
 
         // Haptic feedback for quest completion
@@ -162,6 +185,21 @@ final class DataManager: ObservableObject {
 
         saveLocalChanges()
         refreshTodaysQuests()
+    }
+
+    /// Ensures the InventoryItem for hermitMiracleSeed matches profile.exemptionPassCount.
+    private func syncExemptionPassToInventory(profile: Profile) {
+        guard let context = modelContext else { return }
+        // Fetch all inventory items and filter in-memory (enum predicates not supported in SwiftData)
+        let descriptor = FetchDescriptor<InventoryItem>()
+        let allItems = (try? context.fetch(descriptor)) ?? []
+        let seedTypeRaw = InventoryItemType.hermitMiracleSeed.rawValue
+        if let existing = allItems.first(where: { $0.itemType.rawValue == seedTypeRaw }) {
+            existing.quantity = profile.exemptionPassCount
+        } else {
+            let newItem = InventoryItem(itemType: .hermitMiracleSeed, quantity: profile.exemptionPassCount)
+            context.insert(newItem)
+        }
     }
 
     func uncompleteQuest(_ quest: Quest) {
@@ -302,7 +340,7 @@ final class DataManager: ObservableObject {
         let activePlanID = profile.activePlanID
         if !activePlanID.isEmpty {
             let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)
-            let animePlan = AnimeWorkoutPlans.plan(id: activePlanID)
+            let animePlan = AnimeWorkoutPlanService.shared.plan(id: activePlanID)
             let resolvedPlan: AnimeWorkoutPlan?
             if let p = animePlan {
                 resolvedPlan = p
@@ -323,11 +361,78 @@ final class DataManager: ObservableObject {
             }
         }
 
+        // Recovery Mode override: use lighter rehabilitation quests
+        if profile.isInRecovery {
+            let quests = buildRecoveryQuests(for: profile, on: today)
+            quests.forEach { addQuest($0) }
+            UserDefaults.standard.set(today, forKey: key)
+            return
+        }
+
         // Build quest list driven by the player's health data gaps
         let quests = buildHealthDrivenQuests(for: profile, on: today)
         quests.forEach { addQuest($0) }
 
         UserDefaults.standard.set(today, forKey: key)
+    }
+
+    /// Rehabilitation Arc quests — 50% XP, gentler targets, 3 days post-reset.
+    private func buildRecoveryQuests(for profile: Profile, on date: Date) -> [Quest] {
+        var quests: [Quest] = []
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: date)
+        let dayNum = 4 - max(0, profile.recoveryDaysRemaining) // Day 1, 2, or 3
+
+        // ── Recovery Arc Header Quest ─────────────────────────────────────────
+        quests.append(Quest(
+            title: "[REHABILITATION ARC] Day \(dayNum) of 3",
+            details: "System detected a critical failure. Reduced difficulty protocols active. Complete all quests to rebuild your foundation. 50% XP penalty lifted after 3 days.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 25, statTarget: "discipline", dateTag: date
+        ))
+
+        // ── Light Movement — 5,000 steps (half of normal) ────────────────────
+        quests.append(Quest(
+            title: "Light Movement Protocol",
+            details: "Walk 5,000 steps today. No intense training required — focus on re-establishing a daily routine.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 40, statTarget: "endurance",
+            completionCondition: "steps:5000", dateTag: date
+        ))
+
+        // ── Sleep Recovery ────────────────────────────────────────────────────
+        quests.append(Quest(
+            title: "Sleep Recalibration",
+            details: "Achieve 7+ hours of sleep tonight. Your body is recovering from a critical stress event.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 50, statTarget: "energy",
+            completionCondition: "sleep:7", dateTag: date
+        ))
+
+        // ── Gentle Workout ────────────────────────────────────────────────────
+        quests.append(Quest(
+            title: "Rehabilitation Training",
+            details: "Complete any 15-minute workout — stretching, mobility, or light cardio counts. No heavy lifting required.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 40, statTarget: "health", dateTag: date
+        ))
+
+        // ── Hydration ─────────────────────────────────────────────────────────
+        quests.append(Quest(
+            title: "Hydration Protocol",
+            details: "Drink 6 glasses of water today. Hydration accelerates recovery and stat restoration.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 25, statTarget: "health", dateTag: date
+        ))
+
+        // ── Nutrition Log ─────────────────────────────────────────────────────
+        quests.append(Quest(
+            title: "Nutrition Log",
+            details: "Log at least 2 meals today in the Diary tab. Rebuilding nutritional awareness is key to recovery.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: 30, statTarget: "discipline", dateTag: date
+        ))
+
+        return quests
     }
 
     /// Analyses the player's current health stats and returns a tailored set of quests.
@@ -416,6 +521,40 @@ final class DataManager: ObservableObject {
                 xpReward: 70, statTarget: "focus", dateTag: date
             ))
         }
+
+        // ── Guaranteed: Daily Training — always present so there is always a workout quest ──
+        let tier = QuestManager.tier(for: profile.level)
+        let weekday = Calendar.current.component(.weekday, from: date)
+        let trainingFocus: String
+        let trainingDetails: String
+        switch weekday {
+        case 2, 5: // Mon, Thu — Push
+            trainingFocus = "Push Day"
+            trainingDetails = "Upper body push — chest, shoulders, triceps. Complete at least 3 working sets of any push movement."
+        case 3, 6: // Tue, Fri — Pull
+            trainingFocus = "Pull Day"
+            trainingDetails = "Upper body pull — back, biceps, rear delts. Complete at least 3 working sets of any pull movement."
+        case 4, 7: // Wed, Sat — Legs
+            trainingFocus = "Leg Day"
+            trainingDetails = "Lower body — quads, hamstrings, glutes. Complete at least 3 working sets of any leg movement."
+        default:   // Sun — Active Recovery
+            trainingFocus = "Active Recovery"
+            trainingDetails = "Light movement day — stretching, mobility, yoga, or a slow walk. Let your body recover and adapt."
+        }
+        quests.append(Quest(
+            title: "Daily Training: \(trainingFocus)",
+            details: "\(tier.rank.displayName) Protocol — \(trainingDetails)\nComplete any logged workout to auto-check this quest.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: Int(100.0 * tier.xpMultiplier), statTarget: "strength", dateTag: date
+        ))
+
+        // ── Guaranteed: Nutrition Log — always present ─────────────────────────
+        quests.append(Quest(
+            title: "Nutrition Log",
+            details: "Log all meals for today in the Diary tab. Hitting your calorie and protein goals awards full XP.",
+            type: .daily, createdAt: Date(), dueDate: tomorrow,
+            xpReward: Int(50.0 * tier.xpMultiplier), statTarget: "discipline", dateTag: date
+        ))
 
         return quests
     }
@@ -532,6 +671,9 @@ final class DataManager: ObservableObject {
     /// Call when app returns to foreground to ensure health data is fresh.
     func refreshHealthOnForeground() {
         Task { await handleHealthDataUpdate() }
+        // Re-run daily quest generation in case the day rolled over while the app was open
+        generateDefaultDailyQuests()
+        refreshTodaysQuests()
     }
     
     func recordHealthAction(_ action: HealthAction) {

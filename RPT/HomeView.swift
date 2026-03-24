@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var rotationAngle: Double = 0
     @State private var showingHealthPermissions = false
     @State private var showingSettingsSheet = false
+    @State private var showingInventorySheet = false
     @State private var selectedStatForDetails: RPGStatsBar.StatType? = nil
     // Level-up animation state
     @State private var showingLevelUp = false
@@ -50,6 +51,16 @@ struct HomeView: View {
                 VStack(spacing: 32) {
                     // Player Card (now contains core attributes)
                     playerCard
+
+                    // Rehabilitation Arc banner (shown for 3 days after a Level 1 reset)
+                    if let currentProfile = profile, currentProfile.isInRecovery {
+                        rehabilitationBanner(for: currentProfile)
+                    }
+
+                    // Exemption Pass earned notification
+                    if let currentProfile = profile, currentProfile.exemptionPassCount > 0 {
+                        exemptionPassBanner(for: currentProfile)
+                    }
 
                     // Motivational coaching banner
                     if let currentProfile = profile {
@@ -132,27 +143,32 @@ struct HomeView: View {
                 }
             }
         }
-        .alert("Health Integration", isPresented: $showingHealthPermissions) {
-            Button("Enable Access") {
+        .alert("Training Grid Offline", isPresented: $showingHealthPermissions) {
+            Button("Sync the Grid") {
                 Task {
                     await dataManager.healthManager.requestAuthorization()
                 }
             }
-            Button("Use Mock Data") {
+            Button("Train Manually") {
                 showingHealthPermissions = false
             }
-            Button("Settings") {
+            Button("Open Settings") {
                 if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
                     UIApplication.shared.open(settingsUrl)
                 }
             }
         } message: {
-            Text(dataManager.healthManager.permissionStatusMessage)
+            Text("Connect Apple Health to auto-complete step, sleep, and calorie quests — and unlock passive XP every time your body moves.")
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingSettingsSheet) {
             SettingsView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingInventorySheet) {
+            InventoryAndShopView()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -212,14 +228,14 @@ struct HomeView: View {
                                 )
 
                             Button {
-                                showingSettingsSheet = true
+                                showingInventorySheet = true
                             } label: {
-                                Image(systemName: "gearshape.fill")
+                                Image(systemName: "bag.fill")
                                     .font(.system(size: 18, weight: .bold))
                                     .foregroundColor(.cyan)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Open Settings")
+                            .accessibilityLabel("Open Inventory")
                         }
                         
                         ZStack(alignment: .leading) {
@@ -346,6 +362,113 @@ struct HomeView: View {
         )
     }
     
+    // MARK: - Rehabilitation Arc Banner
+
+    @ViewBuilder
+    private func rehabilitationBanner(for profile: Profile) -> some View {
+        let daysLeft = profile.recoveryDaysRemaining
+        let dayNum = max(1, 4 - daysLeft)
+
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                Image(systemName: "cross.circle.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.red)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("REHABILITATION ARC")
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundColor(.red)
+                    Text("DAY \(dayNum)/3")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.red.opacity(0.7))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(Color.red.opacity(0.15)))
+                }
+                Text("System failure detected. Reduced difficulty protocols active — \(daysLeft) day\(daysLeft == 1 ? "" : "s") remaining. Rebuild your foundation.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Progress dots
+                HStack(spacing: 6) {
+                    ForEach(1...3, id: \.self) { day in
+                        Circle()
+                            .fill(day < dayNum ? Color.red : (day == dayNum ? Color.red : Color.red.opacity(0.2)))
+                            .frame(width: 8, height: 8)
+                    }
+                    Text("Recovery complete at Day 3")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.red.opacity(0.4), lineWidth: 1.5)
+                )
+        )
+    }
+
+    // MARK: - Exemption Pass Banner
+
+    @ViewBuilder
+    private func exemptionPassBanner(for profile: Profile) -> some View {
+        let count = profile.exemptionPassCount
+        // Only show once per milestone (i.e., when count was just awarded)
+        // We show a persistent indicator so the player knows they have protection
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.cyan.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                Image(systemName: "shield.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.cyan)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("EXEMPTION PASS ACTIVE")
+                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .foregroundColor(.cyan)
+                Text("You have \(count) Hermit's Miracle Seed\(count == 1 ? "" : "s"). The System will consume one automatically if you miss the midnight deadline.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            // Pass count badge
+            VStack(spacing: 2) {
+                Text("\(count)")
+                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .foregroundColor(.cyan)
+                Text("PASS\(count == 1 ? "" : "ES")")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan.opacity(0.6))
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.cyan.opacity(0.4), lineWidth: 1.5)
+                )
+        )
+    }
+
     // MARK: - Recovery / Deload Recommendation Card
 
     /// Returns a recommendation level based on HRV, sleep, and recent workout frequency.
@@ -495,6 +618,7 @@ struct HomeView: View {
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(colorScheme == .dark ? .white : .black)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                             
                             Spacer()
                             

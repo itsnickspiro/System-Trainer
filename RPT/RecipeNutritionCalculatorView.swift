@@ -78,10 +78,8 @@ struct RecipeNutritionCalculatorView: View {
                 if !ingredients.isEmpty {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("Log Total") {
-                            // Optionally log the whole recipe as a custom food in the future
+                            logRecipe()
                         }
-                        .disabled(true) // placeholder
-                        .foregroundColor(.secondary)
                     }
                 }
             }
@@ -166,6 +164,30 @@ struct RecipeNutritionCalculatorView: View {
             }
             .font(.caption2)
         }
+    }
+
+    // MARK: - Actions
+
+    private func logRecipe() {
+        let name = recipeName.isEmpty ? "Recipe (\(ingredients.count) items)" : recipeName
+        // Store per-serving values as per-100g equivalents with servingSize = 100
+        let foodItem = FoodItem(
+            name: name,
+            brand: "Recipe",
+            caloriesPer100g: perServingCalories,
+            servingSize: 100,
+            carbohydrates: perServingCarbs,
+            protein: perServingProtein,
+            fat: perServingFat,
+            fiber: totalFiber / Double(max(1, servings)),
+            sodium: totalSodium / Double(max(1, servings)),
+            isCustom: true
+        )
+        context.insert(foodItem)
+        let entry = FoodEntry(foodItem: foodItem, quantity: 100, unit: .grams, meal: .lunch)
+        context.insert(entry)
+        try? context.save()
+        dismiss()
     }
 
     // MARK: - Helpers

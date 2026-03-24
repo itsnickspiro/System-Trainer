@@ -1,12 +1,16 @@
 import SwiftUI
+import SwiftData
 
 struct CoachView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.modelContext) private var context
     @StateObject private var dataManager = DataManager.shared
     private var ai: AIManager { AIManager.shared }
     @State private var userInput = ""
     @State private var messages: [ChatMessage] = []
     @State private var isTyping = false
+    @State private var showingSleepPicker = false
+    @State private var sleepHoursInput: Double = 7.5
 
     var body: some View {
         NavigationStack {
@@ -58,6 +62,37 @@ struct CoachView: View {
                 // Input Area
                 VStack(spacing: 0) {
                     Divider()
+
+                    // Quick Action Chips
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ActionChip(icon: "drop.fill", label: "Log Water", color: .blue) {
+                                logWater()
+                            }
+                            ActionChip(icon: "bed.double.fill", label: "Log Sleep", color: .indigo) {
+                                showingSleepPicker = true
+                            }
+                            ActionChip(icon: "dumbbell.fill", label: "Analyze Stats", color: .orange) {
+                                userInput = "Analyze my stats and tell me what to prioritize today."
+                                sendMessage()
+                            }
+                            ActionChip(icon: "fork.knife", label: "Meal Advice", color: .green) {
+                                userInput = "Based on my nutrition goal and today's calories, what should I eat next?"
+                                sendMessage()
+                            }
+                            ActionChip(icon: "figure.run", label: "Workout Plan", color: .cyan) {
+                                userInput = "What is my workout focus today and which exercises should I prioritize?"
+                                sendMessage()
+                            }
+                            ActionChip(icon: "bolt.fill", label: "Level Up Tips", color: .yellow) {
+                                userInput = "What is the fastest way to gain XP and level up given my current stats?"
+                                sendMessage()
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                    }
+
                     HStack(spacing: 12) {
                         TextField("Query the System...", text: $userInput, axis: .vertical)
                             .textFieldStyle(.plain)
@@ -80,14 +115,18 @@ struct CoachView: View {
                         .disabled(userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTyping)
                     }
                     .padding(.horizontal)
-                    .padding(.vertical, 12)
+                    .padding(.bottom, 12)
                 }
                 .background(colorScheme == .dark ? Color.black.opacity(0.9) : Color.white)
             }
             .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color(.systemGroupedBackground))
             .navigationTitle("THE SYSTEM")
             .navigationBarTitleDisplayMode(.inline)
-
+            .sheet(isPresented: $showingSleepPicker) {
+                SleepLogSheet(hours: $sleepHoursInput) { hours in
+                    logSleep(hours: hours)
+                }
+            }
         }
     }
 
@@ -105,7 +144,7 @@ struct CoachView: View {
                 .font(.title.bold())
                 .foregroundStyle(.cyan)
 
-            Text("Player data is being monitored. Submit your query.")
+            Text("Player data is being monitored. Use quick actions or submit a query.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -116,10 +155,10 @@ struct CoachView: View {
                     .font(.caption.bold())
                     .foregroundColor(.secondary)
 
-                suggestedQuestion("Analyze my current stats")
-                suggestedQuestion("How do I increase my Endurance?")
-                suggestedQuestion("What should I focus on today?")
-                suggestedQuestion("Explain my XP progress")
+                suggestedQuestion("Why is my Energy stat low?")
+                suggestedQuestion("Am I on track to level up this week?")
+                suggestedQuestion("What food should I log after a workout?")
+                suggestedQuestion("Rate my performance today.")
             }
             .padding()
             .background(
@@ -153,6 +192,37 @@ struct CoachView: View {
         }
     }
 
+    // MARK: - Quick Actions
+
+    private func logWater() {
+        guard let profile = dataManager.currentProfile else { return }
+        profile.waterIntake += 1
+        try? context.save()
+        let glasses = profile.waterIntake
+        let systemMsg = glasses >= 8
+            ? "Directive: \(glasses) glasses logged. Hydration threshold achieved. Endurance XP unlocked."
+            : "Notice: Water intake updated — \(glasses)/8 glasses logged. \(8 - glasses) remaining to threshold. Continue."
+        messages.append(ChatMessage(content: "Log water (+1 glass)", isUser: true))
+        messages.append(ChatMessage(content: systemMsg, isUser: false))
+    }
+
+    private func logSleep(hours: Double) {
+        guard let profile = dataManager.currentProfile else { return }
+        profile.sleepHours = hours
+        try? context.save()
+        let formatted = String(format: "%.1f", hours)
+        let systemMsg: String
+        if hours >= 8 {
+            systemMsg = "Notice: \(formatted)h sleep logged. Optimal recovery achieved. Energy and Focus stats operating at full capacity."
+        } else if hours >= 7 {
+            systemMsg = "Analysis: \(formatted)h sleep logged. Suboptimal — 0.\(Int((8.0 - hours) * 10))h short of threshold. Focus stat mildly suppressed."
+        } else {
+            systemMsg = "Analysis: \(formatted)h sleep logged. Sleep deficit detected. Focus and Energy stats operating below capacity. Directive: Restore 8h cycle."
+        }
+        messages.append(ChatMessage(content: "Log sleep: \(formatted) hours", isUser: true))
+        messages.append(ChatMessage(content: systemMsg, isUser: false))
+    }
+
     // MARK: - Send
 
     private func sendMessage() {
@@ -163,11 +233,11 @@ struct CoachView: View {
         userInput = ""
         isTyping = true
 
-        let context = buildPlayerContext()
+        let ctx = buildPlayerContext()
 
         Task {
             do {
-                let reply = try await ai.chat(message: trimmed, context: context)
+                let reply = try await ai.chat(message: trimmed, context: ctx)
                 isTyping = false
                 messages.append(ChatMessage(content: reply, isUser: false))
             } catch AIManagerError.unavailable {
@@ -186,7 +256,7 @@ struct CoachView: View {
         }
     }
 
-    /// Serialise the current player profile into a compact JSON string for context injection.
+    /// Serialise the current player profile into a compact context string for the AI.
     private func buildPlayerContext() -> String {
         guard let profile = dataManager.currentProfile else { return "" }
         let quests = dataManager.todaysQuests
@@ -212,10 +282,94 @@ struct CoachView: View {
                 "steps": profile.dailySteps,
                 "active_calories": profile.dailyActiveCalories,
                 "sleep_hours": profile.sleepHours,
+                "water_glasses": profile.waterIntake,
                 "resting_heart_rate": profile.restingHeartRate
             ]
         ]
         return (try? String(data: JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted), encoding: .utf8)) ?? ""
+    }
+}
+
+// MARK: - Action Chip
+
+struct ActionChip: View {
+    let icon: String
+    let label: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundColor(color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.12))
+                    .overlay(Capsule().stroke(color.opacity(0.35), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Sleep Log Sheet
+
+struct SleepLogSheet: View {
+    @Binding var hours: Double
+    let onLog: (Double) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let options: [Double] = [4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10]
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Image(systemName: "bed.double.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(.indigo)
+                    .padding(.top, 20)
+
+                Text("How many hours did you sleep?")
+                    .font(.headline)
+
+                Picker("Sleep Hours", selection: $hours) {
+                    ForEach(options, id: \.self) { h in
+                        Text(String(format: "%.1fh", h)).tag(h)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 150)
+
+                Button(action: {
+                    onLog(hours)
+                    dismiss()
+                }) {
+                    Text("Log \(String(format: "%.1f", hours)) Hours")
+                        .font(.system(size: 16, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color.indigo))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal)
+
+                Spacer()
+            }
+            .navigationTitle("Log Sleep")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }
 

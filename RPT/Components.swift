@@ -1,7 +1,7 @@
-import SwiftUI
-import SwiftUI
-import SwiftData
+import Combine
 import Foundation
+import SwiftData
+import SwiftUI
 
 struct XPBar: View {
     var currentXP: Int
@@ -474,28 +474,32 @@ struct StatDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     let stat: RPGStatsBar.StatType
     let profile: Profile
-    
+
+    @State private var showSleepLog = false
+    @State private var sleepHoursInput: Double = 7.5
+    @State private var showMeditation = false
+
     private var value: Double { stat.getValue(from: profile) }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: stat.icon)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(stat.color)
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stat.displayName)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-                    
+
                     Text("Current: \(Int(value))/100")
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundColor(stat.color.opacity(0.8))
                 }
-                
+
                 Spacer()
-                
+
                 // Status indicator
                 VStack(alignment: .trailing, spacing: 2) {
                     Circle()
@@ -510,12 +514,12 @@ struct StatDetailView: View {
                         .foregroundColor(.secondary)
                 }
             }
-            
+
             Text(stat.description)
                 .font(.system(size: 12, weight: .regular))
                 .foregroundColor(.gray)
                 .lineLimit(nil)
-            
+
             // Quick actions based on stat type
             quickActions(for: stat)
         }
@@ -528,8 +532,16 @@ struct StatDetailView: View {
                         .stroke(stat.color.opacity(0.5), lineWidth: 1)
                 )
         )
+        .sheet(isPresented: $showSleepLog) {
+            SleepLogSheet(hours: $sleepHoursInput) { hours in
+                profile.recordSleep(hours: hours)
+            }
+        }
+        .sheet(isPresented: $showMeditation) {
+            MeditationTimerSheet()
+        }
     }
-    
+
     private func statusColor(for value: Double) -> Color {
         switch value {
         case 80...: return .green
@@ -538,7 +550,7 @@ struct StatDetailView: View {
         default: return .red
         }
     }
-    
+
     private func statusText(for value: Double) -> String {
         switch value {
         case 80...: return "EXCELLENT"
@@ -548,37 +560,53 @@ struct StatDetailView: View {
         default: return "CRITICAL"
         }
     }
-    
+
     @ViewBuilder
     private func quickActions(for stat: RPGStatsBar.StatType) -> some View {
         HStack(spacing: 8) {
             switch stat {
             case .health:
                 QuickActionButton(title: "Log Meal", icon: "fork.knife", color: .green) {
-                    // TODO: Open meal logging
+                    NotificationCenter.default.post(
+                        name: .rptNavigateToTab,
+                        object: nil,
+                        userInfo: ["tab": "diet"]
+                    )
                 }
                 QuickActionButton(title: "Drink Water", icon: "drop.fill", color: .blue) {
                     profile.recordWaterIntake()
                 }
             case .energy:
                 QuickActionButton(title: "Log Sleep", icon: "bed.double.fill", color: .purple) {
-                    // TODO: Open sleep logging
+                    showSleepLog = true
                 }
             case .strength:
                 QuickActionButton(title: "Strength Training", icon: "dumbbell", color: .orange) {
-                    // TODO: Open workout logging
+                    NotificationCenter.default.post(
+                        name: .rptNavigateToTab,
+                        object: nil,
+                        userInfo: ["tab": "training"]
+                    )
                 }
             case .endurance:
                 QuickActionButton(title: "Cardio", icon: "heart.fill", color: .red) {
-                    // TODO: Open cardio logging
+                    NotificationCenter.default.post(
+                        name: .rptNavigateToTab,
+                        object: nil,
+                        userInfo: ["tab": "training"]
+                    )
                 }
             case .focus:
                 QuickActionButton(title: "Meditate", icon: "brain", color: .purple) {
-                    // TODO: Open meditation timer
+                    showMeditation = true
                 }
             case .discipline:
                 QuickActionButton(title: "View Quests", icon: "target", color: .green) {
-                    // TODO: Navigate to quests
+                    NotificationCenter.default.post(
+                        name: .rptNavigateToTab,
+                        object: nil,
+                        userInfo: ["tab": "quests"]
+                    )
                 }
             }
         }
@@ -688,6 +716,7 @@ struct WeekScroller: View {
 struct QuestRow: View {
     var quest: Quest
     var onToggle: (() -> Void)?
+    @State private var showingDetail = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -797,6 +826,181 @@ struct QuestRow: View {
         .scaleEffect(quest.isCompleted ? 0.98 : 1.0)
         .opacity(quest.isCompleted ? 0.7 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: quest.isCompleted)
+        .contentShape(Rectangle())
+        .onTapGesture { showingDetail = true }
+        .sheet(isPresented: $showingDetail) {
+            QuestDetailSheet(quest: quest, onToggle: onToggle)
+        }
+    }
+}
+
+// MARK: - Quest Detail Sheet
+
+struct QuestDetailSheet: View {
+    let quest: Quest
+    var onToggle: (() -> Void)?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Status hero
+                    ZStack {
+                        LinearGradient(
+                            colors: [quest.type.color.opacity(0.25), quest.type.color.opacity(0.05)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                        VStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(quest.type.color.opacity(0.2))
+                                    .frame(width: 80, height: 80)
+                                Image(systemName: quest.isCompleted ? "checkmark.seal.fill" : questTypeIcon(quest.type))
+                                    .font(.system(size: 38))
+                                    .foregroundColor(quest.isCompleted ? .green : quest.type.color)
+                            }
+                            .padding(.top, 28)
+
+                            HStack(spacing: 8) {
+                                Text(quest.type.displayName.uppercased())
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(quest.type.color)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(quest.type.color.opacity(0.15)))
+
+                                if quest.isCompleted {
+                                    Text("COMPLETED")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.green)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(Capsule().fill(Color.green.opacity(0.15)))
+                                }
+                            }
+                            .padding(.bottom, 24)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 0))
+
+                    VStack(spacing: 20) {
+                        // Details text
+                        if !quest.details.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Label("OBJECTIVE", systemImage: "doc.text.fill")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                Text(quest.details)
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemGray6)))
+                        }
+
+                        // Stats grid
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            QuestStatCell(label: "XP REWARD", value: "+\(quest.xpReward)", icon: "bolt.fill", color: .cyan)
+
+                            if let stat = quest.statTarget, !stat.isEmpty {
+                                QuestStatCell(label: "STAT BOOST", value: stat.capitalized, icon: "chart.bar.fill", color: quest.type.color)
+                            }
+
+                            if let due = quest.dueDate {
+                                QuestStatCell(
+                                    label: "DUE",
+                                    value: due.formatted(date: .abbreviated, time: .omitted),
+                                    icon: "clock.fill",
+                                    color: .orange
+                                )
+                            }
+
+                            if let condition = quest.completionCondition, !condition.isEmpty {
+                                QuestStatCell(label: "VERIFIED BY", value: verificationLabel(condition), icon: "checkmark.shield.fill", color: .green)
+                            }
+                        }
+
+                        // Complete / Uncomplete button
+                        Button(action: {
+                            onToggle?()
+                            dismiss()
+                        }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: quest.isCompleted ? "arrow.uturn.left.circle.fill" : "checkmark.circle.fill")
+                                    .font(.system(size: 20))
+                                Text(quest.isCompleted ? "Mark Incomplete" : "Complete Quest")
+                                    .font(.system(size: 16, weight: .bold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(quest.isCompleted ? Color.orange : Color.green)
+                            )
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 30)
+                }
+            }
+            .ignoresSafeArea(edges: .top)
+            .navigationTitle(quest.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func verificationLabel(_ condition: String) -> String {
+        let parts = condition.split(separator: ":").map(String.init)
+        switch parts.first {
+        case "steps":    return "HealthKit Steps"
+        case "calories": return "Active Calories"
+        case "workout":  return "Workout Log"
+        case "sleep":    return "HealthKit Sleep"
+        default:         return "Manual"
+        }
+    }
+
+    private func questTypeIcon(_ type: QuestType) -> String {
+        switch type {
+        case .daily:  return "sun.max.fill"
+        case .weekly: return "calendar.badge.clock"
+        case .custom: return "star.fill"
+        }
+    }
+}
+
+struct QuestStatCell: View {
+    let label: String
+    let value: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundColor(color)
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.center)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
     }
 }
 
@@ -939,6 +1143,158 @@ struct CurvedStatRing: View {
             }
         }
         .accessibilityLabel(Text(icon))
+    }
+}
+
+// MARK: - Meditation Timer Sheet
+
+struct MeditationTimerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var secondsRemaining: Int = 0
+    @State private var totalSeconds: Int = 300
+    @State private var isRunning = false
+    @State private var phase: MeditationPhase = .inhale
+    @State private var breathProgress: Double = 0
+
+    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let breathTicker = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+
+    enum MeditationPhase: String {
+        case inhale = "Inhale"
+        case hold   = "Hold"
+        case exhale = "Exhale"
+
+        var color: Color {
+            switch self {
+            case .inhale: return .cyan
+            case .hold:   return .indigo
+            case .exhale: return .purple
+            }
+        }
+
+        static let phaseDuration: Double = 4.0
+    }
+
+    private let durations = [60, 120, 180, 300, 600]
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 32) {
+                // Duration picker shown before session starts
+                if !isRunning && secondsRemaining == 0 {
+                    Picker("Duration", selection: $totalSeconds) {
+                        ForEach(durations, id: \.self) { sec in
+                            Text("\(sec / 60) min").tag(sec)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                }
+
+                // Breath guidance circle
+                ZStack {
+                    Circle()
+                        .stroke(phase.color.opacity(0.15), lineWidth: 20)
+                        .frame(width: 200, height: 200)
+
+                    Circle()
+                        .trim(from: 0, to: breathProgress)
+                        .stroke(
+                            LinearGradient(
+                                colors: [phase.color, phase.color.opacity(0.4)],
+                                startPoint: .top, endPoint: .bottom
+                            ),
+                            style: StrokeStyle(lineWidth: 20, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 200, height: 200)
+                        .animation(.linear(duration: 0.05), value: breathProgress)
+
+                    VStack(spacing: 4) {
+                        Text(phase.rawValue)
+                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            .foregroundColor(phase.color)
+                        if isRunning || secondsRemaining > 0 {
+                            Text(timeString(secondsRemaining))
+                                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                HStack(spacing: 20) {
+                    Button(action: toggleTimer) {
+                        Label(isRunning ? "Pause" : "Start",
+                              systemImage: isRunning ? "pause.fill" : "play.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 120, height: 44)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.indigo))
+                            .foregroundColor(.white)
+                    }
+
+                    if secondsRemaining > 0 || isRunning {
+                        Button(action: resetTimer) {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 100, height: 44)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.3)))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(.top, 24)
+            .navigationTitle("Meditate")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .onReceive(ticker) { _ in
+                guard isRunning else { return }
+                if secondsRemaining > 0 {
+                    secondsRemaining -= 1
+                } else {
+                    isRunning = false
+                }
+            }
+            .onReceive(breathTicker) { _ in
+                guard isRunning else { return }
+                let elapsed = Double(totalSeconds - secondsRemaining)
+                let cycleDuration = MeditationPhase.phaseDuration * 3
+                let posInCycle = elapsed.truncatingRemainder(dividingBy: cycleDuration)
+                let d = MeditationPhase.phaseDuration
+                if posInCycle < d {
+                    phase = .inhale
+                    breathProgress = posInCycle / d
+                } else if posInCycle < d * 2 {
+                    phase = .hold
+                    breathProgress = (posInCycle - d) / d
+                } else {
+                    phase = .exhale
+                    breathProgress = (posInCycle - d * 2) / d
+                }
+            }
+        }
+    }
+
+    private func toggleTimer() {
+        if secondsRemaining == 0 { secondsRemaining = totalSeconds }
+        isRunning.toggle()
+    }
+
+    private func resetTimer() {
+        isRunning = false
+        secondsRemaining = 0
+        breathProgress = 0
+        phase = .inhale
+    }
+
+    private func timeString(_ seconds: Int) -> String {
+        String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 

@@ -1,8 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
 serve(async (req) => {
@@ -16,47 +18,97 @@ serve(async (req) => {
   if (!appSecret || !incomingSecret || incomingSecret !== appSecret) {
     return new Response(
       JSON.stringify({ error: "Unauthorized" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   }
 
   try {
     const body = await req.json();
-    const { muscle, type, name, difficulty, offset } = body;
 
-    const apiKey = Deno.env.get("API_NINJAS_KEY");
-    if (!apiKey) {
+    // Input parameters (all optional)
+    const query: string     = (body.query     ?? body.name  ?? "").trim();
+    const category: string  = (body.category  ?? body.type  ?? "").trim();
+    const muscle: string    = (body.muscle                  ?? "").trim();
+    const level: string     = (body.level     ?? body.difficulty ?? "").trim();
+    const equipment: string = (body.equipment               ?? "").trim();
+    const limit: number     = Math.min(parseInt(body.limit ?? "30", 10), 100);
+    const offset: number    = Math.max(parseInt(body.offset ?? "0",  10), 0);
+
+    // Create a Supabase client with the service role key so RLS is bypassed
+    // (the exercises table has a public read policy, but service role is
+    //  slightly faster since it skips the policy check entirely)
+    const supabaseUrl  = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey   = Deno.env.get("DB_SERVICE_ROLE_KEY")!;
+    const supabase     = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false },
+    });
+
+    // Call the search_exercises RPC defined in the migration
+    const { data, error } = await supabase.rpc("search_exercises", {
+      p_query:     query,
+      p_category:  category,
+      p_level:     level,
+      p_equipment: equipment,
+      p_muscle:    muscle,
+      lim:         limit,
+      off:         offset,
+    });
+
+    if (error) {
+      console.error("RPC error:", error);
       return new Response(
-        JSON.stringify({ error: "Server configuration error" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Database query failed", detail: error.message }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
       );
     }
 
-    const params = new URLSearchParams();
-    if (muscle)         params.set("muscle", muscle);
-    if (type)           params.set("type", type);
-    if (name)           params.set("name", name);
-    if (difficulty)     params.set("difficulty", difficulty);
-    if (offset != null) params.set("offset", String(offset));
+    // Map DB rows to the shape the iOS app expects
+    // Keeps backwards-compat with existing Exercise struct while adding new fields
+    const exercises = (data ?? []).map((row: Record<string, unknown>) => ({
+      // Core fields (backwards-compatible with old API Ninjas shape)
+      name:              row.name,
+      type:              row.category,
+      muscle:            (row.primary_muscles as string[])?.[0] ?? null,
+      secondaryMuscle:   (row.secondary_muscles as string[])?.[0] ?? null,
+      equipment:         row.equipment ?? null,
+      difficulty:        row.level ?? null,
+      instructions:      Array.isArray(row.instructions)
+                           ? (row.instructions as string[]).join("\n")
+                           : null,
 
-    const query = params.toString();
-    const upstreamURL = `https://api.api-ninjas.com/v1/exercises${query ? "?" + query : ""}`;
+      // Extended fields (new in this version)
+      slug:              row.slug,
+      primaryMuscles:    row.primary_muscles   ?? [],
+      secondaryMuscles:  row.secondary_muscles ?? [],
+      force:             row.force   ?? null,
+      level:             row.level   ?? null,
+      mechanic:          row.mechanic ?? null,
+      category:          row.category ?? null,
+      instructionSteps:  row.instructions ?? [],
+      tips:              row.tips ?? null,
+      imageUrls:         row.image_urls ?? [],
+      gifUrl:            row.gif_url ?? null,
+      youtubeSearchUrl:  row.youtube_search_url ?? null,
+    }));
 
-    const upstreamResponse = await fetch(upstreamURL, {
-      method: "GET",
-      headers: { "X-Api-Key": apiKey },
-    });
-
-    const data = await upstreamResponse.json();
-
-    return new Response(JSON.stringify(data), {
-      status: upstreamResponse.status,
+    return new Response(JSON.stringify(exercises), {
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
+    console.error("exercises-proxy error:", err);
     return new Response(
       JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
     );
   }
 });

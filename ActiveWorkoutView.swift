@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import ActivityKit
 
 // MARK: - ActiveWorkoutView
 //
@@ -24,6 +25,8 @@ struct ActiveWorkoutView: View {
     @State private var showCompletionBanner = false
     @State private var isCompleting = false
     @State private var elapsedSeconds = 0
+    @State private var showResumeAlert = false
+    @State private var pendingAutosave: WorkoutAutosaveState? = nil
 
     private var profile: Profile? { profiles.first }
 
@@ -104,19 +107,56 @@ struct ActiveWorkoutView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Abandon") { dismiss() }
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.red)
+                    Button("Abandon") {
+                        WorkoutAutosaveManager.shared.clearSave()
+                        WorkoutActivityManager.shared.end(totalVolumeKg: 0, xpAwarded: 0)
+                        dismiss()
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.red)
                 }
             }
             .preferredColorScheme(.dark)
         }
         .onAppear(perform: buildInitialSets)
+        .alert("Resume Workout?", isPresented: $showResumeAlert, presenting: pendingAutosave) { save in
+            Button("Resume") { restoreAutosave(save) }
+            Button("Start Fresh", role: .destructive) {
+                WorkoutAutosaveManager.shared.clearSave()
+                pendingAutosave = nil
+            }
+        } message: { save in
+            let elapsed = save.elapsedSeconds / 60
+            let completed = save.sets.values.flatMap { $0 }.filter(\.isComplete).count
+            Text("Found a session from \(elapsed) min ago with \(completed) sets logged. Continue where you left off?")
+        }
+        .onChange(of: completedSetsCount) { _, newCount in
+            // Update Live Activity when a set is marked complete
+            let totalSets = setStates.values.flatMap { $0 }.count
+            let currentExercise = currentExerciseName
+            WorkoutActivityManager.shared.update(
+                currentExercise: currentExercise,
+                setsCompleted: newCount,
+                totalSets: max(1, totalSets),
+                totalVolumeKg: currentTotalVolume
+            )
+        }
         .task {
-            // Elapsed timer — pure async loop, no Combine
+            // Elapsed timer + autosave — pure async loop
+            var secondsSinceLastSave = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 elapsedSeconds += 1
+                secondsSinceLastSave += 1
+                // Autosave every 30 seconds
+                if secondsSinceLastSave >= 30 {
+                    secondsSinceLastSave = 0
+                    WorkoutAutosaveManager.shared.save(
+                        routineName: routine.name,
+                        elapsedSeconds: elapsedSeconds,
+                        setStates: setStates
+                    )
+                }
             }
         }
     }
@@ -127,13 +167,59 @@ struct ActiveWorkoutView: View {
         setStates.values.flatMap { $0 }.filter(\.isComplete).count
     }
 
+    /// The exercise currently being logged (first incomplete exercise, or last if all done).
+    private var currentExerciseName: String {
+        for wgerID in routine.exerciseWgerIDs {
+            guard let sets = setStates[wgerID] else { continue }
+            if sets.contains(where: { !$0.isComplete }) {
+                return sets.first?.exerciseName.isEmpty == false
+                    ? (sets.first?.exerciseName ?? "Exercise")
+                    : "Exercise \(wgerID)"
+            }
+        }
+        return routine.name
+    }
+
+    private var currentTotalVolume: Double {
+        setStates.values.flatMap { $0 }
+            .filter(\.isComplete)
+            .reduce(0) { $0 + $1.weightKgValue * Double($1.repsValue) }
+    }
+
     // MARK: - Setup
 
     private func buildInitialSets() {
+        // Check for an autosave first
+        if let saved = WorkoutAutosaveManager.shared.loadSave(for: routine.name) {
+            pendingAutosave = saved
+            showResumeAlert = true
+        }
+
+        // Build default sets (may be overridden by restoreAutosave)
         for wgerID in routine.exerciseWgerIDs {
             guard setStates[wgerID] == nil else { continue }
             setStates[wgerID] = (1...3).map { WorkoutEditableSet(setNumber: $0, wgerID: wgerID) }
         }
+
+        // Start Live Activity now that we know the total sets
+        let totalSets = routine.exerciseWgerIDs.count * 3
+        WorkoutActivityManager.shared.start(
+            routineName: routine.name,
+            totalSets: totalSets
+        )
+    }
+
+    private func restoreAutosave(_ save: WorkoutAutosaveState) {
+        let restored = WorkoutAutosaveManager.shared.restoreSetStates(from: save)
+        // Merge: use restored sets where available, fallback to defaults
+        for wgerID in routine.exerciseWgerIDs {
+            if let restoredSets = restored[wgerID], !restoredSets.isEmpty {
+                setStates[wgerID] = restoredSets
+            }
+        }
+        elapsedSeconds = save.elapsedSeconds
+        WorkoutAutosaveManager.shared.clearSave()
+        pendingAutosave = nil
     }
 
     // MARK: - Complete Quest
@@ -171,6 +257,15 @@ struct ActiveWorkoutView: View {
 
         try? context.save()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        // Clear autosave since the workout is finished
+        WorkoutAutosaveManager.shared.clearSave()
+
+        // End the Live Activity
+        WorkoutActivityManager.shared.end(
+            totalVolumeKg: session.totalVolumeKg,
+            xpAwarded: session.xpAwarded
+        )
 
         withAnimation(.spring(duration: 0.4)) {
             showCompletionBanner = true

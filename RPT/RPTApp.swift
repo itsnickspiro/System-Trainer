@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
+import WidgetKit
 
 extension Notification.Name {
     static let rptAddFriendDeepLink = Notification.Name("rptAddFriendDeepLink")
+    static let rptNavigateToTab = Notification.Name("rptNavigateToTab")
 }
 
 @main
@@ -98,6 +100,9 @@ struct RPTApp: App {
             .onOpenURL { url in
                 handleDeepLink(url)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .rptWidgetDataDidChange)) { _ in
+                WidgetCenter.shared.reloadAllTimelines()
+            }
             .task {
                 // Request notification permission and schedule recurring notifications
                 await notificationManager.requestAuthorization()
@@ -105,23 +110,37 @@ struct RPTApp: App {
                     notificationManager.setupNotificationCategories()
                     notificationManager.configureRecurringNotifications()
                 }
+                // Refresh anime workout plans from Supabase (falls back to bundled data)
+                await AnimeWorkoutPlanService.shared.refresh()
             }
         }
         .modelContainer(sharedModelContainer)
     }
 
-    /// Handles incoming deep links of the form `rpt://addfriend/XXXXXX`.
+    /// Handles incoming deep links.
+    /// - `rpt://addfriend/XXXXXX` → friend invite
+    /// - `rpt://quests`           → navigate to Quests tab (from widget)
+    /// - `rpt://diet`             → navigate to Diet tab (from widget)
     private func handleDeepLink(_ url: URL) {
-        guard url.scheme?.lowercased() == "rpt",
-              url.host?.lowercased() == "addfriend" else { return }
-        // The friend code is the first path component, e.g. /A3F9K2
-        let code = url.pathComponents.dropFirst().first?.uppercased() ?? ""
-        guard code.count == 6 else { return }
-        NotificationCenter.default.post(
-            name: .rptAddFriendDeepLink,
-            object: nil,
-            userInfo: ["code": code]
-        )
+        guard url.scheme?.lowercased() == "rpt" else { return }
+        let host = url.host?.lowercased() ?? ""
+
+        switch host {
+        case "addfriend":
+            let code = url.pathComponents.dropFirst().first?.uppercased() ?? ""
+            guard code.count == 6 else { return }
+            NotificationCenter.default.post(
+                name: .rptAddFriendDeepLink,
+                object: nil,
+                userInfo: ["code": code]
+            )
+        case "quests":
+            NotificationCenter.default.post(name: .rptNavigateToTab, object: nil, userInfo: ["tab": "quests"])
+        case "diet":
+            NotificationCenter.default.post(name: .rptNavigateToTab, object: nil, userInfo: ["tab": "diet"])
+        default:
+            break
+        }
     }
     
     private func setupUserDefaults() {

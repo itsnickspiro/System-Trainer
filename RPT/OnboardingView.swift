@@ -577,23 +577,62 @@ struct PermissionStepView: View {
                 }
                 
             case .health:
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     if healthManager.isAuthorized {
-                        HStack {
+                        HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
-                            Text("Health access granted!")
+                            Text("Synced to the Training Grid!")
                                 .foregroundColor(.green)
+                                .fontWeight(.semibold)
                         }
+                        Text("Your biometrics are now feeding live data into your quest engine. Steps, sleep, and active calories will auto-complete matching quests.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
                     } else if !healthManager.healthDataAvailable {
-                        Text("Health data not available on this device")
-                            .foregroundColor(.orange)
+                        VStack(spacing: 8) {
+                            Image(systemName: "sensor.tag.radiowaves.forward.fill")
+                                .font(.title2)
+                                .foregroundColor(.orange)
+                            Text("Training Grid Offline")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.orange)
+                            Text("Apple Health isn't available on this device. You can still log workouts and nutrition manually — your progress counts either way.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                    } else {
+                        VStack(spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "bolt.fill")
+                                    .foregroundColor(.yellow)
+                                Text("Unlock passive XP gains")
+                                    .font(.caption).fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                            }
+                            HStack(spacing: 6) {
+                                Image(systemName: "figure.walk")
+                                    .foregroundColor(.cyan)
+                                Text("Auto-complete step & sleep quests")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            HStack(spacing: 6) {
+                                Image(systemName: "flame.fill")
+                                    .foregroundColor(.orange)
+                                Text("Real calorie burn drives real rewards")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        Text("Your data stays private — RPT only reads, never writes to Apple Health.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .multilineTextAlignment(.center)
                     }
-                    
-                    Text("This enables automatic tracking of steps, sleep, and other health metrics")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
                 }
                 
             case .notifications:
@@ -675,11 +714,11 @@ struct PermissionStep {
         ),
         PermissionStep(
             type: .health,
-            title: "Connect Apple Health",
-            description: "Link your health data to automatically earn XP and track real progress.",
-            icon: "heart.circle.fill",
+            title: "Connect to the Training Grid",
+            description: "Sync Apple Health so every step, rep, and hour of sleep earns real XP. Quests auto-complete when your body does the work.",
+            icon: "sensor.tag.radiowaves.forward.fill",
             color: .red,
-            buttonTitle: "Connect Health"
+            buttonTitle: "Sync the Grid"
         ),
         PermissionStep(
             type: .notifications,
