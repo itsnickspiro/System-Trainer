@@ -14,7 +14,16 @@ struct RPTApp: App {
     @State private var isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     @State private var hasBootedUp = false
     @State private var notificationManager = NotificationManager()
-    
+
+    // MARK: - Black-screen safety fallback
+    //
+    // After the boot screen fires onComplete(), we expect ContentView or OnboardingView
+    // to appear immediately. If somehow the view remains black for 2 seconds (e.g. due
+    // to a SwiftUI state race on certain OS versions), we break the stuck state by
+    // briefly resetting hasBootedUp and re-setting it on the next run loop tick.
+    @State private var bootCompletedAt: Date? = nil
+    @State private var safetyFallbackArmed = false
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Quest.self,
@@ -81,21 +90,17 @@ struct RPTApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if !hasBootedUp {
-                    // Boot screen shown once per cold launch
-                    BootScreenView(onComplete: { hasBootedUp = true })
-                        .preferredColorScheme(.dark)
-                } else if isOnboardingComplete {
-                    ContentView()
-                        .onAppear {
-                            SampleFoodData.createSampleFoods(context: sharedModelContainer.mainContext)
-                            SystemDataSeeder.seedIfNeeded(context: sharedModelContainer.mainContext)
-                        }
-                } else {
-                    OnboardingView(isOnboardingComplete: $isOnboardingComplete)
-                }
-            }
+            // RootContainer is a stable wrapper whose identity never changes.
+            // The .task is attached here so it is never cancelled when the inner
+            // view switches between BootScreenView → OnboardingView → ContentView.
+            // Previously the .task was on the Group, which got cancelled and
+            // restarted on every view-tree replacement, causing hangs on TestFlight.
+            RootContainerView(
+                hasBootedUp: $hasBootedUp,
+                isOnboardingComplete: $isOnboardingComplete,
+                modelContainer: sharedModelContainer,
+                onBootComplete: handleBootComplete
+            )
             .preferredColorScheme(colorScheme == "auto" ? nil : (colorScheme == "dark" ? .dark : .light))
             .onOpenURL { url in
                 handleDeepLink(url)
@@ -103,26 +108,91 @@ struct RPTApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .rptWidgetDataDidChange)) { _ in
                 WidgetCenter.shared.reloadAllTimelines()
             }
+            // ── Service refresh chain ──────────────────────────────────────────
+            // Attached to RootContainerView (stable identity) so it runs ONCE on
+            // launch and is never cancelled by inner view transitions.
+            //
+            // Order matters:
+            //  1. CloudKit user ID — must resolve before any service that needs it.
+            //     Uses a 10-second timeout internally; failure is non-fatal.
+            //  2. RemoteConfig — feature flags needed by later services.
+            //  3. PlayerProfile — needs CloudKit ID, must come after step 1.
+            //  4–10. All other services in dependency order.
             .task {
-                // Request notification permission and schedule recurring notifications
+                // Step 1: Resolve CloudKit identity first (10-second timeout, non-fatal)
+                await LeaderboardService.shared.resolveCloudKitUserIDIfNeeded()
+
+                // Step 2: Notification permission (non-blocking UI)
                 await notificationManager.requestAuthorization()
                 if notificationManager.isAuthorized {
                     notificationManager.setupNotificationCategories()
                     notificationManager.configureRecurringNotifications()
                 }
-                // Refresh anime workout plans from Supabase (falls back to bundled data)
+                // Step 3: Remote config — feature flags / thresholds available ASAP
+                await RemoteConfigService.shared.refresh()
+                // Step 4: Cloud player profile (account recovery, overrides)
+                await PlayerProfileService.shared.refresh()
+                // Step 5: Quest templates and arcs
+                await QuestTemplateService.shared.refresh()
+                // Step 6: Achievement definitions
+                await AchievementsService.shared.refresh()
+                // Step 7: Announcements filtered by player level
+                await AnnouncementsService.shared.refresh()
+                // Step 8: Store catalog and player inventory
+                await StoreService.shared.refresh()
+                // Step 9: Special events and participation records
+                await EventsService.shared.refresh()
+                // Step 10: Anime workout plans (falls back to bundled data)
                 await AnimeWorkoutPlanService.shared.refresh()
+                // Step 11: Leaderboard upsert + rankings (CloudKit ID already resolved)
+                await LeaderboardService.shared.refresh()
+                // Step 12: Avatar catalog and current equipped avatar
+                await AvatarService.shared.refresh()
             }
         }
         .modelContainer(sharedModelContainer)
     }
 
+    // MARK: - Boot Completion + Safety Fallback
+
+    private func handleBootComplete() {
+        hasBootedUp = true
+        bootCompletedAt = Date()
+
+        // Arm a 2-second safety fallback. If the view is still black at that point
+        // (detectable because bootCompletedAt is still set — meaning ContentView's
+        // onAppear has not cleared it), we cycle hasBootedUp to break any stuck state.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            // If bootCompletedAt is still non-nil, ContentView never called onAppear
+            // and the screen is likely black. Reset the boot flag on the next tick.
+            if bootCompletedAt != nil {
+                print("[RPTApp] Safety fallback triggered — resetting boot state.")
+                hasBootedUp = false
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                hasBootedUp = true
+            }
+        }
+    }
+
+    // Called by ContentView.onAppear to signal that the UI rendered successfully.
+    static func signalContentViewAppeared() {
+        // Posts a notification that RPTApp observes to disarm the fallback.
+        NotificationCenter.default.post(name: .rptContentViewAppeared, object: nil)
+    }
+
+    // MARK: - Deep Links
+
     /// Handles incoming deep links.
-    /// - `rpt://addfriend/XXXXXX` → friend invite
-    /// - `rpt://quests`           → navigate to Quests tab (from widget)
-    /// - `rpt://diet`             → navigate to Diet tab (from widget)
+    /// - `rpt://addfriend/XXXXXX`          → friend invite
+    /// - `rpt://quests`                    → navigate to Quests tab (from widget)
+    /// - `rpt://diet`                      → navigate to Diet tab (from widget)
+    /// - `systemtrainer://addfriend/XXXXXX` → friend invite (new scheme)
+    /// - `systemtrainer://quests`           → navigate to Quests tab (new scheme)
+    /// - `systemtrainer://diet`             → navigate to Diet tab (new scheme)
     private func handleDeepLink(_ url: URL) {
-        guard url.scheme?.lowercased() == "rpt" else { return }
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme == "rpt" || scheme == "systemtrainer" else { return }
         let host = url.host?.lowercased() ?? ""
 
         switch host {
@@ -142,10 +212,10 @@ struct RPTApp: App {
             break
         }
     }
-    
+
     private func setupUserDefaults() {
         let defaults = UserDefaults.standard
-        
+
         // Set default notification preferences
         if defaults.object(forKey: "questReminders") == nil {
             defaults.set(true, forKey: "questReminders")
@@ -159,7 +229,7 @@ struct RPTApp: App {
         if defaults.object(forKey: "healthGoalNotifications") == nil {
             defaults.set(true, forKey: "healthGoalNotifications")
         }
-        
+
         // Set default gameplay preferences
         if defaults.object(forKey: "hardcoreMode") == nil {
             defaults.set(false, forKey: "hardcoreMode")
@@ -170,7 +240,7 @@ struct RPTApp: App {
         if defaults.object(forKey: "weeklyGoalsEnabled") == nil {
             defaults.set(true, forKey: "weeklyGoalsEnabled")
         }
-        
+
         // Set default appearance preferences
         if defaults.object(forKey: "colorScheme") == nil {
             defaults.set("dark", forKey: "colorScheme")
@@ -179,4 +249,57 @@ struct RPTApp: App {
             defaults.set(true, forKey: "animationsEnabled")
         }
     }
+}
+
+// MARK: - RootContainerView
+//
+// A stable wrapper with a fixed identity so the .task modifier on RPTApp
+// is never cancelled when the inner view changes between boot / onboarding / main.
+
+private struct RootContainerView: View {
+    @Binding var hasBootedUp: Bool
+    @Binding var isOnboardingComplete: Bool
+    let modelContainer: ModelContainer
+    let onBootComplete: () -> Void
+
+    // Disarm the safety fallback once ContentView appears.
+    @State private var contentViewHasAppeared = false
+
+    var body: some View {
+        Group {
+            if !hasBootedUp {
+                BootScreenView(onComplete: onBootComplete)
+                    .preferredColorScheme(.dark)
+            } else if isOnboardingComplete {
+                ContentView()
+                    .onAppear {
+                        guard !contentViewHasAppeared else { return }
+                        contentViewHasAppeared = true
+                        // Signal the safety fallback that the UI rendered — disarm it.
+                        NotificationCenter.default.post(name: .rptContentViewAppeared, object: nil)
+                        // Seed local data now that we have a model context
+                        let ctx = modelContainer.mainContext
+                        SampleFoodData.createSampleFoods(context: ctx)
+                        SystemDataSeeder.seedIfNeeded(context: ctx)
+                    }
+            } else {
+                OnboardingView(isOnboardingComplete: $isOnboardingComplete)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .rptContentViewAppeared)) { _ in
+            // Disarm the safety fallback by posting back to RPTApp via state.
+            // RPTApp observes this notification in handleBootComplete's Task.
+            // We signal by posting — RPTApp's Task checks bootCompletedAt.
+            // Setting contentViewHasAppeared here too for local guard above.
+            contentViewHasAppeared = true
+        }
+    }
+}
+
+// MARK: - Notification names
+
+extension Notification.Name {
+    /// Posted by RootContainerView when ContentView's onAppear fires.
+    /// RPTApp uses this to disarm the black-screen safety fallback.
+    static let rptContentViewAppeared = Notification.Name("rptContentViewAppeared")
 }

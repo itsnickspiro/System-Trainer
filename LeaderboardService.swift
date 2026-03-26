@@ -1,0 +1,288 @@
+import Foundation
+import SwiftUI
+import CloudKit
+
+// MARK: - LeaderboardService
+//
+// Manages the Supabase-backed leaderboard via the leaderboard-proxy Edge Function.
+//
+// Replaces the CloudKit public-database leaderboard while keeping the CloudKit
+// user ID as the stable player identifier (other services still use it).
+//
+// Usage:
+//   await LeaderboardService.shared.refresh()         // upsert + fetch global page 1
+//   LeaderboardService.shared.globalEntries           // ranked global list
+//   LeaderboardService.shared.weeklyEntries           // this week's leaders
+//   LeaderboardService.shared.friendEntries           // friends list
+//   LeaderboardService.shared.playerGlobalRank        // current player's rank (or nil)
+//   LeaderboardService.shared.currentUserID           // CloudKit user ID (for all services)
+
+@MainActor
+final class LeaderboardService: ObservableObject {
+
+    static let shared = LeaderboardService()
+
+    // MARK: - Published state
+
+    @Published private(set) var isLoading        = false
+    @Published private(set) var isFriendsLoading = false
+    @Published private(set) var lastError: String?      = nil
+    @Published private(set) var friendsError: String?   = nil
+
+    @Published private(set) var globalEntries:  [LeaderboardEntry] = []
+    @Published private(set) var weeklyEntries:  [LeaderboardEntry] = []
+    @Published private(set) var friendEntries:  [LeaderboardEntry] = []
+
+    /// The current player's position in the global leaderboard (nil if unranked).
+    @Published private(set) var playerGlobalRank: Int? = nil
+
+    // MARK: - CloudKit user ID (stable identifier, shared by all services)
+
+    /// Returns the cached CloudKit record ID string, or nil before first resolution.
+    var currentUserID: String? { _cachedCloudKitUserID }
+
+    private var _cachedCloudKitUserID: String?
+
+    // MARK: - Disk cache URLs
+
+    private static let cacheDir: URL = {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    }()
+    private static let globalCacheURL  = cacheDir.appendingPathComponent("leaderboard_global_cache.json")
+    private static let weeklyCacheURL  = cacheDir.appendingPathComponent("leaderboard_weekly_cache.json")
+    private static let friendCacheURL  = cacheDir.appendingPathComponent("leaderboard_friends_cache.json")
+
+    private static let proxyURL = "\(Secrets.supabaseURL)/functions/v1/leaderboard-proxy"
+
+    // MARK: - Init
+
+    private init() {
+        // Load cached data so the leaderboard tab populates immediately on launch.
+        globalEntries = (try? JSONDecoder().decode([LeaderboardEntry].self,
+                                                   from: Data(contentsOf: Self.globalCacheURL))) ?? []
+        weeklyEntries = (try? JSONDecoder().decode([LeaderboardEntry].self,
+                                                   from: Data(contentsOf: Self.weeklyCacheURL))) ?? []
+        friendEntries = (try? JSONDecoder().decode([LeaderboardEntry].self,
+                                                   from: Data(contentsOf: Self.friendCacheURL))) ?? []
+    }
+
+    // MARK: - Public API
+
+    /// Upserts the current player's stats, then fetches the first page of global + weekly entries.
+    func refresh() async {
+        await resolveCloudKitUserIDIfNeeded()
+        await upsertEntry()
+        await fetchGlobal(page: 1)
+        await fetchWeekly(page: 1)
+    }
+
+    /// Pushes the current player's stats to the leaderboard.
+    func upsertEntry() async {
+        guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+
+        let profile = DataManager.shared.currentProfile
+        let body: [String: Any] = [
+            "action":           "upsert_entry",
+            "cloudkit_user_id": cloudKitID,
+            "display_name":     profile?.name ?? "Warrior",
+            "level":            profile?.level ?? 1,
+            "xp":               profile?.xp ?? 0,
+            "streak":           profile?.currentStreak ?? 0,
+            "player_id":        PlayerProfileService.shared.playerId ?? "",
+            "avatar_key":       profile?.avatarKey ?? ""
+        ]
+
+        do {
+            try await postToProxy(body: body)
+        } catch {
+            // Non-critical — leaderboard upsert failures don't block the player
+            print("[LeaderboardService] upsertEntry failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fetches a page of global rankings (50 entries per page).
+    func fetchGlobal(page: Int = 1) async {
+        guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+        isLoading = true
+        lastError = nil
+        defer { isLoading = false }
+
+        let body: [String: Any] = [
+            "action":           "get_global",
+            "cloudkit_user_id": cloudKitID,
+            "page":             page
+        ]
+        do {
+            let data = try await postToProxy(body: body)
+            let payload = try JSONDecoder().decode(LeaderboardGlobalPayload.self, from: data)
+            globalEntries = payload.entries
+            playerGlobalRank = payload.playerRank
+            try? JSONEncoder().encode(payload.entries).write(to: Self.globalCacheURL, options: .atomic)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Fetches a page of weekly rankings (sorted by this week's XP earned).
+    func fetchWeekly(page: Int = 1) async {
+        guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+
+        let body: [String: Any] = [
+            "action":           "get_weekly",
+            "cloudkit_user_id": cloudKitID,
+            "page":             page
+        ]
+        do {
+            let data = try await postToProxy(body: body)
+            let payload = try JSONDecoder().decode(LeaderboardWeeklyPayload.self, from: data)
+            weeklyEntries = payload.entries
+            try? JSONEncoder().encode(payload.entries).write(to: Self.weeklyCacheURL, options: .atomic)
+        } catch {
+            // Non-fatal — weekly board may not be populated yet
+            print("[LeaderboardService] fetchWeekly failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fetches the current player's friends list from Supabase.
+    func fetchFriends() async {
+        guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+        isFriendsLoading = true
+        friendsError = nil
+        defer { isFriendsLoading = false }
+
+        let body: [String: Any] = [
+            "action":           "get_friends",
+            "cloudkit_user_id": cloudKitID
+        ]
+        do {
+            let data = try await postToProxy(body: body)
+            let payload = try JSONDecoder().decode(LeaderboardFriendsPayload.self, from: data)
+            friendEntries = payload.entries
+            try? JSONEncoder().encode(payload.entries).write(to: Self.friendCacheURL, options: .atomic)
+        } catch {
+            friendsError = error.localizedDescription
+        }
+    }
+
+    /// Sends a friend request using an RPT-XXXXX player ID code.
+    func addFriend(playerID: String) async {
+        guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+        let normalized = playerID.uppercased().trimmingCharacters(in: .whitespaces)
+        guard !normalized.isEmpty else { return }
+
+        let body: [String: Any] = [
+            "action":           "add_friend",
+            "cloudkit_user_id": cloudKitID,
+            "friend_player_id": normalized
+        ]
+        do {
+            try await postToProxy(body: body)
+            await fetchFriends()
+        } catch {
+            friendsError = "Could not add friend: \(error.localizedDescription)"
+        }
+    }
+
+    /// Removes a friend by their RPT-XXXXX player ID.
+    func removeFriend(playerID: String) async {
+        guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+        let body: [String: Any] = [
+            "action":           "remove_friend",
+            "cloudkit_user_id": cloudKitID,
+            "friend_player_id": playerID
+        ]
+        do {
+            try await postToProxy(body: body)
+            friendEntries.removeAll { $0.playerId == playerID }
+        } catch {
+            print("[LeaderboardService] removeFriend failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - CloudKit user ID resolution
+
+    /// Resolves the CloudKit user record ID the first time it is needed.
+    /// Caches the result in UserDefaults so subsequent launches don't make a network call.
+    func resolveCloudKitUserIDIfNeeded() async {
+        if _cachedCloudKitUserID != nil { return }
+        if let persisted = UserDefaults.standard.string(forKey: "cloudKitUserRecordID") {
+            _cachedCloudKitUserID = persisted
+            return
+        }
+        do {
+            let recordID = try await CKContainer.default().userRecordID()
+            let idString = recordID.recordName
+            _cachedCloudKitUserID = idString
+            UserDefaults.standard.set(idString, forKey: "cloudKitUserRecordID")
+        } catch {
+            print("[LeaderboardService] CloudKit user ID resolution failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Network
+
+    @discardableResult
+    private func postToProxy(body: [String: Any]) async throws -> Data {
+        guard let url = URL(string: Self.proxyURL) else { throw URLError(.badURL) }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            return Data()
+        }
+        return data
+    }
+}
+
+// MARK: - Public Models
+
+struct LeaderboardEntry: Codable, Identifiable {
+    var id: String { playerId }
+
+    let playerId:    String
+    let displayName: String
+    let level:       Int
+    let xp:          Int
+    let weeklyXP:    Int
+    let streak:      Int
+    let rank:        Int
+    let avatarKey:   String
+    /// True when this entry belongs to the signed-in player.
+    let isCurrentUser: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case playerId     = "player_id"
+        case displayName  = "display_name"
+        case level, xp, streak, rank
+        case weeklyXP     = "weekly_xp"
+        case avatarKey    = "avatar_key"
+        case isCurrentUser = "is_current_user"
+    }
+}
+
+// MARK: - Wire Payloads (private)
+
+private struct LeaderboardGlobalPayload: Decodable {
+    let entries:    [LeaderboardEntry]
+    let playerRank: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case entries
+        case playerRank = "player_rank"
+    }
+}
+
+private struct LeaderboardWeeklyPayload: Decodable {
+    let entries: [LeaderboardEntry]
+}
+
+private struct LeaderboardFriendsPayload: Decodable {
+    let entries: [LeaderboardEntry]
+}

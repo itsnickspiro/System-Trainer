@@ -1,291 +1,30 @@
 import SwiftUI
-import CloudKit
-import Observation
 
-// MARK: - CloudKit Leaderboard Manager
-
-@Observable
-@MainActor
-final class CloudKitLeaderboardManager {
-    static let shared = CloudKitLeaderboardManager()
-
-    var players: [LeaderboardPlayer] = []
-    var friends: [LeaderboardPlayer] = []
-    var isLoading = false
-    var isFriendsLoading = false
-    var errorMessage: String?
-    var friendsErrorMessage: String?
-
-    private let recordType = "LeaderboardEntry"
-    private let publicDB = CKContainer.default().publicCloudDatabase
-
-    /// Saved friend codes the user has added (stored in UserDefaults).
-    var savedFriendCodes: [String] {
-        get { UserDefaults.standard.stringArray(forKey: "savedFriendCodes") ?? [] }
-        set { UserDefaults.standard.set(newValue, forKey: "savedFriendCodes") }
-    }
-
-    /// The user's iCloud-account-bound CloudKit record ID.
-    /// Cached after the first successful fetch. Persists across app reinstalls and
-    /// device transfers because it is tied to the user's iCloud account, not the device.
-    private var _cachedCloudKitUserID: String?
-
-    /// Returns the cached CloudKit user ID, or nil if not yet fetched.
-    var currentUserID: String? { _cachedCloudKitUserID }
-
-    /// Fetches (and caches) the anonymous iCloud user record ID.
-    /// This is a stable, account-bound identifier that survives app deletion and device changes.
-    private func resolveUserID() async throws -> String {
-        if let cached = _cachedCloudKitUserID { return cached }
-        // Check UserDefaults cache first to avoid a network round-trip on every launch.
-        if let persisted = UserDefaults.standard.string(forKey: "cloudKitUserRecordID") {
-            _cachedCloudKitUserID = persisted
-            return persisted
-        }
-        let recordID = try await CKContainer.default().userRecordID()
-        let idString = recordID.recordName
-        _cachedCloudKitUserID = idString
-        UserDefaults.standard.set(idString, forKey: "cloudKitUserRecordID")
-        return idString
-    }
-
-    // MARK: - Friend Code Generation
-
-    /// Derives a stable 6-character alphanumeric friend code from a CloudKit user ID string.
-    /// Uses a simple hash so the same ID always produces the same code.
-    static func friendCode(from cloudKitUserID: String) -> String {
-        let charset = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") // 32 chars, no ambiguous I/O/0/1
-        var hash: UInt64 = 14695981039346656037 // FNV-1a offset basis
-        for byte in cloudKitUserID.utf8 {
-            hash ^= UInt64(byte)
-            hash = hash &* 1099511628211
-        }
-        var code = ""
-        var h = hash
-        for _ in 0..<6 {
-            code.append(charset[Int(h % 32)])
-            h >>= 5
-        }
-        return code
-    }
-
-    /// Ensures the profile has a friend code set. Generates one from the CloudKit ID if missing.
-    func ensureFriendCode(for profile: Profile) async {
-        guard profile.friendCode.isEmpty else { return }
-        if let userID = try? await resolveUserID() {
-            profile.friendCode = Self.friendCode(from: userID)
-        }
-    }
-
-    // MARK: - Push local player to CloudKit
-
-    func pushScore(name: String, level: Int, xp: Int, streak: Int, friendCode: String) async {
-        do {
-            let userID = try await resolveUserID()
-            let record = try await fetchOwnRecord(userID: userID) ?? CKRecord(recordType: recordType)
-            record["playerName"] = name as CKRecordValue
-            record["level"] = level as CKRecordValue
-            record["xp"] = xp as CKRecordValue
-            record["streak"] = streak as CKRecordValue
-            record["cloudKitUserID"] = userID as CKRecordValue
-            record["friendCode"] = friendCode as CKRecordValue
-            record["updatedAt"] = Date() as CKRecordValue
-            _ = try await publicDB.save(record)
-            errorMessage = nil
-        } catch let ckError as CKError where ckError.code == .notAuthenticated {
-            errorMessage = "Sign in to iCloud in Settings to post your score."
-        } catch {
-            errorMessage = "Sync failed: \(error.localizedDescription)"
-        }
-    }
-
-    // MARK: - Fetch global leaderboard
-
-    func fetchLeaderboard() async {
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
-
-        // Resolve user ID in parallel with the leaderboard fetch so we can
-        // highlight the current user's row without a second round-trip.
-        async let userIDResult: String? = try? resolveUserID()
-
-        do {
-            let predicate = NSPredicate(value: true)
-            let query = CKQuery(recordType: recordType, predicate: predicate)
-            query.sortDescriptors = [NSSortDescriptor(key: "xp", ascending: false)]
-            let keys = ["playerName", "level", "xp", "streak", "cloudKitUserID", "friendCode"]
-            let records = try await performQuery(query, desiredKeys: keys, limit: 100)
-            let resolvedUserID = await userIDResult
-
-            var fetched: [LeaderboardPlayer] = []
-            for record in records {
-                guard
-                    let name = record["playerName"] as? String,
-                    let level = record["level"] as? Int,
-                    let xp = record["xp"] as? Int,
-                    let streak = record["streak"] as? Int,
-                    let ckUserID = record["cloudKitUserID"] as? String
-                else { continue }
-                let code = record["friendCode"] as? String ?? ""
-                fetched.append(LeaderboardPlayer(
-                    id: record.recordID.recordName,
-                    cloudKitUserID: ckUserID,
-                    friendCode: code,
-                    name: name,
-                    level: level,
-                    xp: xp,
-                    streak: streak,
-                    rank: 0,
-                    isCurrentUser: ckUserID == resolvedUserID
-                ))
-            }
-            players = fetched.enumerated().map { idx, p in
-                LeaderboardPlayer(id: p.id, cloudKitUserID: p.cloudKitUserID, friendCode: p.friendCode,
-                                  name: p.name, level: p.level, xp: p.xp, streak: p.streak,
-                                  rank: idx + 1, isCurrentUser: p.isCurrentUser)
-            }
-        } catch let ckError as CKError where ckError.code == .unknownItem {
-            players = []
-        } catch {
-            errorMessage = "Could not load leaderboard: \(error.localizedDescription)"
-        }
-    }
-
-    // MARK: - Friends
-
-    func addFriend(code: String) async {
-        let normalized = code.uppercased().trimmingCharacters(in: .whitespaces)
-        guard !normalized.isEmpty, !savedFriendCodes.contains(normalized) else { return }
-        savedFriendCodes.append(normalized)
-        await fetchFriends()
-    }
-
-    func removeFriend(code: String) {
-        savedFriendCodes.removeAll { $0 == code }
-        friends.removeAll { $0.friendCode == code }
-    }
-
-    func fetchFriends() async {
-        let codes = savedFriendCodes
-        guard !codes.isEmpty else { friends = []; return }
-        isFriendsLoading = true
-        friendsErrorMessage = nil
-        defer { isFriendsLoading = false }
-
-        do {
-            let predicate = NSPredicate(format: "friendCode IN %@", codes)
-            let query = CKQuery(recordType: recordType, predicate: predicate)
-            query.sortDescriptors = [NSSortDescriptor(key: "xp", ascending: false)]
-            let keys = ["playerName", "level", "xp", "streak", "cloudKitUserID", "friendCode"]
-            let records = try await performQuery(query, desiredKeys: keys, limit: 200)
-            let myID = try? await resolveUserID()
-
-            let fetched: [LeaderboardPlayer] = records.compactMap { record -> LeaderboardPlayer? in
-                guard
-                    let name = record["playerName"] as? String,
-                    let level = record["level"] as? Int,
-                    let xp = record["xp"] as? Int,
-                    let streak = record["streak"] as? Int,
-                    let ckUserID = record["cloudKitUserID"] as? String
-                else { return nil }
-                let code = record["friendCode"] as? String ?? ""
-                return LeaderboardPlayer(
-                    id: record.recordID.recordName,
-                    cloudKitUserID: ckUserID,
-                    friendCode: code,
-                    name: name,
-                    level: level,
-                    xp: xp,
-                    streak: streak,
-                    rank: 0,
-                    isCurrentUser: ckUserID == myID
-                )
-            }
-            let sorted = fetched.sorted { $0.xp > $1.xp }
-            friends = sorted.enumerated().map { idx, p in
-                LeaderboardPlayer(id: p.id, cloudKitUserID: p.cloudKitUserID, friendCode: p.friendCode,
-                                  name: p.name, level: p.level, xp: p.xp, streak: p.streak,
-                                  rank: idx + 1, isCurrentUser: p.isCurrentUser)
-            }
-        } catch {
-            friendsErrorMessage = "Could not load friends: \(error.localizedDescription)"
-        }
-    }
-
-    // MARK: - Private helpers
-
-    private func fetchOwnRecord(userID: String) async throws -> CKRecord? {
-        let predicate = NSPredicate(format: "cloudKitUserID == %@", userID)
-        let query = CKQuery(recordType: recordType, predicate: predicate)
-        return try await performQuery(query, desiredKeys: nil, limit: 1).first
-    }
-
-    /// Wraps `CKQueryOperation` in an async/throws interface.
-    private func performQuery(_ query: CKQuery, desiredKeys: [CKRecord.FieldKey]?, limit: Int) async throws -> [CKRecord] {
-        try await withCheckedThrowingContinuation { continuation in
-            var collected: [CKRecord] = []
-            var finished = false
-
-            let op = CKQueryOperation(query: query)
-            op.desiredKeys = desiredKeys
-            op.resultsLimit = limit
-
-            op.recordMatchedBlock = { _, result in
-                if case .success(let record) = result {
-                    collected.append(record)
-                }
-            }
-
-            op.queryResultBlock = { result in
-                guard !finished else { return }
-                finished = true
-                switch result {
-                case .success:
-                    continuation.resume(returning: collected)
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-
-            publicDB.add(op)
-        }
-    }
-}
-
-// MARK: - Leaderboard Data Model
-
-struct LeaderboardPlayer: Identifiable {
-    let id: String
-    let cloudKitUserID: String
-    let friendCode: String
-    let name: String
-    let level: Int
-    let xp: Int
-    let streak: Int
-    let rank: Int
-    /// True when this player record belongs to the signed-in iCloud account.
-    let isCurrentUser: Bool
-}
-
-// MARK: - Root View
+// MARK: - LeaderboardView
+//
+// Displays the Supabase-backed leaderboard with three tabs:
+//   Global  — all-time XP rankings (paginated, top 50)
+//   Weekly  — XP earned this week, resets each Monday
+//   Friends — players you follow via RPT-XXXXX codes
+//
+// The current player's row is highlighted; if they fall outside the top 50 on
+// Global/Weekly their row is pinned to the bottom of the list.
 
 struct LeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
-    private var dataManager: DataManager { DataManager.shared }
-    @State private var selectedTab: LeaderboardTab = .world
+    @StateObject private var leaderboard = LeaderboardService.shared
+    @State private var selectedTab: LeaderboardTab = .global
 
     enum LeaderboardTab: String, CaseIterable {
-        case world = "World"
+        case global  = "Global"
+        case weekly  = "Weekly"
         case friends = "Friends"
-        case you = "You"
 
         var icon: String {
             switch self {
-            case .world: return "globe"
+            case .global:  return "globe"
+            case .weekly:  return "calendar.badge.clock"
             case .friends: return "person.2.fill"
-            case .you: return "person.fill"
             }
         }
     }
@@ -296,12 +35,12 @@ struct LeaderboardView: View {
                 tabSelector
 
                 TabView(selection: $selectedTab) {
-                    WorldLeaderboardView()
-                        .tag(LeaderboardTab.world)
+                    GlobalLeaderboardView()
+                        .tag(LeaderboardTab.global)
+                    WeeklyLeaderboardView()
+                        .tag(LeaderboardTab.weekly)
                     FriendsLeaderboardView()
                         .tag(LeaderboardTab.friends)
-                    YourRankView()
-                        .tag(LeaderboardTab.you)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: selectedTab)
@@ -311,19 +50,7 @@ struct LeaderboardView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task {
-                            if let profile = dataManager.currentProfile {
-                                await leaderboard.ensureFriendCode(for: profile)
-                                await leaderboard.pushScore(
-                                    name: profile.name,
-                                    level: profile.level,
-                                    xp: profile.xp,
-                                    streak: profile.currentStreak,
-                                    friendCode: profile.friendCode
-                                )
-                            }
-                            await leaderboard.fetchLeaderboard()
-                        }
+                        Task { await leaderboard.refresh() }
                     } label: {
                         Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                     }
@@ -331,6 +58,7 @@ struct LeaderboardView: View {
             }
             .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
         }
+        .task { await leaderboard.refresh() }
     }
 
     private var tabSelector: some View {
@@ -362,24 +90,24 @@ struct LeaderboardView: View {
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(colorScheme == .dark ? .black.opacity(0.2) : .gray.opacity(0.1))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(colorScheme == .dark ? .gray.opacity(0.3) : .gray.opacity(0.2), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 16)
+                    .stroke(colorScheme == .dark ? .gray.opacity(0.3) : .gray.opacity(0.2), lineWidth: 1))
         )
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
 }
 
-// MARK: - World Leaderboard
+// MARK: - Global Leaderboard
 
-struct WorldLeaderboardView: View {
+private struct GlobalLeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
-    private var dataManager: DataManager { DataManager.shared }
+    @StateObject private var leaderboard = LeaderboardService.shared
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
-                if let msg = leaderboard.errorMessage {
+                if let msg = leaderboard.lastError {
                     errorBanner(msg)
                 }
                 contentView
@@ -389,8 +117,8 @@ struct WorldLeaderboardView: View {
             .padding(.top, 16)
         }
         .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
-        .task { await leaderboard.fetchLeaderboard() }
-        .refreshable { await leaderboard.fetchLeaderboard() }
+        .task { await leaderboard.fetchGlobal(page: 1) }
+        .refreshable { await leaderboard.fetchGlobal(page: 1) }
     }
 
     @ViewBuilder
@@ -399,7 +127,7 @@ struct WorldLeaderboardView: View {
             ProgressView("Loading Leaderboard...")
                 .foregroundColor(.cyan)
                 .padding()
-        } else if leaderboard.players.isEmpty {
+        } else if leaderboard.globalEntries.isEmpty {
             emptyState
         } else {
             leaderboardList
@@ -422,9 +150,38 @@ struct WorldLeaderboardView: View {
     }
 
     private var leaderboardList: some View {
-        ForEach(leaderboard.players) { player in
-            LeaderboardRow(player: player, isCurrentUser: player.isCurrentUser)
+        let entries      = leaderboard.globalEntries
+        let currentEntry = entries.first { $0.isCurrentUser }
+        let inTopList    = currentEntry != nil
+
+        return Group {
+            ForEach(entries) { entry in
+                LeaderboardRow(entry: entry)
+            }
+
+            // Pin the current player below the list if they're not in the top 50
+            if let rank = leaderboard.playerGlobalRank, !inTopList {
+                Divider().padding(.vertical, 4)
+                // Build a placeholder entry for the current player
+                let placeholder = currentPlayerPlaceholder(rank: rank)
+                LeaderboardRow(entry: placeholder)
+            }
         }
+    }
+
+    private func currentPlayerPlaceholder(rank: Int) -> LeaderboardEntry {
+        let dm = DataManager.shared
+        return LeaderboardEntry(
+            playerId:      PlayerProfileService.shared.playerId ?? "RPT-???",
+            displayName:   dm.currentProfile?.name ?? "You",
+            level:         dm.currentProfile?.level ?? 1,
+            xp:            dm.currentProfile?.xp ?? 0,
+            weeklyXP:      0,
+            streak:        dm.currentProfile?.currentStreak ?? 0,
+            rank:          rank,
+            avatarKey:     nil,
+            isCurrentUser: true
+        )
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -437,69 +194,58 @@ struct WorldLeaderboardView: View {
     }
 }
 
-// MARK: - Your Rank View
+// MARK: - Weekly Leaderboard
 
-struct YourRankView: View {
+private struct WeeklyLeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
-    private var dataManager: DataManager { DataManager.shared }
-    @State private var showCopied = false
+    @StateObject private var leaderboard = LeaderboardService.shared
 
-    private var ownEntry: LeaderboardPlayer? {
-        leaderboard.players.first { $0.isCurrentUser }
+    /// Seconds until next Monday 00:00 UTC.
+    private var secondsUntilReset: Int {
+        let now = Date()
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let weekday = cal.component(.weekday, from: now) // 1=Sun, 2=Mon, ..., 7=Sat
+        let daysUntilMonday = weekday == 2 ? 7 : (9 - weekday) % 7
+        guard let nextMonday = cal.date(byAdding: .day, value: daysUntilMonday, to: cal.startOfDay(for: now)) else { return 0 }
+        return max(0, Int(nextMonday.timeIntervalSince(now)))
     }
 
-    private var friendCode: String {
-        dataManager.currentProfile?.friendCode ?? ""
+    private var resetCountdown: String {
+        let s = secondsUntilReset
+        let d = s / 86400
+        let h = (s % 86400) / 3600
+        let m = (s % 3600) / 60
+        if d > 0 { return "\(d)d \(h)h \(m)m" }
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
     }
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 24) {
-                // Friend code card — always shown
-                if !friendCode.isEmpty {
-                    friendCodeCard
-                        .padding(.top, 20)
+            LazyVStack(spacing: 16) {
+                // Reset countdown banner
+                HStack {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundColor(.cyan)
+                    Text("Resets in \(resetCountdown)")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                    Spacer()
+                    Text("Weekly XP")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.secondary)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.08)))
 
-                if let player = ownEntry {
-                    VStack(spacing: 8) {
-                        Text("YOUR RANK")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundColor(.cyan.opacity(0.8))
-
-                        PodiumCard(player: player, position: player.rank)
-                            .scaleEffect(1.05)
+                if leaderboard.weeklyEntries.isEmpty && !leaderboard.isLoading {
+                    emptyState
+                } else {
+                    ForEach(leaderboard.weeklyEntries) { entry in
+                        LeaderboardRow(entry: entry, showWeeklyXP: true)
                     }
-                } else if let profile = dataManager.currentProfile {
-                    // Not yet synced
-                    VStack(spacing: 16) {
-                        Image(systemName: "icloud.and.arrow.up")
-                            .font(.system(size: 48))
-                            .foregroundColor(.cyan.opacity(0.5))
-                        Text("You're not on the board yet")
-                            .font(.headline)
-                        Text("Tap the sync button at the top to post your score.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        // Local preview shown before the first sync.
-                        let preview = LeaderboardPlayer(
-                            id: "preview",
-                            cloudKitUserID: leaderboard.currentUserID ?? "",
-                            friendCode: profile.friendCode,
-                            name: profile.name,
-                            level: profile.level,
-                            xp: profile.xp,
-                            streak: profile.currentStreak,
-                            rank: 0,
-                            isCurrentUser: true
-                        )
-                        LeaderboardRow(player: preview, isCurrentUser: true)
-                            .opacity(0.6)
-                    }
-                    .padding(.vertical, 40)
                 }
 
                 Spacer(minLength: 100)
@@ -508,43 +254,227 @@ struct YourRankView: View {
             .padding(.top, 16)
         }
         .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
-        .task {
-            // Generate friend code if needed when this tab appears
-            if let profile = dataManager.currentProfile {
-                await leaderboard.ensureFriendCode(for: profile)
+        .task { await leaderboard.fetchWeekly(page: 1) }
+        .refreshable { await leaderboard.fetchWeekly(page: 1) }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "calendar.badge.plus")
+                .font(.system(size: 48))
+                .foregroundColor(.cyan.opacity(0.5))
+            Text("No Weekly Data Yet")
+                .font(.headline)
+            Text("Complete quests and workouts to appear here.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+}
+
+// MARK: - Friends Leaderboard View
+
+private struct FriendsLeaderboardView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var leaderboard = LeaderboardService.shared
+    @State private var enteredCode = ""
+    @State private var showAddField = false
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                addFriendSection
+                    .padding(.top, 8)
+
+                if let msg = leaderboard.friendsError {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                        Text(msg).font(.caption).foregroundColor(.secondary)
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
+                }
+
+                if leaderboard.isFriendsLoading {
+                    ProgressView("Loading friends...")
+                        .foregroundColor(.cyan)
+                        .padding()
+                } else if leaderboard.friendEntries.isEmpty {
+                    emptyState
+                } else {
+                    friendsList
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal, 16)
+        }
+        .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
+        .task { await leaderboard.fetchFriends() }
+        .refreshable { await leaderboard.fetchFriends() }
+        .onReceive(NotificationCenter.default.publisher(for: .rptAddFriendDeepLink)) { notification in
+            guard let code = notification.userInfo?["code"] as? String, !code.isEmpty else { return }
+            Task { await leaderboard.addFriend(playerID: code) }
+        }
+    }
+
+    private var addFriendSection: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("FRIENDS")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan.opacity(0.8))
+                Spacer()
+                Button {
+                    withAnimation { showAddField.toggle() }
+                } label: {
+                    Label("Add Friend", systemImage: "person.badge.plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.cyan)
+                }
+            }
+
+            if showAddField {
+                HStack(spacing: 10) {
+                    TextField("Enter RPT-XXXXX code", text: $enteredCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 15, design: .monospaced))
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.05))
+                        )
+
+                    Button("Add") {
+                        let code = enteredCode.uppercased().trimmingCharacters(in: .whitespaces)
+                        guard !code.isEmpty else { return }
+                        Task {
+                            await leaderboard.addFriend(playerID: code)
+                            enteredCode = ""
+                            withAnimation { showAddField = false }
+                        }
+                    }
+                    .disabled(enteredCode.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }
 
-    private var friendCodeCard: some View {
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "person.2")
+                .font(.system(size: 48))
+                .foregroundColor(.cyan.opacity(0.4))
+            Text("No Friends Added Yet")
+                .font(.headline)
+            Text("Tap \"Add Friend\" and enter a friend's RPT-XXXXX code to follow their progress.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, 60)
+    }
+
+    private var friendsList: some View {
+        ForEach(leaderboard.friendEntries) { entry in
+            LeaderboardRow(entry: entry)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        Task { await leaderboard.removeFriend(playerID: entry.playerId) }
+                    } label: {
+                        Label("Remove", systemImage: "person.badge.minus")
+                    }
+                }
+        }
+    }
+}
+
+// MARK: - Your Rank / Player ID Card (shown in the You tab)
+//
+// This view is no longer a separate tab — the player's row is highlighted inline
+// in Global/Weekly. However we keep a "Your Player ID" card in the Friends tab
+// area accessible via a dedicated view you can push to.
+
+struct YourPlayerIDView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var leaderboard = LeaderboardService.shared
+    @State private var showCopied = false
+
+    private var playerID: String {
+        PlayerProfileService.shared.playerId ?? ""
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 24) {
+                if !playerID.isEmpty {
+                    playerIDCard
+                        .padding(.top, 20)
+                }
+
+                if let entry = leaderboard.globalEntries.first(where: { $0.isCurrentUser }) {
+                    VStack(spacing: 8) {
+                        Text("YOUR RANK")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyan.opacity(0.8))
+                        PodiumCard(entry: entry, position: entry.rank)
+                            .scaleEffect(1.05)
+                    }
+                } else if let rank = leaderboard.playerGlobalRank {
+                    VStack(spacing: 8) {
+                        Text("YOUR RANK")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyan.opacity(0.8))
+                        Text("#\(rank)")
+                            .font(.system(size: 48, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyan)
+                    }
+                }
+
+                Spacer(minLength: 100)
+            }
+            .padding(.horizontal, 16)
+        }
+        .navigationTitle("Your Profile")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var playerIDCard: some View {
         VStack(spacing: 10) {
-            Text("YOUR FRIEND CODE")
+            Text("YOUR PLAYER ID")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundColor(.cyan.opacity(0.8))
 
-            Text(friendCode)
-                .font(.system(size: 32, weight: .bold, design: .monospaced))
+            Text(playerID)
+                .font(.system(size: 24, weight: .bold, design: .monospaced))
                 .foregroundColor(colorScheme == .dark ? .white : .black)
-                .tracking(6)
+                .tracking(2)
 
             HStack(spacing: 16) {
                 Button {
-                    UIPasteboard.general.string = friendCode
+                    UIPasteboard.general.string = playerID
                     withAnimation { showCopied = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         withAnimation { showCopied = false }
                     }
                 } label: {
-                    Label(showCopied ? "Copied!" : "Copy Code", systemImage: showCopied ? "checkmark" : "doc.on.doc")
+                    Label(showCopied ? "Copied!" : "Copy Code",
+                          systemImage: showCopied ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(showCopied ? .green : .cyan)
                 }
 
-                if let shareURL = URL(string: "rpt://addfriend/\(friendCode)") {
+                if let shareURL = URL(string: "rpt://addfriend/\(playerID)") {
                     ShareLink(
                         item: shareURL,
                         subject: Text("Add me on RPT!"),
-                        message: Text("Use my friend code \(friendCode) to add me on RPT — the fitness RPG app! Tap the link or enter the code manually: \(shareURL.absoluteString)")
+                        message: Text("Use my player ID \(playerID) to add me on RPT. Tap: \(shareURL.absoluteString)")
                     ) {
                         Label("Share", systemImage: "square.and.arrow.up")
                             .font(.system(size: 13, weight: .semibold))
@@ -568,135 +498,11 @@ struct YourRankView: View {
     }
 }
 
-// MARK: - Friends Leaderboard View
-
-struct FriendsLeaderboardView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    private var leaderboard: CloudKitLeaderboardManager { CloudKitLeaderboardManager.shared }
-    @State private var enteredCode = ""
-    @State private var showAddField = false
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 16) {
-                // Add friend section
-                addFriendSection
-                    .padding(.top, 8)
-
-                if let msg = leaderboard.friendsErrorMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                        Text(msg).font(.caption).foregroundColor(.secondary)
-                    }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.1)))
-                }
-
-                if leaderboard.isFriendsLoading {
-                    ProgressView("Loading friends...")
-                        .foregroundColor(.cyan)
-                        .padding()
-                } else if leaderboard.friends.isEmpty && leaderboard.savedFriendCodes.isEmpty {
-                    emptyState
-                } else {
-                    friendsList
-                }
-
-                Spacer(minLength: 100)
-            }
-            .padding(.horizontal, 16)
-        }
-        .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
-        .task { await leaderboard.fetchFriends() }
-        .refreshable { await leaderboard.fetchFriends() }
-        .onReceive(NotificationCenter.default.publisher(for: .rptAddFriendDeepLink)) { notification in
-            guard let code = notification.userInfo?["code"] as? String, code.count == 6 else { return }
-            Task {
-                await leaderboard.addFriend(code: code)
-            }
-        }
-    }
-
-    private var addFriendSection: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("FRIENDS")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(.cyan.opacity(0.8))
-                Spacer()
-                Button {
-                    withAnimation { showAddField.toggle() }
-                } label: {
-                    Label("Add Friend", systemImage: "person.badge.plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.cyan)
-                }
-            }
-
-            if showAddField {
-                HStack(spacing: 10) {
-                    TextField("Enter friend code (e.g. A3F9K2)", text: $enteredCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.system(size: 15, design: .monospaced))
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.05))
-                        )
-
-                    Button("Add") {
-                        let code = enteredCode.uppercased().trimmingCharacters(in: .whitespaces)
-                        guard code.count == 6 else { return }
-                        Task {
-                            await leaderboard.addFriend(code: code)
-                            enteredCode = ""
-                            withAnimation { showAddField = false }
-                        }
-                    }
-                    .disabled(enteredCode.trimmingCharacters(in: .whitespaces).count != 6)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.cyan)
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.2")
-                .font(.system(size: 48))
-                .foregroundColor(.cyan.opacity(0.4))
-            Text("No Friends Added Yet")
-                .font(.headline)
-            Text("Tap \"Add Friend\" and enter a friend's 6-character code to follow their progress.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(.vertical, 60)
-    }
-
-    private var friendsList: some View {
-        ForEach(leaderboard.friends) { player in
-            LeaderboardRow(player: player, isCurrentUser: player.isCurrentUser)
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        leaderboard.removeFriend(code: player.friendCode)
-                    } label: {
-                        Label("Remove", systemImage: "person.badge.minus")
-                    }
-                }
-        }
-    }
-}
-
 // MARK: - Supporting Views
 
 struct PodiumCard: View {
     @Environment(\.colorScheme) private var colorScheme
-    let player: LeaderboardPlayer
+    let entry: LeaderboardEntry
     let position: Int
 
     private var positionColor: Color {
@@ -723,24 +529,24 @@ struct PodiumCard: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(positionColor)
 
-            Text(player.name)
+            Text(entry.displayName)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(colorScheme == .dark ? .white : .black)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
             VStack(spacing: 4) {
-                Text("LVL \(player.level)")
+                Text("LVL \(entry.level)")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundColor(positionColor)
 
-                Text("\(player.xp) XP")
+                Text("\(entry.xp) XP")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 2) {
                     Image(systemName: "flame.fill").font(.system(size: 8)).foregroundColor(.orange)
-                    Text("\(player.streak)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
+                    Text("\(entry.streak)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
                 }
             }
         }
@@ -756,28 +562,23 @@ struct PodiumCard: View {
 
 struct LeaderboardRow: View {
     @Environment(\.colorScheme) private var colorScheme
-    let player: LeaderboardPlayer
-    let isCurrentUser: Bool
-
-    init(player: LeaderboardPlayer, isCurrentUser: Bool = false) {
-        self.player = player
-        self.isCurrentUser = isCurrentUser
-    }
+    let entry: LeaderboardEntry
+    var showWeeklyXP: Bool = false
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("#\(player.rank)")
+            Text("#\(entry.rank)")
                 .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundColor(isCurrentUser ? .cyan : .secondary)
+                .foregroundColor(entry.isCurrentUser ? .cyan : .secondary)
                 .frame(width: 40, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(player.name)
+                    Text(entry.displayName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(isCurrentUser ? .cyan : (colorScheme == .dark ? .white : .black))
+                        .foregroundColor(entry.isCurrentUser ? .cyan : (colorScheme == .dark ? .white : .black))
 
-                    if isCurrentUser {
+                    if entry.isCurrentUser {
                         Text("YOU")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
@@ -787,12 +588,12 @@ struct LeaderboardRow: View {
                 }
 
                 HStack(spacing: 12) {
-                    Text("LVL \(player.level)")
+                    Text("LVL \(entry.level)")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundColor(.orange)
                     HStack(spacing: 2) {
                         Image(systemName: "flame.fill").font(.system(size: 10)).foregroundColor(.orange)
-                        Text("\(player.streak)").font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
+                        Text("\(entry.streak)").font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
                     }
                 }
             }
@@ -800,10 +601,10 @@ struct LeaderboardRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(player.xp)")
+                Text("\(showWeeklyXP ? entry.weeklyXP : entry.xp)")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(isCurrentUser ? .cyan : (colorScheme == .dark ? .white : .black))
-                Text("XP")
+                    .foregroundColor(entry.isCurrentUser ? .cyan : (colorScheme == .dark ? .white : .black))
+                Text(showWeeklyXP ? "WK XP" : "XP")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
             }
@@ -811,12 +612,13 @@ struct LeaderboardRow: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(isCurrentUser ?
+                .fill(entry.isCurrentUser ?
                       (colorScheme == .dark ? .cyan.opacity(0.1) : .cyan.opacity(0.05)) :
                       (colorScheme == .dark ? .black.opacity(0.2) : .white.opacity(0.8)))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(isCurrentUser ? .cyan.opacity(0.5) : .gray.opacity(0.2), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 12)
+                    .stroke(entry.isCurrentUser ? .cyan.opacity(0.5) : .gray.opacity(0.2), lineWidth: 1))
         )
-        .shadow(color: isCurrentUser ? .cyan.opacity(0.2) : .clear, radius: 4, x: 0, y: 2)
+        .shadow(color: entry.isCurrentUser ? .cyan.opacity(0.2) : .clear, radius: 4, x: 0, y: 2)
     }
 }
 

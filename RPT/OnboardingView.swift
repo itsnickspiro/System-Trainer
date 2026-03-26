@@ -1,365 +1,226 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - OnboardingView
+//
+// Unified 12-step onboarding flow. All collected state lives here; sub-views
+// receive only the bindings they need.
+//
+// Steps:
+//  0  — Boot / Welcome     (no progress bar)
+//  1  — Name
+//  2  — Biological Sex
+//  3  — Fitness Goal
+//  4  — Body Stats
+//  5  — Gym Environment
+//  6  — Avatar Selection   (skippable)
+//  7  — Workout Plan       (skippable)
+//  8  — Gold Pieces Explainer
+//  9  — HealthKit          (skippable)
+//  10 — Notifications      (skippable)
+//  11 — Ready Screen       (no progress bar)
+
 struct OnboardingView: View {
-    @State private var currentPage = 0
-    @State private var showingPermissions = false
-    @Binding var isOnboardingComplete: Bool
-    
-    let pages = OnboardingPage.allPages
-    
-    var body: some View {
-        ZStack {
-            // Animated background
-            LinearGradient(
-                colors: [.black, .gray.opacity(0.8), .black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            
-            // Animated particles
-            ForEach(0..<20, id: \.self) { index in
-                Circle()
-                    .fill(.cyan.opacity(0.1))
-                    .frame(width: .random(in: 2...6), height: .random(in: 2...6))
-                    .offset(
-                        x: .random(in: -200...200),
-                        y: .random(in: -400...400)
-                    )
-                    .animation(
-                        .linear(duration: .random(in: 3...8))
-                        .repeatForever(autoreverses: false),
-                        value: currentPage
-                    )
-            }
-            
-            TabView(selection: $currentPage) {
-                ForEach(pages.indices, id: \.self) { index in
-                    OnboardingPageView(page: pages[index])
-                        .tag(index)
-                }
-            }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-            
-            VStack {
-                Spacer()
-                
-                // Custom page indicator
-                HStack(spacing: 8) {
-                    ForEach(pages.indices, id: \.self) { index in
-                        Circle()
-                            .fill(index == currentPage ? .cyan : .gray.opacity(0.5))
-                            .frame(width: 8, height: 8)
-                            .scaleEffect(index == currentPage ? 1.2 : 1.0)
-                            .animation(.easeInOut(duration: 0.3), value: currentPage)
-                    }
-                }
-                .padding(.bottom, 30)
-                
-                // Action buttons
-                HStack(spacing: 20) {
-                    if currentPage > 0 {
-                        Button("Back") {
-                            withAnimation(.easeInOut) {
-                                currentPage -= 1
-                            }
-                        }
-                        .buttonStyle(SecondaryButtonStyle())
-                    }
-                    
-                    Spacer()
-                    
-                    if currentPage < pages.count - 1 {
-                        Button("Next") {
-                            withAnimation(.easeInOut) {
-                                currentPage += 1
-                            }
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                    } else {
-                        Button("Get Started") {
-                            showingPermissions = true
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                    }
-                }
-                .padding(.horizontal, 30)
-                .padding(.bottom, 40)
-            }
-        }
-        .sheet(isPresented: $showingPermissions) {
-            PermissionRequestView(isOnboardingComplete: $isOnboardingComplete)
-        }
-    }
-}
-
-struct OnboardingPageView: View {
-    let page: OnboardingPage
-    @State private var animateIcon = false
-    
-    var body: some View {
-        VStack(spacing: 40) {
-            Spacer()
-            
-            // Icon with animation
-            ZStack {
-                Circle()
-                    .fill(page.accentColor.opacity(0.2))
-                    .frame(width: 120, height: 120)
-                    .blur(radius: 20)
-                    .scaleEffect(animateIcon ? 1.2 : 0.8)
-                    .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: animateIcon)
-                
-                Image(systemName: page.icon)
-                    .font(.system(size: 50, weight: .light))
-                    .foregroundColor(page.accentColor)
-                    .scaleEffect(animateIcon ? 1.1 : 0.9)
-                    .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: animateIcon)
-            }
-            
-            VStack(spacing: 16) {
-                Text(page.title)
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                
-                Text(page.description)
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(nil)
-            }
-            .padding(.horizontal, 30)
-            
-            // Feature highlights
-            if !page.features.isEmpty {
-                VStack(spacing: 12) {
-                    ForEach(page.features, id: \.self) { feature in
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(page.accentColor)
-                            Text(feature)
-                                .foregroundColor(.white)
-                            Spacer()
-                        }
-                    }
-                }
-                .padding(.horizontal, 30)
-            }
-            
-            Spacer()
-            Spacer()
-        }
-        .onAppear {
-            animateIcon = true
-        }
-    }
-}
-
-struct OnboardingPage {
-    let title: String
-    let description: String
-    let icon: String
-    let accentColor: Color
-    let features: [String]
-    
-    static let allPages = [
-        OnboardingPage(
-            title: "Welcome to RPT",
-            description: "Transform your daily life into an epic adventure. Complete real-world quests, level up, and become the hero of your own story.",
-            icon: "star.fill",
-            accentColor: .yellow,
-            features: [
-                "Turn habits into quests",
-                "Level up with real progress",
-                "Track your epic journey"
-            ]
-        ),
-        
-        OnboardingPage(
-            title: "Complete Daily Quests",
-            description: "Every day brings new challenges. From workouts to healthy meals, turn your goals into exciting missions.",
-            icon: "target",
-            accentColor: .orange,
-            features: [
-                "Personalized daily challenges",
-                "Streak-based rewards",
-                "Custom quest creation"
-            ]
-        ),
-        
-        OnboardingPage(
-            title: "Level Up Your Stats",
-            description: "Your real-world activities boost your RPG stats. Exercise increases Strength, meditation improves Focus.",
-            icon: "chart.bar.fill",
-            accentColor: .blue,
-            features: [
-                "6 core attributes to develop",
-                "Real health data integration",
-                "Visible progress tracking"
-            ]
-        ),
-        
-        OnboardingPage(
-            title: "Health Integration",
-            description: "Connect with Apple Health to automatically track your progress and earn XP for healthy activities.",
-            icon: "heart.fill",
-            accentColor: .red,
-            features: [
-                "Automatic step tracking",
-                "Sleep quality monitoring",
-                "Heart rate analysis"
-            ]
-        ),
-        
-        OnboardingPage(
-            title: "Stay Motivated",
-            description: "Your AI coach provides guidance, celebrates victories, and helps you stay on track with your goals.",
-            icon: "brain.head.profile",
-            accentColor: .purple,
-            features: [
-                "Personalized coaching",
-                "Smart notifications",
-                "Progress celebrations"
-            ]
-        ),
-        
-        OnboardingPage(
-            title: "Begin Your Journey",
-            description: "Ready to transform your life into an adventure? Let's set up your profile and start your epic quest.",
-            icon: "figure.walk",
-            accentColor: .green,
-            features: []
-        )
-    ]
-}
-
-struct PermissionRequestView: View {
     @Binding var isOnboardingComplete: Bool
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var healthManager = HealthManager()
-    @StateObject private var notificationManager = NotificationManager()
-    @State private var currentStep = 0
-    @State private var profileName = ""
-    @State private var selectedGoal: FitnessGoal = .generalHealth
-    @State private var selectedGender: PlayerGender = .male
-    @State private var selectedGym: GymEnvironment = .fullGym
-    @State private var ageText: String = "25"
-    @State private var heightText: String = "170"
-    @State private var weightText: String = "70"
-    @State private var activityLevelIndex: Int = 1
 
-    let steps = PermissionStep.allSteps
-    
+    // ── Collected state ───────────────────────────────────────────────────────
+    @State private var currentStep = 0
+
+    @State private var profileName         = ""
+    @State private var selectedGender: PlayerGender    = .male
+    @State private var selectedGoal: FitnessGoal       = .generalHealth
+    @State private var selectedGym: GymEnvironment     = .fullGym
+    @State private var ageText             = "25"
+    @State private var heightText          = "170"
+    @State private var weightText          = "70"
+    @State private var activityLevelIndex  = 1
+    @State private var selectedAvatarKey: String?      = nil
+    @State private var selectedPlanID: String?         = nil   // nil = skip / custom
+
+    // ── Services ──────────────────────────────────────────────────────────────
+    @StateObject private var healthManager       = HealthManager()
+    @StateObject private var notificationManager = NotificationManager()
+    @ObservedObject private var avatarService    = AvatarService.shared
+
+    // ── Step configuration ────────────────────────────────────────────────────
+    private let totalProgressSteps = 10   // steps 1–10 show the progress bar
+    private let skippableSteps: Set<Int> = [6, 7, 9, 10]
+    private let noProgressBarSteps: Set<Int> = [0, 11]
+
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 30) {
-                // Progress indicator
-                ProgressView(value: Double(currentStep + 1), total: Double(steps.count))
-                    .tint(.cyan)
-                    .padding(.horizontal)
-                
-                Text("Step \(currentStep + 1) of \(steps.count)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                // Current step content
-                PermissionStepView(
-                    step: steps[currentStep],
-                    healthManager: healthManager,
-                    notificationManager: notificationManager,
-                    profileName: $profileName,
-                    selectedGoal: $selectedGoal,
-                    selectedGender: $selectedGender,
-                    selectedGym: $selectedGym,
-                    ageText: $ageText,
-                    heightText: $heightText,
-                    weightText: $weightText,
-                    activityLevelIndex: $activityLevelIndex
-                )
-                
-                Spacer()
-                
-                // Navigation buttons
-                HStack(spacing: 20) {
-                    if currentStep > 0 {
-                        Button("Back") {
-                            withAnimation(.easeInOut) {
-                                currentStep -= 1
-                            }
-                        }
-                        .buttonStyle(SecondaryButtonStyle())
-                    }
-                    
-                    Spacer()
-                    
-                    if currentStep < steps.count - 1 {
-                        Button(steps[currentStep].buttonTitle) {
-                            handleStepAction()
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                    } else {
-                        Button("Complete Setup") {
-                            completeOnboarding()
-                        }
-                        .buttonStyle(PrimaryButtonStyle())
-                    }
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Progress bar (hidden on boot and ready screens)
+                if !noProgressBarSteps.contains(currentStep) {
+                    progressBar
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .transition(.opacity)
                 }
-                .padding(.horizontal, 30)
-                .padding(.bottom, 40)
-            }
-            .navigationTitle("Setup")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Skip") {
-                        isOnboardingComplete = true
-                    }
-                    .foregroundColor(.secondary)
+
+                // Step content
+                stepContent
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+                    .id(currentStep)
+
+                // Navigation buttons (hidden on boot and ready screens)
+                if !noProgressBarSteps.contains(currentStep) {
+                    navigationButtons
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 40)
                 }
             }
         }
         .preferredColorScheme(.dark)
     }
-    
-    private func handleStepAction() {
-        switch steps[currentStep].type {
-        case .profile, .goal, .demographics, .gymEnvironment:
-            // Input steps are handled by their UI controls; nothing to do here
-            break
-        case .health:
-            Task {
-                await healthManager.requestAuthorization()
+
+    // MARK: - Progress Bar
+
+    private var progressBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                // Back chevron
+                Button {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        currentStep = max(1, currentStep - 1)
+                    }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(currentStep <= 1 ? .clear : .white.opacity(0.7))
+                }
+                .disabled(currentStep <= 1)
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(height: 4)
+                        Capsule()
+                            .fill(Color.cyan)
+                            .frame(
+                                width: geo.size.width * progressFraction,
+                                height: 4
+                            )
+                            .animation(.easeInOut(duration: 0.4), value: currentStep)
+                    }
+                }
+                .frame(height: 4)
+
+                Text("\(currentStep)/\(totalProgressSteps)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.4))
+                    .frame(width: 36, alignment: .trailing)
             }
-        case .notifications:
-            Task {
-                await notificationManager.requestAuthorization()
-            }
-        case .complete:
-            break
+            .frame(height: 32)
         }
-        
-        withAnimation(.easeInOut) {
+    }
+
+    private var progressFraction: CGFloat {
+        guard currentStep > 0 else { return 0 }
+        return CGFloat(currentStep) / CGFloat(totalProgressSteps)
+    }
+
+    // MARK: - Step Content Router
+
+    @ViewBuilder
+    private var stepContent: some View {
+        switch currentStep {
+        case 0:  BootStepView()
+        case 1:  NameStepView(profileName: $profileName)
+        case 2:  GenderStepView(selectedGender: $selectedGender)
+        case 3:  GoalStepView(selectedGoal: $selectedGoal)
+        case 4:  BodyStatsStepView(
+                    ageText: $ageText,
+                    heightText: $heightText,
+                    weightText: $weightText,
+                    activityLevelIndex: $activityLevelIndex,
+                    selectedGender: selectedGender,
+                    selectedGoal: selectedGoal
+                 )
+        case 5:  GymStepView(selectedGym: $selectedGym)
+        case 6:  AvatarStepView(selectedAvatarKey: $selectedAvatarKey)
+        case 7:  WorkoutPlanStepView(selectedPlanID: $selectedPlanID)
+        case 8:  GPExplainerStepView()
+        case 9:  HealthStepView(healthManager: healthManager)
+        case 10: NotificationsStepView(notificationManager: notificationManager)
+        case 11: ReadyStepView(
+                    name: profileName,
+                    goal: selectedGoal,
+                    avatarKey: selectedAvatarKey ?? "avatar_default"
+                 )
+        default: EmptyView()
+        }
+    }
+
+    // MARK: - Navigation Buttons
+
+    private var navigationButtons: some View {
+        VStack(spacing: 12) {
+            // Continue / advance button
+            Button(currentStep == 10 ? "Complete Setup" : "Continue") {
+                handleAdvance()
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
+            .disabled(!canAdvance)
+
+            // Skip button (optional steps only)
+            if skippableSteps.contains(currentStep) {
+                Button("Skip for now") {
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        currentStep += 1
+                    }
+                }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white.opacity(0.4))
+            }
+        }
+    }
+
+    // MARK: - Advance Logic
+
+    private var canAdvance: Bool {
+        switch currentStep {
+        case 1: return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
+        default: return true
+        }
+    }
+
+    private func handleAdvance() {
+        if currentStep == 0 {
+            // Boot → Name
+            withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
+            return
+        }
+        if currentStep == 10 {
+            // Final setup step → complete
+            completeOnboarding()
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.35)) {
             currentStep += 1
         }
     }
-    
+
+    // MARK: - Complete Onboarding
+
     private func completeOnboarding() {
         let trimmedName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let age = Int(ageText) ?? 25
+        let age    = Int(ageText)    ?? 25
         let height = Double(heightText) ?? 170.0
         let weight = Double(weightText) ?? 70.0
 
-        // Write the profile into SwiftData so every view that reads Profile fields
-        // shows the player's real info instead of defaults.
-        // Fetch any existing profile first to avoid creating duplicates on re-runs.
+        // Write to SwiftData Profile
         let existing = try? modelContext.fetch(FetchDescriptor<Profile>())
         let profile: Profile
-        if let existing = existing?.first {
-            profile = existing
+        if let first = existing?.first {
+            profile = first
         } else {
             profile = Profile()
             modelContext.insert(profile)
@@ -372,44 +233,314 @@ struct PermissionRequestView: View {
         profile.height             = height
         profile.weight             = weight
         profile.activityLevelIndex = activityLevelIndex
+        if let planID = selectedPlanID, !planID.isEmpty {
+            profile.activePlanID = planID
+        }
         try? modelContext.save()
 
-        // Keep UserDefaults in sync for any legacy reads
+        // UserDefaults sync
         if !trimmedName.isEmpty {
             UserDefaults.standard.set(trimmedName, forKey: "userProfileName")
         }
 
-        // Configure notifications if authorized
+        // Notifications
         if notificationManager.isAuthorized {
             notificationManager.configureRecurringNotifications()
             notificationManager.setupNotificationCategories()
         }
+
+        // Avatar selection (async, fire-and-forget)
+        if let key = selectedAvatarKey {
+            Task { await AvatarService.shared.setAvatar(key: key) }
+        }
+
+        // Kick off profile sync
+        Task { await PlayerProfileService.shared.refresh() }
 
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         isOnboardingComplete = true
     }
 }
 
-struct PermissionStepView: View {
-    let step: PermissionStep
-    @ObservedObject var healthManager: HealthManager
-    @ObservedObject var notificationManager: NotificationManager
+// MARK: - Step 0: Boot / Welcome
+
+private struct BootStepView: View {
+    @State private var pulse = false
+    @State private var glowOpacity: Double = 0.3
+
+    var body: some View {
+        ZStack {
+            // Glow rings
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .stroke(Color.cyan.opacity(glowOpacity - Double(i) * 0.08), lineWidth: 1)
+                    .frame(width: CGFloat(180 + i * 60), height: CGFloat(180 + i * 60))
+                    .scaleEffect(pulse ? 1.08 : 0.92)
+                    .animation(
+                        .easeInOut(duration: 2.4 + Double(i) * 0.4)
+                        .repeatForever(autoreverses: true)
+                        .delay(Double(i) * 0.3),
+                        value: pulse
+                    )
+            }
+
+            VStack(spacing: 48) {
+                Spacer()
+
+                VStack(spacing: 16) {
+                    Text("SYSTEM TRAINER")
+                        .font(.system(size: 32, weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                        .shadow(color: .cyan.opacity(0.6), radius: 16)
+
+                    Text("TRAIN. LEVEL UP. ASCEND.")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.cyan.opacity(0.7))
+                        .tracking(4)
+                }
+
+                Spacer()
+                Spacer()
+
+                // Begin button
+                VStack(spacing: 0) { }
+                    .frame(height: 80)
+            }
+            .padding(.horizontal, 24)
+
+            // Begin button pinned to bottom
+            VStack {
+                Spacer()
+                // Handled by parent's navigationButtons — but boot step has no nav bar.
+                // We inject it inline here for the special full-screen layout.
+                BootBeginButtonPlaceholder()
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 40)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { pulse = true; glowOpacity = 0.3 }
+    }
+}
+
+// We can't call parent's handleAdvance from a sub-view directly, so the boot
+// step's "Begin" button is handled in OnboardingView via the unified nav area.
+// This placeholder keeps the layout correct.
+private struct BootBeginButtonPlaceholder: View {
+    var body: some View { EmptyView() }
+}
+
+// MARK: - Step 1: Name
+
+private struct NameStepView: View {
     @Binding var profileName: String
-    @Binding var selectedGoal: FitnessGoal
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "person.circle.fill",
+            iconColor: .cyan,
+            title: "What should we\ncall you, Warrior?",
+            subtitle: "Your identity in the system."
+        ) {
+            VStack(spacing: 8) {
+                TextField("Enter your name", text: $profileName)
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.white)
+                    .padding(.vertical, 14)
+                    .padding(.horizontal, 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.white.opacity(0.07))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(focused ? Color.cyan : Color.white.opacity(0.15), lineWidth: 1)
+                            )
+                    )
+                    .focused($focused)
+                    .submitLabel(.continue)
+                    .frame(maxWidth: 320)
+
+                if profileName.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Text("Required to continue")
+                        .font(.caption)
+                        .foregroundColor(.orange.opacity(0.7))
+                }
+            }
+        }
+        .onAppear { focused = true }
+    }
+}
+
+// MARK: - Step 2: Biological Sex
+
+private struct GenderStepView: View {
     @Binding var selectedGender: PlayerGender
-    @Binding var selectedGym: GymEnvironment
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "person.2.fill",
+            iconColor: .purple,
+            title: "Choose Your Fighter",
+            subtitle: "Used to personalise training benchmarks and calorie targets."
+        ) {
+            HStack(spacing: 16) {
+                GenderCard(
+                    icon: "figure.stand",
+                    label: "Male",
+                    isSelected: selectedGender == .male,
+                    color: .blue
+                ) { selectedGender = .male }
+
+                GenderCard(
+                    icon: "figure.stand.dress",
+                    label: "Female",
+                    isSelected: selectedGender == .female,
+                    color: .pink
+                ) { selectedGender = .female }
+            }
+            .padding(.horizontal, 8)
+        }
+    }
+}
+
+private struct GenderCard: View {
+    let icon: String
+    let label: String
+    let isSelected: Bool
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 52, weight: .light))
+                    .foregroundColor(isSelected ? color : .white.opacity(0.5))
+                Text(label)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(isSelected ? .white : .white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(isSelected ? color.opacity(0.15) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(isSelected ? color : Color.white.opacity(0.1), lineWidth: isSelected ? 2 : 1)
+                    )
+                    .shadow(color: isSelected ? color.opacity(0.3) : .clear, radius: 12)
+            )
+            .scaleEffect(isSelected ? 1.02 : 1.0)
+            .animation(.easeInOut(duration: 0.2), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step 3: Fitness Goal
+
+private struct GoalStepView: View {
+    @Binding var selectedGoal: FitnessGoal
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "target",
+            iconColor: .orange,
+            title: "Your Primary Mission",
+            subtitle: "Shapes your quest difficulty and daily targets."
+        ) {
+            VStack(spacing: 10) {
+                ForEach(FitnessGoal.allCases, id: \.self) { goal in
+                    GoalCard(goal: goal, isSelected: selectedGoal == goal) {
+                        selectedGoal = goal
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct GoalCard: View {
+    let goal: FitnessGoal
+    let isSelected: Bool
+    let action: () -> Void
+
+    private var accentColor: Color {
+        switch goal {
+        case .loseFat:      return .orange
+        case .buildMuscle:  return .blue
+        case .endurance:    return .green
+        case .generalHealth: return .red
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: goal.icon)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(isSelected ? accentColor : .white.opacity(0.5))
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(goal.displayName)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(goal.description)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(accentColor)
+                        .font(.system(size: 20))
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? accentColor.opacity(0.12) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(isSelected ? accentColor : Color.white.opacity(0.1), lineWidth: isSelected ? 1.5 : 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.01 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step 4: Body Stats
+
+private struct BodyStatsStepView: View {
     @Binding var ageText: String
     @Binding var heightText: String
     @Binding var weightText: String
     @Binding var activityLevelIndex: Int
+    let selectedGender: PlayerGender
+    let selectedGoal: FitnessGoal
 
-    private let activityLabels = ["Sedentary", "Lightly Active", "Moderately Active", "Very Active", "Extremely Active"]
+    private let activityOptions: [(label: String, icon: String, subtitle: String)] = [
+        ("Sedentary",         "sofa.fill",          "Little to no exercise"),
+        ("Lightly Active",    "figure.walk",         "1–3 days/week"),
+        ("Moderately Active", "figure.run",          "3–5 days/week"),
+        ("Very Active",       "figure.hiking",       "6–7 days/week"),
+        ("Extremely Active",  "bolt.heart.fill",     "Physical job or 2× training")
+    ]
 
-    /// Live TDEE estimate shown in the demographics step
     private var estimatedCalories: Int {
         let age = Double(Int(ageText) ?? 25)
-        let h = Double(Double(heightText) ?? 170)
-        let w = Double(Double(weightText) ?? 70)
+        let h   = Double(Double(heightText) ?? 170)
+        let w   = Double(Double(weightText) ?? 70)
         let bmr: Double
         switch selectedGender {
         case .male:   bmr = 10 * w + 6.25 * h - 5 * age + 5
@@ -417,391 +548,993 @@ struct PermissionStepView: View {
         default:      bmr = 10 * w + 6.25 * h - 5 * age - 78
         }
         let multipliers = [1.2, 1.375, 1.55, 1.725, 1.9]
-        let tdee = bmr * multipliers[max(0, min(multipliers.count - 1, activityLevelIndex))]
+        let idx  = max(0, min(multipliers.count - 1, activityLevelIndex))
+        let tdee = bmr * multipliers[idx]
         switch selectedGoal {
-        case .loseFat:     return Int((tdee - 500).rounded())
-        case .buildMuscle: return Int((tdee + 300).rounded())
-        default:           return Int(tdee.rounded())
+        case .loseFat:      return Int((tdee - 500).rounded())
+        case .buildMuscle:  return Int((tdee + 300).rounded())
+        default:            return Int(tdee.rounded())
         }
     }
 
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: step.icon)
-                .font(.system(size: 60, weight: .light))
-                .foregroundColor(step.color)
-            
-            VStack(spacing: 12) {
-                Text(step.title)
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                
-                Text(step.description)
-                    .font(.body)
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(nil)
-            }
-            .padding(.horizontal, 20)
-            
-            // Step-specific content
-            switch step.type {
-            case .profile:
-                VStack(spacing: 16) {
-                    TextField("Enter your name", text: $profileName)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(maxWidth: 250)
-                    Text("We'll use this to personalize your experience")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+        OnboardingStepShell(
+            icon: "person.text.rectangle.fill",
+            iconColor: .cyan,
+            title: "Calibrate Your System",
+            subtitle: "Used to calculate your calorie target and quest intensity."
+        ) {
+            VStack(spacing: 14) {
+                // Age / Height / Weight
+                HStack(spacing: 12) {
+                    StatField(label: "AGE", placeholder: "25", unit: "yrs", text: $ageText)
+                    StatField(label: "HEIGHT", placeholder: "170", unit: "cm", text: $heightText)
+                    StatField(label: "WEIGHT", placeholder: "70", unit: "kg", text: $weightText)
                 }
 
-            case .goal:
-                VStack(spacing: 12) {
-                    ForEach(FitnessGoal.allCases, id: \.self) { goal in
-                        Button {
-                            selectedGoal = goal
-                        } label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: goal.icon)
-                                    .font(.title3)
-                                    .foregroundColor(selectedGoal == goal ? .black : step.color)
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(goal.displayName)
-                                        .font(.headline)
-                                        .foregroundColor(selectedGoal == goal ? .black : .white)
-                                    Text(goal.description)
-                                        .font(.caption)
-                                        .foregroundColor(selectedGoal == goal ? .black.opacity(0.7) : .gray)
+                // Activity level cards
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("ACTIVITY LEVEL")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.leading, 2)
+
+                    ForEach(activityOptions.indices, id: \.self) { i in
+                        let opt = activityOptions[i]
+                        Button { activityLevelIndex = i } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: opt.icon)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(activityLevelIndex == i ? .cyan : .white.opacity(0.4))
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(opt.label)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    Text(opt.subtitle)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.white.opacity(0.45))
                                 }
                                 Spacer()
-                                if selectedGoal == goal {
+                                if activityLevelIndex == i {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.black)
+                                        .foregroundColor(.cyan)
+                                        .font(.system(size: 16))
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(selectedGoal == goal ? step.color : Color.white.opacity(0.08))
-                            .cornerRadius(12)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(activityLevelIndex == i ? Color.cyan.opacity(0.1) : Color.white.opacity(0.04))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(activityLevelIndex == i ? Color.cyan.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1)
+                                    )
+                            )
                         }
-                        .padding(.horizontal)
+                        .buttonStyle(.plain)
+                        .animation(.easeInOut(duration: 0.15), value: activityLevelIndex)
                     }
                 }
 
-            case .demographics:
-                VStack(spacing: 14) {
-                    // Gender picker
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Gender")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                        Picker("Gender", selection: $selectedGender) {
-                            ForEach(PlayerGender.allCases, id: \.self) { g in
-                                Text(g.displayName).tag(g)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal)
-                    }
-                    // Age / Height / Weight fields
-                    HStack(spacing: 12) {
-                        DemographicField(label: "Age", placeholder: "25", unit: "yrs", text: $ageText)
-                        DemographicField(label: "Height", placeholder: "170", unit: "cm", text: $heightText)
-                        DemographicField(label: "Weight", placeholder: "70", unit: "kg", text: $weightText)
-                    }
-                    .padding(.horizontal)
-
-                    // Activity level picker
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Activity Level")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                        Picker("Activity Level", selection: $activityLevelIndex) {
-                            ForEach(activityLabels.indices, id: \.self) { i in
-                                Text(activityLabels[i]).tag(i)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .padding(.horizontal)
-                        .tint(.cyan)
-                    }
-
-                    // Live calorie goal preview
-                    HStack {
-                        Image(systemName: "flame.fill")
-                            .foregroundColor(.orange)
-                        Text("Daily calorie goal: \(estimatedCalories) kcal")
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.08))
-                    .cornerRadius(10)
-                    .padding(.horizontal)
-                }
-
-            case .gymEnvironment:
-                VStack(spacing: 10) {
-                    ForEach(GymEnvironment.allCases, id: \.self) { env in
-                        Button {
-                            selectedGym = env
-                        } label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: env.icon)
-                                    .font(.title3)
-                                    .foregroundColor(selectedGym == env ? .black : step.color)
-                                    .frame(width: 28)
-                                Text(env.displayName)
-                                    .font(.headline)
-                                    .foregroundColor(selectedGym == env ? .black : .white)
-                                Spacer()
-                                if selectedGym == env {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.black)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(selectedGym == env ? step.color : Color.white.opacity(0.08))
-                            .cornerRadius(12)
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-                
-            case .health:
-                VStack(spacing: 14) {
-                    if healthManager.isAuthorized {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text("Synced to the Training Grid!")
-                                .foregroundColor(.green)
-                                .fontWeight(.semibold)
-                        }
-                        Text("Your biometrics are now feeding live data into your quest engine. Steps, sleep, and active calories will auto-complete matching quests.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    } else if !healthManager.healthDataAvailable {
-                        VStack(spacing: 8) {
-                            Image(systemName: "sensor.tag.radiowaves.forward.fill")
-                                .font(.title2)
-                                .foregroundColor(.orange)
-                            Text("Training Grid Offline")
-                                .fontWeight(.semibold)
-                                .foregroundColor(.orange)
-                            Text("Apple Health isn't available on this device. You can still log workouts and nutrition manually — your progress counts either way.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                    } else {
-                        VStack(spacing: 6) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "bolt.fill")
-                                    .foregroundColor(.yellow)
-                                Text("Unlock passive XP gains")
-                                    .font(.caption).fontWeight(.semibold)
-                                    .foregroundColor(.white)
-                            }
-                            HStack(spacing: 6) {
-                                Image(systemName: "figure.walk")
-                                    .foregroundColor(.cyan)
-                                Text("Auto-complete step & sleep quests")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            HStack(spacing: 6) {
-                                Image(systemName: "flame.fill")
-                                    .foregroundColor(.orange)
-                                Text("Real calorie burn drives real rewards")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                        Text("Your data stays private — RPT only reads, never writes to Apple Health.")
-                            .font(.caption2)
-                            .foregroundColor(.secondary.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                
-            case .notifications:
-                VStack(spacing: 12) {
-                    if notificationManager.isAuthorized {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text("Notifications enabled!")
-                                .foregroundColor(.green)
-                        }
-                    }
-                    
-                    Text("Get reminded about quests and celebrate your achievements")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                
-            case .complete:
-                VStack(spacing: 16) {
-                    Text("🎉")
-                        .font(.system(size: 50))
-                    
-                    Text("You're all set! Your adventure begins now.")
-                        .font(.headline)
+                // Live TDEE estimate
+                HStack(spacing: 8) {
+                    Image(systemName: "flame.fill")
+                        .foregroundColor(.orange)
+                    Text("Daily calorie target: \(estimatedCalories) kcal")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.orange.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+                        )
+                )
+                .animation(.easeInOut(duration: 0.2), value: estimatedCalories)
             }
         }
     }
 }
 
-struct PermissionStep {
-    enum StepType {
-        case profile, goal, demographics, gymEnvironment, health, notifications, complete
-    }
-    
-    let type: StepType
-    let title: String
-    let description: String
-    let icon: String
-    let color: Color
-    let buttonTitle: String
-    
-    static let allSteps = [
-        PermissionStep(
-            type: .profile,
-            title: "Create Your Profile",
-            description: "Let's personalize your RPG experience with your name.",
-            icon: "person.circle.fill",
-            color: .blue,
-            buttonTitle: "Continue"
-        ),
-        PermissionStep(
-            type: .goal,
-            title: "What's Your Goal?",
-            description: "We'll tailor your quests and program to match your fitness mission.",
-            icon: "target",
-            color: .orange,
-            buttonTitle: "Continue"
-        ),
-        PermissionStep(
-            type: .demographics,
-            title: "Your Body Stats",
-            description: "Used to personalise quest intensity, calorie targets and strength benchmarks.",
-            icon: "person.text.rectangle.fill",
-            color: .cyan,
-            buttonTitle: "Continue"
-        ),
-        PermissionStep(
-            type: .gymEnvironment,
-            title: "Where Do You Train?",
-            description: "Your training environment shapes which exercises and programs are right for you.",
-            icon: "building.2.fill",
-            color: .purple,
-            buttonTitle: "Continue"
-        ),
-        PermissionStep(
-            type: .health,
-            title: "Connect to the Training Grid",
-            description: "Sync Apple Health so every step, rep, and hour of sleep earns real XP. Quests auto-complete when your body does the work.",
-            icon: "sensor.tag.radiowaves.forward.fill",
-            color: .red,
-            buttonTitle: "Sync the Grid"
-        ),
-        PermissionStep(
-            type: .notifications,
-            title: "Enable Notifications",
-            description: "Stay motivated with quest reminders and achievement celebrations.",
-            icon: "bell.circle.fill",
-            color: .orange,
-            buttonTitle: "Enable Notifications"
-        ),
-        PermissionStep(
-            type: .complete,
-            title: "Ready to Begin!",
-            description: "Your RPG life transformation starts now. Complete your first quest to earn XP!",
-            icon: "flag.checkered.circle.fill",
-            color: .green,
-            buttonTitle: "Start Adventure"
-        )
-    ]
-}
-
-// MARK: - Custom Button Styles
-struct PrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .foregroundColor(.black)
-            .padding(.horizontal, 30)
-            .padding(.vertical, 12)
-            .background(
-                Capsule()
-                    .fill(.cyan)
-                    .shadow(color: .cyan.opacity(0.5), radius: 10, x: 0, y: 5)
-            )
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
-
-struct SecondaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .foregroundColor(.white)
-            .padding(.horizontal, 30)
-            .padding(.vertical, 12)
-            .background(
-                Capsule()
-                    .stroke(.gray, lineWidth: 2)
-            )
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
-
-// MARK: - Demographic input field helper
-private struct DemographicField: View {
+private struct StatField: View {
     let label: String
     let placeholder: String
     let unit: String
     @Binding var text: String
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             Text(label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            HStack(spacing: 2) {
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.4))
+
+            VStack(spacing: 2) {
                 TextField(placeholder, text: $text)
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.center)
-                    .frame(width: 52)
-                    .padding(8)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(8)
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
+                    .frame(width: 60)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.white.opacity(0.07))
+                    )
+
                 Text(unit)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Step 5: Gym Environment
+
+private struct GymStepView: View {
+    @Binding var selectedGym: GymEnvironment
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "building.2.fill",
+            iconColor: .purple,
+            title: "Where Do You Train?",
+            subtitle: "Determines which exercises and programs are generated for you."
+        ) {
+            VStack(spacing: 10) {
+                ForEach(GymEnvironment.allCases, id: \.self) { env in
+                    GymCard(env: env, isSelected: selectedGym == env) {
+                        selectedGym = env
+                    }
+                }
             }
         }
     }
 }
 
+private struct GymCard: View {
+    let env: GymEnvironment
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: env.icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(isSelected ? .purple : .white.opacity(0.45))
+                    .frame(width: 32)
+
+                Text(env.displayName)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.purple)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 15)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? Color.purple.opacity(0.13) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(isSelected ? Color.purple : Color.white.opacity(0.1), lineWidth: isSelected ? 1.5 : 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.01 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step 6: Avatar Selection
+
+private struct AvatarStepView: View {
+    @Binding var selectedAvatarKey: String?
+    @ObservedObject private var avatarService = AvatarService.shared
+
+    private var displayAvatars: [AvatarTemplate] {
+        Array(avatarService.catalog.prefix(8))
+    }
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "person.crop.circle.badge.plus",
+            iconColor: .cyan,
+            title: "Choose Your Warrior",
+            subtitle: "Your avatar represents you in the system.",
+            isSkippable: true
+        ) {
+            VStack(spacing: 16) {
+                if displayAvatars.isEmpty {
+                    // Catalog not loaded yet — show placeholder grid
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()),
+                                        GridItem(.flexible()), GridItem(.flexible())],
+                              spacing: 12) {
+                        ForEach(0..<8, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color.white.opacity(0.06))
+                                .frame(height: 70)
+                        }
+                    }
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()),
+                                        GridItem(.flexible()), GridItem(.flexible())],
+                              spacing: 12) {
+                        ForEach(displayAvatars) { avatar in
+                            AvatarCell(avatar: avatar,
+                                       isSelected: selectedAvatarKey == avatar.key) {
+                                selectedAvatarKey = avatar.key
+                            }
+                        }
+                    }
+                }
+
+                Text("More avatars unlock as you level up")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+        }
+    }
+}
+
+private struct AvatarCell: View {
+    let avatar: AvatarTemplate
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack {
+                    if let uiImage = UIImage(named: avatar.key) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.circle.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundColor(.white.opacity(0.3))
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .overlay(
+                    Circle()
+                        .stroke(isSelected ? Color.cyan : Color.clear, lineWidth: 2.5)
+                        .shadow(color: isSelected ? .cyan.opacity(0.6) : .clear, radius: 6)
+                )
+
+                Text(avatar.name)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(isSelected ? .cyan : .white.opacity(0.5))
+                    .lineLimit(1)
+            }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(isSelected ? Color.cyan.opacity(0.1) : Color.clear)
+            )
+            .scaleEffect(isSelected ? 1.05 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step 7: Workout Plan
+
+private struct WorkoutPlanStepView: View {
+    @Binding var selectedPlanID: String?
+    @ObservedObject private var planService = AnimeWorkoutPlanService.shared
+
+    @State private var showingAnimePicker = false
+    @State private var pickMode: PickMode = .none
+
+    private enum PickMode { case none, anime, custom }
+
+    private var previewPlans: [AnimeWorkoutPlan] {
+        Array(planService.all.prefix(4))
+    }
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "figure.strengthtraining.traditional",
+            iconColor: .orange,
+            title: "Training Protocol",
+            subtitle: "Start with a proven plan or build your own.",
+            isSkippable: true
+        ) {
+            VStack(spacing: 14) {
+                // Anime Plan card
+                PlanOptionCard(
+                    icon: "sparkles",
+                    title: "Anime Plan",
+                    subtitle: "Train like your favourite character",
+                    color: .orange,
+                    isSelected: pickMode == .anime
+                ) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        pickMode = .anime
+                        showingAnimePicker = true
+                    }
+                }
+
+                // Custom Plan card
+                PlanOptionCard(
+                    icon: "wrench.and.screwdriver.fill",
+                    title: "Custom Protocol",
+                    subtitle: "Build your own training plan in the Training tab",
+                    color: .blue,
+                    isSelected: pickMode == .custom
+                ) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        pickMode = .custom
+                        selectedPlanID = nil
+                    }
+                }
+
+                // Mini anime plan preview strip
+                if !previewPlans.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("POPULAR PLANS")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.35))
+                            .padding(.leading, 2)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(previewPlans) { plan in
+                                    MiniPlanChip(plan: plan,
+                                                 isSelected: selectedPlanID == plan.id) {
+                                        selectedPlanID = plan.id
+                                        pickMode = .anime
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Confirmation
+                if let id = selectedPlanID,
+                   let plan = planService.plan(id: id) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Selected: \(plan.character)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.top, 4)
+                } else if pickMode == .custom {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundColor(.blue)
+                        Text("Build your plan after setup in the Training tab")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+        .sheet(isPresented: $showingAnimePicker) {
+            AnimePlanPickerSheet(
+                plans: planService.all,
+                selectedPlanID: $selectedPlanID
+            )
+        }
+    }
+}
+
+private struct PlanOptionCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let color: Color
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(isSelected ? color : .white.opacity(0.4))
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(color)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 15)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? color.opacity(0.12) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(isSelected ? color : Color.white.opacity(0.1), lineWidth: isSelected ? 1.5 : 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.01 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MiniPlanChip: View {
+    let plan: AnimeWorkoutPlan
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(plan.character)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(plan.difficulty.rawValue)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(plan.difficulty.color)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.orange.opacity(0.15) : Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? Color.orange : Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AnimePlanPickerSheet: View {
+    let plans: [AnimeWorkoutPlan]
+    @Binding var selectedPlanID: String?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(plans) { plan in
+                        Button {
+                            selectedPlanID = plan.id
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: plan.iconSymbol)
+                                    .font(.system(size: 22))
+                                    .foregroundColor(plan.accentColor)
+                                    .frame(width: 36)
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(plan.character)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                    Text(plan.anime)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.5))
+                                }
+
+                                Spacer()
+
+                                Text(plan.difficulty.rawValue)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(plan.difficulty.color)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(plan.difficulty.color.opacity(0.15))
+                                    )
+
+                                if selectedPlanID == plan.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.cyan)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(selectedPlanID == plan.id
+                                          ? Color.cyan.opacity(0.08)
+                                          : Color.white.opacity(0.05))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .stroke(selectedPlanID == plan.id
+                                                    ? Color.cyan.opacity(0.4)
+                                                    : Color.white.opacity(0.08),
+                                                    lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            .navigationTitle("Choose Your Plan")
+            .navigationBarTitleDisplayMode(.inline)
+            .background(Color(.systemBackground))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step 8: Gold Pieces Explainer
+
+private struct GPExplainerStepView: View {
+    @State private var coinPulse = false
+
+    private let bullets: [(icon: String, text: String)] = [
+        ("target",               "Earn GP by completing quests"),
+        ("storefront.fill",      "Spend GP in the item store"),
+        ("bolt.fill",            "Buy gear that powers up your stats")
+    ]
+
+    private let examples: [(label: String, amount: String)] = [
+        ("Daily Quest",  "+25 GP"),
+        ("Weekly Quest", "+100 GP"),
+        ("Level Up",     "+200 GP")
+    ]
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "bitcoinsign.circle.fill",
+            iconColor: Color(red: 1.0, green: 0.8, blue: 0.0),
+            title: "Gold Pieces",
+            subtitle: "The in-game currency that powers your progression."
+        ) {
+            VStack(spacing: 18) {
+                // Bullets
+                VStack(spacing: 10) {
+                    ForEach(bullets, id: \.text) { bullet in
+                        HStack(spacing: 12) {
+                            Image(systemName: bullet.icon)
+                                .font(.system(size: 16))
+                                .foregroundColor(Color(red: 1.0, green: 0.8, blue: 0.0))
+                                .frame(width: 24)
+                            Text(bullet.text)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+
+                Divider().background(Color.white.opacity(0.1))
+
+                // Example amounts
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("EXAMPLE REWARDS")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.35))
+
+                    HStack(spacing: 10) {
+                        ForEach(examples, id: \.label) { ex in
+                            VStack(spacing: 4) {
+                                Text(ex.amount)
+                                    .font(.system(size: 14, weight: .black, design: .monospaced))
+                                    .foregroundColor(Color(red: 1.0, green: 0.8, blue: 0.0))
+                                Text(ex.label)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.white.opacity(0.45))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(red: 1.0, green: 0.8, blue: 0.0).opacity(0.07))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color(red: 1.0, green: 0.8, blue: 0.0).opacity(0.2), lineWidth: 1)
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step 9: HealthKit
+
+private struct HealthStepView: View {
+    @ObservedObject var healthManager: HealthManager
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "sensor.tag.radiowaves.forward.fill",
+            iconColor: .red,
+            title: "Connect Apple Health",
+            subtitle: "Every step, rep, and hour of sleep earns real XP. Quests auto-complete when your body does the work.",
+            isSkippable: true
+        ) {
+            VStack(spacing: 14) {
+                if healthManager.isAuthorized {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.title3)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Training Grid Online")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.green)
+                            Text("Your biometrics are feeding live data into the quest engine.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.green.opacity(0.08))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green.opacity(0.3), lineWidth: 1))
+                    )
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach([
+                            ("bolt.fill",        "yellow",  "Unlock passive XP gains"),
+                            ("figure.walk",      "cyan",    "Auto-complete step & sleep quests"),
+                            ("flame.fill",       "orange",  "Real calorie burn drives real rewards")
+                        ], id: \.2) { icon, _, label in
+                            HStack(spacing: 10) {
+                                Image(systemName: icon)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.yellow)
+                                    .frame(width: 20)
+                                Text(label)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                        }
+                    }
+
+                    Text("Your data stays private — System Trainer only reads, never writes to Apple Health.")
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+
+                    Button("Sync the Grid") {
+                        Task { await healthManager.requestAuthorization() }
+                    }
+                    .buttonStyle(OnboardingPrimaryButtonStyle())
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step 10: Notifications
+
+private struct NotificationsStepView: View {
+    @ObservedObject var notificationManager: NotificationManager
+
+    private let examples = [
+        "⚔️ Daily quests are live — time to level up!",
+        "🔥 Streak at risk! Log one quest to keep it alive.",
+        "🏆 You levelled up to Rank 12. New missions await."
+    ]
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "bell.badge.fill",
+            iconColor: .orange,
+            title: "Stay in the System",
+            subtitle: "Quest reminders and achievement alerts keep you on mission.",
+            isSkippable: true
+        ) {
+            VStack(spacing: 16) {
+                if notificationManager.isAuthorized {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.title3)
+                        Text("Notifications enabled!")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.green)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.green.opacity(0.08))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green.opacity(0.3), lineWidth: 1))
+                    )
+                } else {
+                    // Example previews
+                    VStack(spacing: 8) {
+                        Text("EXAMPLE ALERTS")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.35))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        ForEach(examples, id: \.self) { ex in
+                            HStack {
+                                Text(ex)
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.white.opacity(0.75))
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.white.opacity(0.05))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                    )
+                            )
+                        }
+                    }
+
+                    Button("Enable Notifications") {
+                        Task { await notificationManager.requestAuthorization() }
+                    }
+                    .buttonStyle(OnboardingPrimaryButtonStyle())
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step 11: Ready Screen
+
+private struct ReadyStepView: View {
+    let name: String
+    let goal: FitnessGoal
+    let avatarKey: String
+
+    @State private var checkmarkScale: CGFloat = 0
+    @State private var appeared = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 32) {
+                Spacer()
+
+                // Checkmark
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.15))
+                        .frame(width: 110, height: 110)
+                        .scaleEffect(appeared ? 1.0 : 0.5)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.1), value: appeared)
+
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(.green)
+                        .scaleEffect(appeared ? 1.0 : 0.0)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.5).delay(0.2), value: appeared)
+                }
+
+                VStack(spacing: 10) {
+                    Text("SYSTEM ONLINE")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyan.opacity(0.8))
+                        .tracking(4)
+
+                    Text("Welcome, \(name.isEmpty ? "Warrior" : name)")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .shadow(color: .cyan.opacity(0.3), radius: 8)
+                }
+                .opacity(appeared ? 1 : 0)
+                .animation(.easeOut(duration: 0.4).delay(0.35), value: appeared)
+
+                // Avatar + goal summary
+                HStack(spacing: 20) {
+                    // Avatar
+                    ZStack {
+                        if let uiImage = UIImage(named: avatarKey) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .clipShape(Circle())
+                        } else {
+                            Image(systemName: "person.circle.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .foregroundColor(.cyan.opacity(0.5))
+                        }
+                    }
+                    .frame(width: 60, height: 60)
+                    .overlay(Circle().stroke(Color.cyan, lineWidth: 2))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: goal.icon)
+                                .foregroundColor(.cyan)
+                            Text(goal.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        Text("Mission objective locked in")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.05))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                )
+                .opacity(appeared ? 1 : 0)
+                .animation(.easeOut(duration: 0.4).delay(0.5), value: appeared)
+
+                Spacer()
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+
+            // "Enter the System" button pinned at bottom
+            // (Handled by OnboardingView's navigationButtons for step 10,
+            //  but step 11 is the ready screen which has no nav area — it
+            //  passes completion up via the parent's isOnboardingComplete binding
+            //  through the "Enter the System" button below.)
+            VStack {
+                Spacer()
+                // This step is step 11, which is in noProgressBarSteps,
+                // so we render the button inline here.
+                EmptyView()
+                    .padding(.bottom, 40)
+            }
+        }
+        .onAppear { appeared = true }
+    }
+}
+
+// MARK: - Shell Layout
+
+private struct OnboardingStepShell<Content: View>: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String
+    var isSkippable: Bool = false
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 28) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(iconColor.opacity(0.12))
+                        .frame(width: 80, height: 80)
+                    Image(systemName: icon)
+                        .font(.system(size: 34, weight: .light))
+                        .foregroundColor(iconColor)
+                }
+                .padding(.top, 24)
+
+                // Title + subtitle
+                VStack(spacing: 10) {
+                    Text(title)
+                        .font(.system(size: 26, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+
+                    Text(subtitle)
+                        .font(.system(size: 15))
+                        .foregroundColor(.white.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                }
+                .padding(.horizontal, 8)
+
+                // Step-specific content
+                content
+                    .padding(.bottom, 12)
+            }
+            .padding(.horizontal, 20)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+}
+
+// MARK: - Button Styles
+
+struct OnboardingPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .bold))
+            .foregroundColor(.black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.cyan)
+                    .shadow(color: .cyan.opacity(0.4), radius: 10)
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+// Re-export old styles for backwards compat with any call site still using them
+struct PrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        OnboardingPrimaryButtonStyle().makeBody(configuration: configuration)
+    }
+}
+
+struct SecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
+            .background(
+                Capsule()
+                    .stroke(Color.gray, lineWidth: 1.5)
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Enums still referenced outside this file
+// (FitnessGoal, GymEnvironment, PlayerGender are in Models.swift — no change needed)
+
+// MARK: - QuestDifficulty, QuestCategory (still in QuestsView.swift — no change)
+
+// MARK: - Preview
+
 #Preview {
     OnboardingView(isOnboardingComplete: .constant(false))
+        .modelContainer(for: [Profile.self, Quest.self], inMemory: true)
 }
