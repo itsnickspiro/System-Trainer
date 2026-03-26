@@ -2,150 +2,97 @@ import SwiftUI
 
 // MARK: - Boot Screen View
 //
-// Simulates a cold, dark-terminal "System boot" sequence before the main UI loads.
-// Phases:
-//   0  →  Black screen with blinking cursor
-//   1  →  Core module log lines scroll in one by one
-//   2  →  Logo materialises from scan-line blur
-//   3  →  "SYSTEM ONLINE" banner pulses then fades out
-//   4  →  Transition to ContentView
+// Single visual state — no phases, no transitions between states.
+//   0.0s  Title + rings visible immediately
+//   0.0s  Breathing ring animation begins
+//   2.0s  "SYSTEM ONLINE" banner fades in
+//   3.0s  Screen fades out (0.5s)
+//   3.5s  onComplete() called
 
 struct BootScreenView: View {
 
-    // Called when the animation finishes so RPTApp can swap views.
     let onComplete: () -> Void
 
-    // MARK: - State
-    @State private var phase: BootPhase = .blank
-    @State private var visibleLines: Int = 0
-    @State private var logOpacity: Double = 1.0
-    @State private var logoScale: Double = 0.6
-    @State private var logoOpacity: Double = 0.0
-    @State private var logoBlur: Double = 20.0
+    @State private var ringPulse: Bool = false
     @State private var bannerOpacity: Double = 0.0
     @State private var bannerPulse: Bool = false
-    @State private var cursorVisible: Bool = true
     @State private var screenOpacity: Double = 1.0
 
-    // MARK: - Boot Log Lines
-    private let bootLog: [BootLogLine] = [
-        BootLogLine("SYSTEM",    "Initialising kernel v4.1.0 ..."),
-        BootLogLine("MEMORY",    "Allocating 512 MB heap — OK"),
-        BootLogLine("HEALTHKIT", "Binding observer queries — OK"),
-        BootLogLine("CLOUDKIT",  "Resolving iCloud identity — OK"),
-        BootLogLine("SWIFTDATA", "Mounting persistent store — OK"),
-        BootLogLine("AI_ENGINE", "Loading on-device model — OK"),
-        BootLogLine("LOCATION",  "Registering patrol service — OK"),
-        BootLogLine("QUESTS",    "Generating daily directives — OK"),
-        BootLogLine("PENALTY",   "Evaluating midnight deadline — OK"),
-        BootLogLine("SYSTEM",    "All modules nominal. Awaiting Player."),
-    ]
-
-    // MARK: - Body
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
-
-                // ── Phase 1: Boot Log ─────────────────────────────────────
-                if phase == .logging || phase == .logo {
-                    bootLogView
-                        .opacity(logOpacity)
-                        .transition(.opacity)
-                }
-
+                mainContent
                 Spacer()
-
-                // ── Phase 2: Logo ─────────────────────────────────────────
-                if phase == .logo || phase == .banner {
-                    logoView
-                }
-
-                Spacer()
-
-                // ── Phase 3: SYSTEM ONLINE banner ─────────────────────────
-                if phase == .banner {
-                    systemOnlineBanner
-                        .opacity(bannerOpacity)
-                        .padding(.bottom, 60)
-                }
-            }
-
-            // Phase 0: blinking cursor in top-left
-            if phase == .blank {
-                VStack {
-                    HStack {
-                        blinkingCursor
-                            .padding(.leading, 20)
-                            .padding(.top, 60)
-                        Spacer()
-                    }
-                    Spacer()
-                }
+                systemOnlineBanner
+                    .opacity(bannerOpacity)
+                    .padding(.bottom, 60)
             }
         }
         .opacity(screenOpacity)
         .onAppear { startBootSequence() }
     }
 
-    // MARK: - Sub-Views
+    // MARK: - Main Content
 
-    private var bootLogView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(0..<min(visibleLines, bootLog.count), id: \.self) { i in
-                BootLogRow(line: bootLog[i])
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .padding(.horizontal, 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var logoView: some View {
-        VStack(spacing: 8) {
-            // Outer glow ring
-            ZStack {
-                Circle()
-                    .stroke(
-                        LinearGradient(colors: [.cyan, .blue, .cyan],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 2
-                    )
-                    .frame(width: 110, height: 110)
-                    .blur(radius: 4)
-                    .opacity(logoOpacity * 0.6)
-
-                // Logo mark
-                Image(systemName: "bolt.shield.fill")
-                    .font(.system(size: 52, weight: .black))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.cyan, .blue],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-            }
-            .scaleEffect(logoScale)
-            .blur(radius: logoBlur)
-            .opacity(logoOpacity)
-
-            Text("R P T")
-                .font(.system(size: 32, weight: .black, design: .monospaced))
+    private var mainContent: some View {
+        VStack(spacing: 20) {
+            Text("SYSTEM TRAINER")
+                .font(.system(size: 26, weight: .black, design: .monospaced))
                 .foregroundStyle(
                     LinearGradient(colors: [.cyan, .white],
                                    startPoint: .leading, endPoint: .trailing)
                 )
-                .opacity(logoOpacity)
-                .scaleEffect(logoScale)
 
-            Text("SOLO LEVELING FITNESS SYSTEM")
+            Text("TRAIN. LEVEL UP. ASCEND.")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundColor(.cyan.opacity(0.6))
                 .tracking(4)
-                .opacity(logoOpacity)
+
+            // Breathing concentric rings
+            ZStack {
+                // Outer ring
+                Circle()
+                    .stroke(
+                        LinearGradient(colors: [.cyan, .blue, .cyan],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        lineWidth: 1.5
+                    )
+                    .frame(width: ringPulse ? 140 : 120, height: ringPulse ? 140 : 120)
+                    .blur(radius: 4)
+                    .opacity(ringPulse ? 0.5 : 0.2)
+                    .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+                               value: ringPulse)
+
+                // Middle ring
+                Circle()
+                    .stroke(Color.cyan.opacity(ringPulse ? 0.4 : 0.15), lineWidth: 1)
+                    .frame(width: ringPulse ? 108 : 92, height: ringPulse ? 108 : 92)
+                    .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+                               value: ringPulse)
+
+                // Inner ring
+                Circle()
+                    .stroke(Color.cyan.opacity(ringPulse ? 0.25 : 0.08), lineWidth: 1)
+                    .frame(width: ringPulse ? 76 : 64, height: ringPulse ? 76 : 64)
+                    .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+                               value: ringPulse)
+
+                // Center dot
+                Circle()
+                    .fill(Color.cyan.opacity(ringPulse ? 0.6 : 0.3))
+                    .frame(width: 6, height: 6)
+                    .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+                               value: ringPulse)
+            }
+            .padding(.top, 8)
         }
         .padding(.vertical, 24)
     }
+
+    // MARK: - System Online Banner
 
     private var systemOnlineBanner: some View {
         VStack(spacing: 4) {
@@ -169,99 +116,26 @@ struct BootScreenView: View {
                 .frame(height: 1)
                 .padding(.horizontal, 40)
         }
-        .opacity(bannerOpacity)
-    }
-
-    private var blinkingCursor: some View {
-        Text("_")
-            .font(.system(size: 18, weight: .bold, design: .monospaced))
-            .foregroundColor(.cyan)
-            .opacity(cursorVisible ? 1 : 0)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.5).repeatForever()) {
-                    cursorVisible.toggle()
-                }
-            }
     }
 
     // MARK: - Boot Sequence
 
     private func startBootSequence() {
-        // Phase 0 — blank with cursor (0.4 s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            withAnimation(.easeIn(duration: 0.2)) { phase = .logging }
-            scrollLogLines()
-        }
-    }
+        // Breathing rings start immediately
+        ringPulse = true
 
-    private func scrollLogLines() {
-        let lineDelay: Double = 0.12
-        for i in 0..<bootLog.count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * lineDelay) {
-                withAnimation(.easeOut(duration: 0.1)) { visibleLines = i + 1 }
-            }
-        }
-        let totalLogTime = Double(bootLog.count) * lineDelay + 0.3
-
-        // Fade log out, show logo
-        DispatchQueue.main.asyncAfter(deadline: .now() + totalLogTime) {
-            withAnimation(.easeOut(duration: 0.4)) { logOpacity = 0 }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                phase = .logo
-                withAnimation(.spring(response: 0.7, dampingFraction: 0.6)) {
-                    logoScale = 1.0
-                    logoOpacity = 1.0
-                    logoBlur = 0.0
-                }
-                showBanner()
-            }
-        }
-    }
-
-    private func showBanner() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-            phase = .banner
+        // "SYSTEM ONLINE" fades in at 2.0s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.easeIn(duration: 0.4)) { bannerOpacity = 1.0 }
             bannerPulse = true
-
-            // Hold for 1.2 s then fade out entire screen
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                withAnimation(.easeOut(duration: 0.6)) { screenOpacity = 0 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-                    onComplete()
-                }
-            }
         }
-    }
-}
 
-// MARK: - Supporting Types
-
-private enum BootPhase {
-    case blank, logging, logo, banner
-}
-
-private struct BootLogLine {
-    let module: String
-    let message: String
-    init(_ module: String, _ message: String) {
-        self.module = module
-        self.message = message
-    }
-}
-
-private struct BootLogRow: View {
-    let line: BootLogLine
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("[\(line.module)]")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(.cyan)
-                .frame(width: 100, alignment: .leading)
-            Text(line.message)
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                .foregroundColor(.green.opacity(0.85))
+        // Screen fades out at 3.0s, onComplete at 3.5s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            withAnimation(.easeOut(duration: 0.5)) { screenOpacity = 0.0 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                onComplete()
+            }
         }
     }
 }

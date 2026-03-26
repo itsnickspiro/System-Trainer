@@ -1,0 +1,137 @@
+import Foundation
+
+// MARK: - QuestTemplateService
+//
+// Fetches rows from the `quest_templates` and `quest_arcs` Supabase tables via
+// the quest-templates-proxy Edge Function.
+//
+// Results are cached to disk (JSON) so the last-known set is available
+// immediately on next launch even before the network fetch completes.
+//
+// Usage:
+//   await QuestTemplateService.shared.refresh()
+//   let templates = QuestTemplateService.shared.templates
+//   let arcs      = QuestTemplateService.shared.arcs
+
+@MainActor
+final class QuestTemplateService: ObservableObject {
+
+    static let shared = QuestTemplateService()
+
+    @Published private(set) var isLoading = false
+    @Published private(set) var lastError: String? = nil
+
+    private(set) var templates: [QuestTemplate] = []
+    private(set) var arcs: [QuestArc] = []
+
+    private static let proxyURL = "\(Secrets.supabaseURL)/functions/v1/quest-templates-proxy"
+    private static let templatesCacheURL: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("quest_templates_cache.json")
+    }()
+    private static let arcsCacheURL: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("quest_arcs_cache.json")
+    }()
+
+    private init() {
+        templates = (try? JSONDecoder().decode([QuestTemplate].self,
+                                               from: Data(contentsOf: Self.templatesCacheURL))) ?? []
+        arcs      = (try? JSONDecoder().decode([QuestArc].self,
+                                               from: Data(contentsOf: Self.arcsCacheURL)))      ?? []
+    }
+
+    // MARK: - Public Accessors
+
+    /// Templates filtered by arc key (nil = all templates)
+    func templates(for arcKey: String? = nil) -> [QuestTemplate] {
+        guard let arcKey else { return templates }
+        return templates.filter { $0.arcKey == arcKey }
+    }
+
+    /// Look up a template by its stable key
+    func template(key: String) -> QuestTemplate? {
+        templates.first { $0.templateKey == key }
+    }
+
+    // MARK: - Refresh
+
+    /// Fetches fresh templates and arcs from Supabase. Safe to call on every launch.
+    func refresh() async {
+        isLoading = true
+        lastError = nil
+        defer { isLoading = false }
+
+        do {
+            let (fetchedTemplates, fetchedArcs) = try await fetchFromSupabase()
+
+            if !fetchedTemplates.isEmpty {
+                templates = fetchedTemplates
+                try? JSONEncoder().encode(fetchedTemplates).write(to: Self.templatesCacheURL, options: .atomic)
+            }
+            if !fetchedArcs.isEmpty {
+                arcs = fetchedArcs
+                try? JSONEncoder().encode(fetchedArcs).write(to: Self.arcsCacheURL, options: .atomic)
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Network
+
+    private func fetchFromSupabase() async throws -> ([QuestTemplate], [QuestArc]) {
+        guard let url = URL(string: Self.proxyURL) else { return ([], []) }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [:])
+        req.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return ([], []) }
+
+        let payload = try JSONDecoder().decode(QuestTemplatesPayload.self, from: data)
+        return (payload.templates, payload.arcs)
+    }
+}
+
+// MARK: - Public Models
+
+struct QuestTemplate: Codable, Identifiable {
+    var id: String { templateKey }
+
+    let templateKey:   String
+    let arcKey:        String?
+    let title:         String
+    let details:       String
+    let questType:     String      // "daily" | "weekly" | "special"
+    let statTarget:    String?
+    let xpBase:        Int
+    let minLevel:      Int
+    let maxLevel:      Int?
+    let condition:     String?     // completionCondition, e.g. "steps:10000"
+    let isEnabled:     Bool
+}
+
+struct QuestArc: Codable, Identifiable {
+    var id: String { arcKey }
+
+    let arcKey:        String
+    let displayName:   String
+    let description:   String
+    let iconSymbol:    String
+    let accentColor:   String
+    let sortOrder:     Int
+    let isEnabled:     Bool
+}
+
+// MARK: - Wire Model
+
+private struct QuestTemplatesPayload: Decodable {
+    let templates: [QuestTemplate]
+    let arcs: [QuestArc]
+}
