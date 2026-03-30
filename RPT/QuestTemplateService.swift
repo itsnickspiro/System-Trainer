@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 // MARK: - QuestTemplateService
@@ -114,6 +115,7 @@ struct QuestTemplate: Codable, Identifiable {
     let minLevel:      Int
     let maxLevel:      Int?
     let condition:     String?     // completionCondition, e.g. "steps:10000"
+    let creditReward:  Int         // GP awarded on completion (0 if none)
     let isEnabled:     Bool
 }
 

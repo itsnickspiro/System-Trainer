@@ -138,7 +138,7 @@ private struct TransactionRow: View {
         case "achievement_reward":  return "trophy.fill"
         case "purchase":            return "cart.fill"
         case "admin_grant":         return "gift.fill"
-        default:                    return "bitcoinsign.circle.fill"
+        default:                    return "dollarsign.circle.fill"
         }
     }
 

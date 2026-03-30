@@ -34,6 +34,9 @@ final class EventsService: ObservableObject {
     /// Combined XP multiplier from any joined events (1.0 = none).
     @Published private(set) var activeXPMultiplier: Double = 1.0
 
+    /// Combined GP credit multiplier from any joined events (1.0 = none).
+    @Published private(set) var activeCreditMultiplier: Double = 1.0
+
     private static let proxyURL = "\(Secrets.supabaseURL)/functions/v1/events-proxy"
     private static let cacheURL: URL = {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -52,7 +55,7 @@ final class EventsService: ObservableObject {
         lastError = nil
         defer { isLoading = false }
 
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
 
         do {
@@ -73,7 +76,7 @@ final class EventsService: ObservableObject {
     // MARK: - Join Event
 
     func joinEvent(key: String) async {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
         do {
             let body: [String: Any] = [
@@ -92,7 +95,7 @@ final class EventsService: ObservableObject {
 
     /// Update progress for a single event.
     func updateProgress(key: String, progress: Double) async {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
         do {
             let body: [String: Any] = [
@@ -133,13 +136,15 @@ final class EventsService: ObservableObject {
     // MARK: - Private Helpers
 
     private func recomputeMultiplier() {
-        var mult = 1.0
+        var xpMult = 1.0
+        var creditMult = 1.0
         for p in participations {
-            guard let event = activeEvents.first(where: { $0.key == p.eventKey }),
-                  let xpMult = event.xpMultiplier else { continue }
-            mult *= xpMult
+            guard let event = activeEvents.first(where: { $0.key == p.eventKey }) else { continue }
+            if let m = event.xpMultiplier      { xpMult     *= m }
+            if let m = event.creditMultiplier  { creditMult *= m }
         }
-        activeXPMultiplier = mult
+        activeXPMultiplier     = xpMult
+        activeCreditMultiplier = creditMult
     }
 
     // MARK: - Network
@@ -185,34 +190,37 @@ struct GameEvent: Codable, Identifiable {
     let iconSymbol:   String
     let goalType:     String   // "workouts" | "quests" | "steps" | "xp"
     let goalTarget:   Double
-    let xpMultiplier: Double?
-    let rewardItemKey: String?
-    let endsAt:       Date?
-    let isEnabled:    Bool
+    let xpMultiplier:     Double?
+    let creditMultiplier: Double?
+    let rewardItemKey:    String?
+    let endsAt:           Date?
+    let isEnabled:        Bool
 
     enum CodingKeys: String, CodingKey {
         case key, title, description, rarity
-        case iconSymbol    = "icon_symbol"
-        case goalType      = "goal_type"
-        case goalTarget    = "goal_target"
-        case xpMultiplier  = "xp_multiplier"
-        case rewardItemKey = "reward_item_key"
-        case endsAt        = "ends_at"
-        case isEnabled     = "is_enabled"
+        case iconSymbol      = "icon_symbol"
+        case goalType        = "goal_type"
+        case goalTarget      = "goal_target"
+        case xpMultiplier    = "xp_multiplier"
+        case creditMultiplier = "credit_multiplier"
+        case rewardItemKey   = "reward_item_key"
+        case endsAt          = "ends_at"
+        case isEnabled       = "is_enabled"
     }
 
     // Initialise endsAt from an ISO-8601 string
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        key          = try c.decode(String.self, forKey: .key)
-        title        = try c.decode(String.self, forKey: .title)
-        description  = try c.decode(String.self, forKey: .description)
-        iconSymbol   = try c.decode(String.self, forKey: .iconSymbol)
-        goalType     = try c.decode(String.self, forKey: .goalType)
-        goalTarget   = try c.decode(Double.self, forKey: .goalTarget)
-        xpMultiplier  = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
-        rewardItemKey = try c.decodeIfPresent(String.self, forKey: .rewardItemKey)
-        isEnabled    = try c.decode(Bool.self, forKey: .isEnabled)
+        key              = try c.decode(String.self, forKey: .key)
+        title            = try c.decode(String.self, forKey: .title)
+        description      = try c.decode(String.self, forKey: .description)
+        iconSymbol       = try c.decode(String.self, forKey: .iconSymbol)
+        goalType         = try c.decode(String.self, forKey: .goalType)
+        goalTarget       = try c.decode(Double.self, forKey: .goalTarget)
+        xpMultiplier     = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
+        creditMultiplier = try c.decodeIfPresent(Double.self, forKey: .creditMultiplier)
+        rewardItemKey    = try c.decodeIfPresent(String.self, forKey: .rewardItemKey)
+        isEnabled        = try c.decode(Bool.self, forKey: .isEnabled)
 
         if let dateStr = try c.decodeIfPresent(String.self, forKey: .endsAt) {
             let iso = ISO8601DateFormatter()
@@ -231,8 +239,9 @@ struct GameEvent: Codable, Identifiable {
         try c.encode(iconSymbol,   forKey: .iconSymbol)
         try c.encode(goalType,     forKey: .goalType)
         try c.encode(goalTarget,   forKey: .goalTarget)
-        try c.encodeIfPresent(xpMultiplier,  forKey: .xpMultiplier)
-        try c.encodeIfPresent(rewardItemKey, forKey: .rewardItemKey)
+        try c.encodeIfPresent(xpMultiplier,     forKey: .xpMultiplier)
+        try c.encodeIfPresent(creditMultiplier, forKey: .creditMultiplier)
+        try c.encodeIfPresent(rewardItemKey,    forKey: .rewardItemKey)
         try c.encode(isEnabled,    forKey: .isEnabled)
         if let d = endsAt {
             let iso = ISO8601DateFormatter()

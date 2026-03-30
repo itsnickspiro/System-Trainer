@@ -46,7 +46,7 @@ struct InventoryAndShopView: View {
                     case .myInventory:
                         MyInventoryTabView(items: ownedItems, profile: profile)
                     case .systemShop:
-                        SystemShopTabView(items: items, profile: profile)
+                        StoreContentView()
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -70,7 +70,7 @@ struct InventoryAndShopView: View {
 
 enum InventoryTab: String, CaseIterable, Identifiable {
     case myInventory = "My Inventory"
-    case systemShop  = "System Shop"
+    case systemShop  = "Item Shop"
 
     var id: String { rawValue }
     var label: String { rawValue }
@@ -119,7 +119,7 @@ private struct MyInventoryTabView: View {
             Text("INVENTORY EMPTY")
                 .font(.system(.callout, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.gray)
-            Text("Visit the System Shop to acquire items.")
+            Text("Visit the Item Shop to acquire items.")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.gray.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -565,7 +565,7 @@ private struct PurchaseConfirmationSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.ignoresSafeArea())
-            .navigationTitle("SYSTEM SHOP")
+            .navigationTitle("ITEM SHOP")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)

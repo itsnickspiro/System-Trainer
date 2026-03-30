@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 import CloudKit
@@ -88,8 +89,7 @@ final class LeaderboardService: ObservableObject {
             "level":            profile?.level ?? 1,
             "xp":               profile?.xp ?? 0,
             "streak":           profile?.currentStreak ?? 0,
-            "player_id":        PlayerProfileService.shared.playerId ?? "",
-            "avatar_key":       profile?.avatarKey ?? ""
+            "player_id":        PlayerProfileService.shared.playerId
         ]
 
         do {
@@ -120,6 +120,8 @@ final class LeaderboardService: ObservableObject {
             try? JSONEncoder().encode(payload.entries).write(to: Self.globalCacheURL, options: .atomic)
         } catch {
             lastError = error.localizedDescription
+            print("[LeaderboardService] fetchGlobal failed (non-fatal): \(error.localizedDescription)")
+            // Keep existing cached entries on failure
         }
     }
 
@@ -161,6 +163,8 @@ final class LeaderboardService: ObservableObject {
             try? JSONEncoder().encode(payload.entries).write(to: Self.friendCacheURL, options: .atomic)
         } catch {
             friendsError = error.localizedDescription
+            print("[LeaderboardService] fetchFriends failed (non-fatal): \(error.localizedDescription)")
+            // Keep existing cached entries on failure
         }
     }
 
@@ -193,7 +197,7 @@ final class LeaderboardService: ObservableObject {
         ]
         do {
             try await postToProxy(body: body)
-            friendEntries.removeAll { $0.playerId == playerID }
+            friendEntries.removeAll { $0.playerId == playerID || $0.playerId == nil }
         } catch {
             print("[LeaderboardService] removeFriend failed: \(error.localizedDescription)")
         }
@@ -203,19 +207,51 @@ final class LeaderboardService: ObservableObject {
 
     /// Resolves the CloudKit user record ID the first time it is needed.
     /// Caches the result in UserDefaults so subsequent launches don't make a network call.
+    /// Uses a 10-second timeout to prevent hanging on TestFlight/poor connectivity.
     func resolveCloudKitUserIDIfNeeded() async {
         if _cachedCloudKitUserID != nil { return }
-        if let persisted = UserDefaults.standard.string(forKey: "cloudKitUserRecordID") {
+        if let persisted = UserDefaults.standard.string(forKey: "cloudKitUserRecordID"),
+           !persisted.isEmpty {
             _cachedCloudKitUserID = persisted
             return
         }
         do {
-            let recordID = try await CKContainer.default().userRecordID()
-            let idString = recordID.recordName
+            // Wrap in a timeout so a slow/unavailable iCloud account never blocks the app.
+            let idString = try await withTimeout(seconds: 10) {
+                let recordID = try await CKContainer.default().userRecordID()
+                return recordID.recordName
+            }
             _cachedCloudKitUserID = idString
             UserDefaults.standard.set(idString, forKey: "cloudKitUserRecordID")
         } catch {
             print("[LeaderboardService] CloudKit user ID resolution failed: \(error.localizedDescription)")
+            // Fall back to a locally-generated anonymous UUID so all Supabase services
+            // that depend on currentUserID continue to work without an iCloud account.
+            let anonKey = "st_anonymous_user_id"
+            let anonID: String
+            if let existing = UserDefaults.standard.string(forKey: anonKey), !existing.isEmpty {
+                anonID = existing
+            } else {
+                anonID = UUID().uuidString
+                UserDefaults.standard.set(anonID, forKey: anonKey)
+            }
+            _cachedCloudKitUserID = anonID
+            print("[LeaderboardService] Using anonymous fallback ID (no iCloud account): \(anonID)")
+        }
+    }
+
+    /// Runs an async throwing closure with a wall-clock timeout.
+    /// Throws `CancellationError` if the timeout expires first.
+    private func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CancellationError()
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
         }
     }
 
@@ -235,7 +271,8 @@ final class LeaderboardService: ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            return Data()
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
         }
         return data
     }
@@ -244,26 +281,62 @@ final class LeaderboardService: ObservableObject {
 // MARK: - Public Models
 
 struct LeaderboardEntry: Codable, Identifiable {
-    var id: String { playerId }
+    // id uses playerId when available; falls back to displayName+rank to avoid collisions
+    var id: String { playerId ?? "\(displayName)-\(rank ?? 0)" }
 
-    let playerId:    String
-    let displayName: String
-    let level:       Int
-    let xp:          Int
-    let weeklyXP:    Int
-    let streak:      Int
-    let rank:        Int
-    let avatarKey:   String
-    /// True when this entry belongs to the signed-in player.
-    let isCurrentUser: Bool
+    let playerId:        String?
+    let displayName:     String
+    let level:           Int?
+    let totalXP:         Int?
+    let weeklyXP:        Int?
+    let weeklyWorkouts:  Int?
+    let rank:            Int?
+    let currentStreak:   Int?
+    let avatarKey:       String?
+    let isCurrentUser:   Bool?
 
     enum CodingKeys: String, CodingKey {
-        case playerId     = "player_id"
-        case displayName  = "display_name"
-        case level, xp, streak, rank
-        case weeklyXP     = "weekly_xp"
-        case avatarKey    = "avatar_key"
-        case isCurrentUser = "is_current_user"
+        case playerId       = "player_id"
+        case displayName    = "display_name"
+        case level
+        case totalXP        = "total_xp"
+        case weeklyXP       = "weekly_xp"
+        case weeklyWorkouts = "weekly_workouts"
+        case rank
+        case currentStreak  = "current_streak"
+        case avatarKey      = "avatar_key"
+        case isCurrentUser  = "is_current_user"
+    }
+
+    // Memberwise init for constructing placeholder entries in code.
+    init(playerId: String?, displayName: String, level: Int?, totalXP: Int?,
+         weeklyXP: Int?, weeklyWorkouts: Int?, rank: Int?, currentStreak: Int?,
+         avatarKey: String?, isCurrentUser: Bool?) {
+        self.playerId       = playerId
+        self.displayName    = displayName
+        self.level          = level
+        self.totalXP        = totalXP
+        self.weeklyXP       = weeklyXP
+        self.weeklyWorkouts = weeklyWorkouts
+        self.rank           = rank
+        self.currentStreak  = currentStreak
+        self.avatarKey      = avatarKey
+        self.isCurrentUser  = isCurrentUser
+    }
+
+    // Custom decoder: every field is optional so no response shape can cause a missing-key crash.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        playerId       = try? c.decodeIfPresent(String.self, forKey: .playerId)
+        displayName    = (try? c.decodeIfPresent(String.self, forKey: .displayName)) ?? "Unknown"
+        level          = try? c.decodeIfPresent(Int.self,    forKey: .level)
+        totalXP        = try? c.decodeIfPresent(Int.self,    forKey: .totalXP)
+        weeklyXP       = try? c.decodeIfPresent(Int.self,    forKey: .weeklyXP)
+        weeklyWorkouts = try? c.decodeIfPresent(Int.self,    forKey: .weeklyWorkouts)
+        rank           = try? c.decodeIfPresent(Int.self,    forKey: .rank)
+        currentStreak  = try? c.decodeIfPresent(Int.self,    forKey: .currentStreak)
+        avatarKey      = try? c.decodeIfPresent(String.self, forKey: .avatarKey)
+        isCurrentUser  = try? c.decodeIfPresent(Bool.self,   forKey: .isCurrentUser)
     }
 }
 

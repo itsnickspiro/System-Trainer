@@ -7,7 +7,8 @@ import SwiftUI
 // A payment toggle on each card lets the player choose XP or Gold Pieces.
 // Sale badge appears when a sale is active.
 
-struct StoreView: View {
+/// Core store UI — no NavigationStack. Embeddable in any NavigationStack context.
+struct StoreContentView: View {
     @StateObject private var store = StoreService.shared
     @ObservedObject private var dataManager = DataManager.shared
 
@@ -22,7 +23,6 @@ struct StoreView: View {
         ("permanent","Permanent","infinity")
     ]
 
-    var playerXP: Int { dataManager.currentProfile?.xp ?? 0 }
     var playerGP: Int { store.playerCredits }
 
     var filteredItems: [StoreItem] {
@@ -30,78 +30,75 @@ struct StoreView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Balance header (XP + GP)
-                balanceHeader
+        VStack(spacing: 0) {
+            // Balance header (XP + GP)
+            balanceHeader
 
-                // Sale banner when active
-                if store.saleActive && store.salePct > 0 {
-                    saleBanner
-                }
+            // Sale banner when active
+            if store.saleActive && store.salePct > 0 {
+                saleBanner
+            }
 
-                // Section picker
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(sections, id: \.0) { key, label, icon in
-                            sectionPill(key: key, label: label, icon: icon)
-                        }
+            // Section picker
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(sections, id: \.0) { key, label, icon in
+                        sectionPill(key: key, label: label, icon: icon)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
 
-                // Item grid
-                if store.isLoading {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
-                } else if filteredItems.isEmpty {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        Image(systemName: "bag")
-                            .font(.system(size: 44))
-                            .foregroundColor(.secondary)
-                        Text("No items in this section")
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                            ForEach(filteredItems) { item in
-                                StoreItemCard(
-                                    item: item,
-                                    playerXP: playerXP,
-                                    playerGP: playerGP,
-                                    store: store,
-                                    inventory: store.inventory,
-                                    isPurchasing: purchaseInProgress == item.key
-                                ) { method in
-                                    Task { await buy(item, method: method) }
-                                }
+            // Item grid
+            if store.isLoading {
+                Spacer()
+                ProgressView()
+                Spacer()
+            } else if filteredItems.isEmpty {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "bag")
+                        .font(.system(size: 44))
+                        .foregroundColor(.secondary)
+                    Text("No items in this section")
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                        ForEach(filteredItems) { item in
+                            StoreItemCard(
+                                item: item,
+                                playerGP: playerGP,
+                                store: store,
+                                inventory: store.inventory,
+                                isPurchasing: purchaseInProgress == item.key
+                            ) {
+                                Task { await buy(item, method: .goldPieces) }
                             }
                         }
-                        .padding(16)
                     }
+                    .padding(16)
                 }
             }
-            .navigationTitle("Store")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        Task { await store.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
+        }
+        .navigationTitle("Item Shop")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    Task { await store.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
                 }
             }
-            .alert("Purchase Failed", isPresented: $showPurchaseError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(store.lastError ?? "An error occurred.")
-            }
+        }
+        .alert("Purchase Failed", isPresented: $showPurchaseError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(store.lastError ?? "An error occurred.")
         }
         .task { await store.refresh() }
     }
@@ -110,18 +107,6 @@ struct StoreView: View {
 
     private var balanceHeader: some View {
         HStack(spacing: 16) {
-            // XP pill
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.fill")
-                    .foregroundColor(.yellow)
-                Text("\(playerXP.formatted()) XP")
-                    .font(.subheadline.weight(.bold))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Color.yellow.opacity(0.12), in: Capsule())
-
-            // GP pill
             HStack(spacing: 4) {
                 Image(systemName: store.currencyIcon)
                     .foregroundColor(.orange)
@@ -180,30 +165,29 @@ struct StoreView: View {
     }
 }
 
+// MARK: - StoreView (standalone sheet wrapper)
+
+struct StoreView: View {
+    var body: some View {
+        NavigationStack {
+            StoreContentView()
+        }
+    }
+}
+
 // MARK: - Store Item Card
 
 private struct StoreItemCard: View {
     let item: StoreItem
-    let playerXP: Int
     let playerGP: Int
     let store: StoreService
     let inventory: [InventoryEntry]
     let isPurchasing: Bool
-    let onBuy: (PaymentMethod) -> Void
-
-    @State private var selectedMethod: PaymentMethod = .xp
+    let onBuy: () -> Void
 
     var isOwned: Bool    { inventory.contains(where: { $0.key == item.key }) }
     var isEquipped: Bool { inventory.first(where: { $0.key == item.key })?.isEquipped == true }
-    var canAffordXP: Bool { playerXP >= item.finalPriceXP }
-    var canAffordGP: Bool { playerGP >= item.finalPriceCredits && item.finalPriceCredits > 0 }
-
-    var canAffordSelected: Bool {
-        switch selectedMethod {
-        case .xp:         return canAffordXP
-        case .goldPieces: return canAffordGP
-        }
-    }
+    var canAfford: Bool  { playerGP >= item.finalPriceCredits && item.finalPriceCredits > 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -248,12 +232,6 @@ private struct StoreItemCard: View {
                     Spacer()
                 }
             } else {
-                // Payment method toggle (shown only when item has GP price)
-                if item.hasCreditPrice {
-                    paymentToggle
-                }
-
-                // Price + buy button
                 buyButton
             }
         }
@@ -296,101 +274,34 @@ private struct StoreItemCard: View {
         }
     }
 
-    @ViewBuilder
-    private var paymentToggle: some View {
-        HStack(spacing: 0) {
-            // XP option
-            Button {
-                selectedMethod = .xp
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 9))
-                    Text("XP")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .background(selectedMethod == .xp ? Color.yellow.opacity(0.3) : Color.clear)
-                .foregroundColor(selectedMethod == .xp ? .yellow : .secondary)
-            }
-
-            Divider().frame(height: 16)
-
-            // GP option
-            Button {
-                selectedMethod = .goldPieces
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: store.currencyIcon)
-                        .font(.system(size: 9))
-                    Text(store.currencySymbol)
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .background(selectedMethod == .goldPieces ? Color.orange.opacity(0.3) : Color.clear)
-                .foregroundColor(selectedMethod == .goldPieces ? .orange : .secondary)
-            }
-        }
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
     private var buyButton: some View {
         Button {
-            onBuy(selectedMethod)
+            onBuy()
         } label: {
             HStack(spacing: 4) {
                 if isPurchasing {
                     ProgressView().scaleEffect(0.7)
                 } else {
-                    priceLabel
+                    Image(systemName: store.currencyIcon).font(.caption)
+                    if item.effectiveDiscountPct > 0 {
+                        Text("\((item.creditPrice ?? 0).formatted())")
+                            .strikethrough()
+                            .font(.system(size: 10))
+                            .opacity(0.6)
+                    }
+                    Text("\(item.finalPriceCredits.formatted()) \(store.currencySymbol)")
+                        .font(.caption.weight(.bold))
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             .background(
-                canAffordSelected ? buttonColor : Color.secondary.opacity(0.3),
+                canAfford ? Color.orange : Color.secondary.opacity(0.3),
                 in: RoundedRectangle(cornerRadius: 8)
             )
-            .foregroundColor(canAffordSelected ? .white : .secondary)
+            .foregroundColor(canAfford ? .white : .secondary)
         }
-        .disabled(!canAffordSelected || isPurchasing)
-    }
-
-    @ViewBuilder
-    private var priceLabel: some View {
-        switch selectedMethod {
-        case .xp:
-            HStack(spacing: 3) {
-                Image(systemName: "bolt.fill").font(.caption)
-                if item.effectiveDiscountPct > 0 {
-                    Text("\(item.price.formatted())")
-                        .strikethrough()
-                        .font(.system(size: 10))
-                        .opacity(0.6)
-                }
-                Text("\(item.finalPriceXP.formatted()) XP")
-                    .font(.caption.weight(.bold))
-            }
-        case .goldPieces:
-            HStack(spacing: 3) {
-                Image(systemName: store.currencyIcon).font(.caption)
-                if item.effectiveDiscountPct > 0 {
-                    Text("\((item.creditPrice ?? 0).formatted())")
-                        .strikethrough()
-                        .font(.system(size: 10))
-                        .opacity(0.6)
-                }
-                Text("\(item.finalPriceCredits.formatted()) \(store.currencySymbol)")
-                    .font(.caption.weight(.bold))
-            }
-        }
-    }
-
-    private var buttonColor: Color {
-        selectedMethod == .goldPieces ? .orange : .accentColor
+        .disabled(!canAfford || isPurchasing)
     }
 
     @ViewBuilder

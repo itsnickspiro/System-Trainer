@@ -5,7 +5,7 @@ struct QuestsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
     @Query(sort: \Quest.createdAt, order: .reverse) private var quests: [Quest]
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
     @State private var selectedDay = Date()
     @State private var showingCreateQuest = false
     @State private var impossibleWarnings: [ImpossibleDayDetector.ImpossibleWarning] = []
@@ -30,10 +30,41 @@ struct QuestsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Week scroller
+                // Pinned header
+                HStack {
+                    Text("Quests")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if isDayLocked {
+                        Button("Today") {
+                            selectedDay = Date()
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.cyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .stroke(Color.cyan, lineWidth: 1.5)
+                        )
+                        .shadow(color: .cyan.opacity(0.45), radius: 8, x: 0, y: 0)
+                    } else {
+                        Button("Add", systemImage: "plus") {
+                            showingCreateQuest = true
+                        }
+                        .foregroundColor(.cyan)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+                // Week scroller pinned below title
                 WeekScroller(selectedDay: $selectedDay)
-                    .padding(.vertical)
-                
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+
                 ScrollView {
                     VStack(spacing: 16) {
                         // Locked day banner
@@ -82,16 +113,18 @@ struct QuestsView: View {
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.center)
                                 
-                                Button("Create Quest") {
-                                    showingCreateQuest = true
+                                if !isDayLocked {
+                                    Button("Create Quest") {
+                                        showingCreateQuest = true
+                                    }
+                                    .buttonStyle(.borderedProminent)
                                 }
-                                .buttonStyle(.borderedProminent)
                             }
                             .padding(.vertical, 60)
                         } else {
                             // Active missions section
                             if !activeQuests.isEmpty {
-                                VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     HStack {
                                         Text("ACTIVE MISSIONS")
                                             .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -101,19 +134,36 @@ struct QuestsView: View {
                                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                                             .foregroundColor(.orange)
                                     }
+                                    .padding(.horizontal)
                                     
-                                    ForEach(activeQuests) { quest in
-                                        QuestRow(quest: quest) {
-                                            toggleQuestCompletion(quest)
+                                    List {
+                                        ForEach(activeQuests) { quest in
+                                            QuestRow(quest: quest) {
+                                                toggleQuestCompletion(quest)
+                                            }
+                                            .listRowBackground(Color.clear)
+                                            .listRowSeparator(.hidden)
+                                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                if !isDayLocked && quest.isUserCreated {
+                                                    Button(role: .destructive) {
+                                                        dataManager.deleteUserCreatedQuest(quest)
+                                                    } label: {
+                                                        Label("Delete Quest", systemImage: "trash.fill")
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
+                                    .listStyle(.plain)
+                                    .scrollDisabled(true)
+                                    .frame(height: CGFloat(activeQuests.count) * 140)
                                 }
-                                .padding(.horizontal)
                             }
                             
-                            // Completed missions section  
+                            // Completed missions section
                             if !completedQuests.isEmpty {
-                                VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 10) {
                                     HStack {
                                         Text("COMPLETED")
                                             .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -123,14 +173,31 @@ struct QuestsView: View {
                                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                                             .foregroundColor(.green)
                                     }
+                                    .padding(.horizontal)
                                     
-                                    ForEach(completedQuests) { quest in
-                                        QuestRow(quest: quest) {
-                                            toggleQuestCompletion(quest)
+                                    List {
+                                        ForEach(completedQuests) { quest in
+                                            QuestRow(quest: quest) {
+                                                toggleQuestCompletion(quest)
+                                            }
+                                            .listRowBackground(Color.clear)
+                                            .listRowSeparator(.hidden)
+                                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                if !isDayLocked && quest.isUserCreated {
+                                                    Button(role: .destructive) {
+                                                        dataManager.deleteUserCreatedQuest(quest)
+                                                    } label: {
+                                                        Label("Delete Quest", systemImage: "trash.fill")
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
+                                    .listStyle(.plain)
+                                    .scrollDisabled(true)
+                                    .frame(height: CGFloat(completedQuests.count) * 140)
                                 }
-                                .padding(.horizontal)
                             }
                         }
                         
@@ -138,23 +205,12 @@ struct QuestsView: View {
                     }
                 }
             }
-            .navigationTitle("Quests")
-            .navigationBarTitleDisplayMode(.large)
             .background(colorScheme == .dark ? .black.opacity(0.95) : .white)
             .onAppear {
                 impossibleWarnings = ImpossibleDayDetector.detect(in: todaysQuests)
             }
             .onChange(of: todaysQuests.count) {
                 impossibleWarnings = ImpossibleDayDetector.detect(in: todaysQuests)
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add", systemImage: "plus") {
-                        showingCreateQuest = true
-                    }
-                    .foregroundColor(.cyan)
-                    .disabled(isDayLocked)
-                }
             }
             .sheet(isPresented: $showingCreateQuest) {
                 CreateQuestView(selectedDay: selectedDay)
@@ -332,6 +388,27 @@ enum QuestDifficulty: String, CaseIterable, Identifiable {
 
 // MARK: - Create Quest View
 
+private enum CustomPreset: CaseIterable {
+    case weekdays, weekends, biweekly
+
+    var label: String {
+        switch self {
+        case .weekdays: return "Weekdays"
+        case .weekends: return "Weekends"
+        case .biweekly: return "Biweekly"
+        }
+    }
+
+    // iOS weekday integers: 1=Sun, 2=Mon … 7=Sat
+    var repeatDays: [Int] {
+        switch self {
+        case .weekdays: return [2, 3, 4, 5, 6]         // Mon–Fri
+        case .weekends: return [1, 7]                   // Sun + Sat
+        case .biweekly: return [2, 5]                   // Mon + Thu (twice a week)
+        }
+    }
+}
+
 struct CreateQuestView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -342,11 +419,13 @@ struct CreateQuestView: View {
     // Quest info
     @State private var title = ""
     @State private var details = ""
-    @State private var questType: QuestType = .daily
+    @State private var questType: QuestType = .oneTime
+    @State private var customPreset: CustomPreset = .weekdays
+    // Multi-day selection for weekly quests: weekday integers (1=Sun, 2=Mon, ... 7=Sat)
+    @State private var selectedWeekdays: Set<Int> = []
 
-    // Category + difficulty — XP is derived, not typed
+    // Category — difficulty is auto-assigned from target value
     @State private var category: QuestCategory = .workout
-    @State private var difficulty: QuestDifficulty = .medium
 
     // Category-specific targets
     @State private var stepTarget: Int = 10_000
@@ -357,6 +436,28 @@ struct CreateQuestView: View {
     private let stepOptions  = [5_000, 7_500, 10_000, 12_500, 15_000, 20_000]
     private let calOptions   = [200, 300, 400, 500, 600, 800]
     private let sleepOptions: [Double] = [6, 7, 7.5, 8, 9]
+
+    /// Auto-assigned difficulty based on category and target — no manual override.
+    private var difficulty: QuestDifficulty {
+        switch category {
+        case .steps:
+            if stepTarget < 7_500  { return .easy }
+            if stepTarget <= 12_500 { return .medium }
+            return .hard
+        case .calories:
+            if calTarget < 300  { return .easy }
+            if calTarget <= 500 { return .medium }
+            return .hard
+        case .sleep:
+            if sleepTarget < 7.0 { return .easy }
+            if sleepTarget <= 8.0 { return .medium }
+            return .hard
+        case .workout:
+            return .medium
+        case .manual:
+            return .medium
+        }
+    }
 
     // XP is calculated from category + difficulty — user cannot set it
     private var calculatedXP: Int {
@@ -394,14 +495,66 @@ struct CreateQuestView: View {
                         .lineLimit(3...5)
                 }
 
-                // ── Quest Type (Daily / Weekly / Custom) ────────────────────
+                // ── Quest Type ───────────────────────────────────────────────
                 Section("Frequency") {
-                    Picker("Quest Type", selection: $questType) {
+                    Picker("Frequency", selection: $questType) {
                         ForEach(QuestType.allCases) { type in
                             Text(type.displayName).tag(type)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    if questType == .custom {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Repeat schedule")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                ForEach(CustomPreset.allCases, id: \.label) { preset in
+                                    Button {
+                                        customPreset = preset
+                                    } label: {
+                                        Text(preset.label)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 8)
+                                            .background(
+                                                Capsule()
+                                                    .fill(customPreset == preset ? Color.cyan : Color(.systemGray5))
+                                            )
+                                            .foregroundColor(customPreset == preset ? .white : .primary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    if questType == .weekly {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Repeat on days")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 6) {
+                                ForEach([(1, "S"), (2, "M"), (3, "T"), (4, "W"), (5, "T"), (6, "F"), (7, "S")], id: \.0) { num, label in
+                                    let selected = selectedWeekdays.contains(num)
+                                    Button {
+                                        if selected { selectedWeekdays.remove(num) }
+                                        else { selectedWeekdays.insert(num) }
+                                    } label: {
+                                        Text(label)
+                                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                            .frame(width: 34, height: 34)
+                                            .background(
+                                                Circle()
+                                                    .fill(selected ? Color.cyan : Color(.systemGray5))
+                                            )
+                                            .foregroundColor(selected ? .white : .primary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 // ── Category ────────────────────────────────────────────────
@@ -471,18 +624,16 @@ struct CreateQuestView: View {
                     }
                 }
 
-                // ── Difficulty ──────────────────────────────────────────────
-                Section("Difficulty") {
-                    Picker("Difficulty", selection: $difficulty) {
-                        ForEach(QuestDifficulty.allCases) { d in
-                            Text(d.displayName).foregroundColor(d.color).tag(d)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
                 // ── XP Preview (read-only) ───────────────────────────────────
                 Section {
+                    HStack {
+                        Label("Difficulty", systemImage: "chart.bar.fill")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(difficulty.displayName)
+                            .foregroundColor(difficulty.color)
+                            .fontWeight(.semibold)
+                    }
                     HStack {
                         Label("Stat Boost", systemImage: "bolt.fill")
                             .foregroundColor(.secondary)
@@ -511,7 +662,7 @@ struct CreateQuestView: View {
                 } header: {
                     Text("Reward Preview")
                 } footer: {
-                    Text("XP is calculated automatically based on category and difficulty. It cannot be set manually.")
+                    Text("Difficulty is auto-assigned based on your target. XP scales with difficulty and cannot be set manually.")
                         .font(.caption)
                 }
 
@@ -544,14 +695,26 @@ struct CreateQuestView: View {
         let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
         guard !trimmedTitle.isEmpty else { return }
 
+        let tag = Calendar.current.startOfDay(for: selectedDay)
+
+        let (saveType, days): (QuestType, [Int]) = {
+            switch questType {
+            case .custom:  return (.weekly, customPreset.repeatDays)
+            case .weekly:  return (.weekly, Array(selectedWeekdays).sorted())
+            default:       return (questType, [])
+            }
+        }()
+
         let quest = Quest(
             title: trimmedTitle,
             details: details.trimmingCharacters(in: .whitespaces),
-            type: questType,
+            type: saveType,
+            repeatDays: days,
             xpReward: calculatedXP,
+            isUserCreated: true,
             statTarget: category.statTarget,
             completionCondition: completionCondition,
-            dateTag: selectedDay
+            dateTag: tag
         )
         context.insert(quest)
         dismiss()

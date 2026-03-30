@@ -87,6 +87,13 @@ class WeatherstackAPI: ObservableObject {
 
     /// Get workout recommendation based on current weather
     func getWorkoutSuggestion(for weather: WeatherData) -> WorkoutSuggestion {
+        let rc = RemoteConfigService.shared
+        let maxTempF    = rc.int("weather_outdoor_max_temp_f",    default: 90)
+        let minTempF    = rc.int("weather_outdoor_min_temp_f",    default: 32)
+        let uvThreshold = rc.int("weather_high_uv_threshold",     default: 7)
+        let idealTempLo = rc.int("weather_ideal_temp_low_f",      default: 60)
+        let idealTempHi = rc.int("weather_ideal_temp_high_f",     default: 80)
+
         // Rain or snow
         if weather.precipitation > 0 {
             return WorkoutSuggestion(
@@ -98,27 +105,27 @@ class WeatherstackAPI: ObservableObject {
         }
 
         // Too hot
-        if weather.temperature > 90 {
+        if weather.temperature > maxTempF {
             return WorkoutSuggestion(
                 type: "Indoor",
-                suggestion: "Very hot outside (\(Int(weather.temperature))°F) - stay indoors",
+                suggestion: "Very hot outside (\(weather.temperature)°F) - stay indoors",
                 icon: "sun.max.fill",
                 color: .orange
             )
         }
 
         // Too cold
-        if weather.temperature < 32 {
+        if weather.temperature < minTempF {
             return WorkoutSuggestion(
                 type: "Indoor",
-                suggestion: "Freezing conditions (\(Int(weather.temperature))°F) - indoor workout recommended",
+                suggestion: "Freezing conditions (\(weather.temperature)°F) - indoor workout recommended",
                 icon: "snowflake",
                 color: .cyan
             )
         }
 
         // High UV
-        if weather.uvIndex > 7 {
+        if weather.uvIndex > uvThreshold {
             return WorkoutSuggestion(
                 type: "Morning/Evening",
                 suggestion: "High UV index (\(weather.uvIndex)) - workout early morning or evening",
@@ -128,10 +135,10 @@ class WeatherstackAPI: ObservableObject {
         }
 
         // Perfect conditions
-        if weather.temperature >= 60 && weather.temperature <= 80 {
+        if weather.temperature >= idealTempLo && weather.temperature <= idealTempHi {
             return WorkoutSuggestion(
                 type: "Outdoor",
-                suggestion: "Perfect weather (\(Int(weather.temperature))°F) - great for outdoor exercise!",
+                suggestion: "Perfect weather (\(weather.temperature)°F) - great for outdoor exercise!",
                 icon: "figure.run",
                 color: .green
             )
@@ -140,7 +147,7 @@ class WeatherstackAPI: ObservableObject {
         // Default
         return WorkoutSuggestion(
             type: "Flexible",
-            suggestion: "Current temp: \(Int(weather.temperature))°F - dress appropriately",
+            suggestion: "Current temp: \(weather.temperature)°F - dress appropriately",
             icon: "thermometer.medium",
             color: .gray
         )

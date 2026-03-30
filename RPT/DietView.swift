@@ -10,6 +10,8 @@ struct DietView: View {
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var workoutSessions: [WorkoutSession]
     @State private var selectedDate = Date()
     @State private var showingNutritionGoals = false
+    @State private var macrosExpanded = false
+    @State private var isPlanBannerExpanded = false
 
     private var profile: Profile {
         profiles.first ?? Profile(name: "Default User")
@@ -44,6 +46,14 @@ struct DietView: View {
 
     private var todaysNetCarbs: Double {
         max(0, todaysCarbs - todaysFiber)
+    }
+
+    /// A workout session started today that has not been completed yet.
+    private var activeWorkoutSession: WorkoutSession? {
+        let cal = Calendar.current
+        return workoutSessions.first {
+            cal.isDateInToday($0.startedAt) && !$0.isComplete
+        }
     }
 
     /// Calories burned from logged workouts today (MET × weight × hours).
@@ -117,11 +127,52 @@ struct DietView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Date Selector
-                    dateSelectorView
+            VStack(spacing: 0) {
+                // Pinned header
+                HStack {
+                    Text("My Diary")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Menu {
+                        Button {
+                            showingNutritionGoals = true
+                        } label: {
+                            Label("Nutrition Goals", systemImage: "slider.horizontal.3")
+                        }
+                        Button {
+                            showingCopyConfirm = true
+                        } label: {
+                            Label("Copy Yesterday's Meals", systemImage: "doc.on.doc")
+                        }
+                        .disabled(isDateLocked)
+                        Button {
+                            showingMealPlanner = true
+                        } label: {
+                            Label("Meal Planner", systemImage: "calendar.badge.plus")
+                        }
+                        Button {
+                            showingRecipeCalculator = true
+                        } label: {
+                            Label("Recipe Calculator", systemImage: "function")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 18))
+                            .foregroundColor(.primary)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
 
+                // Date selector pinned below header — does not scroll
+                dateSelectorView
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+
+                ScrollView {
+                    VStack(spacing: 20) {
                     // Locked day banner
                     if isDateLocked {
                         HStack(spacing: 8) {
@@ -147,6 +198,36 @@ struct DietView: View {
                         planNutritionBanner(plan: plan)
                     }
 
+                    // Active workout banner — shown above calories ring when a session is in progress
+                    if let session = activeWorkoutSession {
+                        HStack(spacing: 8) {
+                            Image(systemName: "figure.run")
+                                .font(.system(size: 13))
+                                .foregroundColor(.orange)
+                            Text(session.routineName.isEmpty ? "Workout in progress" : session.routineName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.orange)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("Active")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.orange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.orange.opacity(0.15)))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.orange.opacity(0.08))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                                )
+                        )
+                    }
+
                     // Daily Calorie Summary
                     dailyCalorieSummaryView
                     
@@ -159,45 +240,13 @@ struct DietView: View {
                     // Meals Section
                     mealsSection
                     
-                    // Water Tracking
-                    waterTrackingView
-                    
                     Spacer(minLength: 100)
                 }
-                .padding(.horizontal)
+                    .padding(.horizontal)
+                }
+                .background(Color(.systemGroupedBackground))
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("My Diary")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            showingNutritionGoals = true
-                        } label: {
-                            Label("Nutrition Goals", systemImage: "slider.horizontal.3")
-                        }
-                        Button {
-                            showingCopyConfirm = true
-                        } label: {
-                            Label("Copy Yesterday's Meals", systemImage: "doc.on.doc")
-                        }
-                        .disabled(isDateLocked)
-                        Button {
-                            showingMealPlanner = true
-                        } label: {
-                            Label("Meal Planner", systemImage: "calendar.badge.plus")
-                        }
-                        Button {
-                            showingRecipeCalculator = true
-                        } label: {
-                            Label("Recipe Calculator", systemImage: "function")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                }
-            }
             .alert("Copy Yesterday's Meals?", isPresented: $showingCopyConfirm) {
                 Button("Copy", role: .none) { copyYesterdaysMeals() }
                 Button("Cancel", role: .cancel) {}
@@ -237,15 +286,26 @@ struct DietView: View {
                 Image(systemName: "chevron.left")
                     .foregroundColor(.blue)
             }
-            
+
             Spacer()
-            
-            Text(selectedDate, style: .date)
-                .font(.headline.weight(.medium))
-                .foregroundColor(.primary)
-            
+
+            // Tap to open meal planner for this date
+            Button {
+                showingMealPlanner = true
+            } label: {
+                VStack(spacing: 2) {
+                    Text(selectedDate, style: .date)
+                        .font(.headline.weight(.medium))
+                        .foregroundColor(.primary)
+                    Text("tap to plan meals")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
             Spacer()
-            
+
             Button {
                 selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate
             } label: {
@@ -266,63 +326,81 @@ struct DietView: View {
 
     private func planNutritionBanner(plan: AnimeWorkoutPlan) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: plan.iconSymbol)
-                    .font(.headline)
-                    .foregroundColor(plan.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(plan.character) Protocol Active")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundColor(.primary)
-                    Text("Nutrition targets adjusted")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            // Header row — always visible, toggles expansion
+            Button {
+                withAnimation(.spring(duration: 0.3)) {
+                    isPlanBannerExpanded.toggle()
                 }
-                Spacer()
-                Text(plan.difficulty.rawValue.capitalized)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(plan.accentColor.opacity(0.15))
-                    .foregroundColor(plan.accentColor)
-                    .clipShape(Capsule())
-            }
-
-            // Macro targets in a compact grid
-            HStack(spacing: 0) {
-                nutritionTargetPill(label: "Calories", value: "\(plan.nutrition.dailyCalories)", unit: "kcal", color: .orange)
-                Divider().frame(height: 30)
-                nutritionTargetPill(label: "Protein", value: "\(plan.nutrition.proteinGrams)", unit: "g", color: .green)
-                Divider().frame(height: 30)
-                nutritionTargetPill(label: "Carbs", value: "\(plan.nutrition.carbGrams)", unit: "g", color: .blue)
-                Divider().frame(height: 30)
-                nutritionTargetPill(label: "Fat", value: "\(plan.nutrition.fatGrams)", unit: "g", color: .red)
-                Divider().frame(height: 30)
-                nutritionTargetPill(label: "Water", value: "\(plan.nutrition.waterGlasses)", unit: "gl", color: .cyan)
-            }
-            .frame(maxWidth: .infinity)
-
-            if !plan.nutrition.mealPrepTips.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Meal Prep")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
-                    ForEach(plan.nutrition.mealPrepTips.prefix(3), id: \.self) { tip in
-                        Label(tip, systemImage: "checkmark.circle.fill")
-                            .font(.caption)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: plan.iconSymbol)
+                        .font(.headline)
+                        .foregroundColor(plan.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(plan.character) Protocol Active")
+                            .font(.subheadline.weight(.bold))
                             .foregroundColor(.primary)
+                        Text("Nutrition targets adjusted")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                }
-            }
-
-            if !plan.nutrition.avoidList.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Avoid")
+                    Spacer()
+                    Text(plan.difficulty.rawValue.capitalized)
                         .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(plan.accentColor.opacity(0.15))
+                        .foregroundColor(plan.accentColor)
+                        .clipShape(Capsule())
+                    Image(systemName: isPlanBannerExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
-                    Text(plan.nutrition.avoidList.joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundColor(.red.opacity(0.8))
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isPlanBannerExpanded {
+                // Macro targets in a compact grid
+                HStack(spacing: 0) {
+                    nutritionTargetPill(label: "Calories", value: "\(plan.nutrition.dailyCalories)", unit: "kcal", color: .orange)
+                    Divider().frame(height: 30)
+                    nutritionTargetPill(label: "Protein", value: "\(plan.nutrition.proteinGrams)", unit: "g", color: .green)
+                    Divider().frame(height: 30)
+                    nutritionTargetPill(label: "Carbs", value: "\(plan.nutrition.carbGrams)", unit: "g", color: .blue)
+                    Divider().frame(height: 30)
+                    nutritionTargetPill(label: "Fat", value: "\(plan.nutrition.fatGrams)", unit: "g", color: .red)
+                    Divider().frame(height: 30)
+                    nutritionTargetPill(label: "Water", value: "\(plan.nutrition.waterGlasses)", unit: "gl", color: .cyan)
+                }
+                .frame(maxWidth: .infinity)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+
+                if !plan.nutrition.mealPrepTips.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Meal Prep")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                        ForEach(plan.nutrition.mealPrepTips.prefix(3), id: \.self) { tip in
+                            Label(tip, systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if !plan.nutrition.avoidList.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Avoid")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                        Text(plan.nutrition.avoidList.joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundColor(.red.opacity(0.8))
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -352,33 +430,62 @@ struct DietView: View {
     // MARK: - Daily Calorie Summary
     private var dailyCalorieSummaryView: some View {
         VStack(spacing: 16) {
-            // Circular Progress — uses net remaining (goal + burn - food)
-            ZStack {
-                Circle()
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 8)
-                    .frame(width: 120, height: 120)
-
-                let netGoal = dailyCalorieGoal + exerciseBurnCalories
-                Circle()
-                    .trim(from: 0, to: min(Double(actualConsumedCalories) / Double(max(1, netGoal)), 1.0))
-                    .stroke(
-                        remainingCalories < 0 ? Color.red : Color.blue,
-                        style: StrokeStyle(lineWidth: 8, lineCap: .round)
-                    )
-                    .frame(width: 120, height: 120)
-                    .rotationEffect(.degrees(-90))
-
-                VStack(spacing: 2) {
-                    Text("\(abs(remainingCalories))")
-                        .font(.title.weight(.bold))
-                        .foregroundColor(remainingCalories < 0 ? .red : .primary)
-                    Text(remainingCalories < 0 ? "over" : "remaining")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            // Ring row: water − | calorie ring | water +
+            HStack(spacing: 0) {
+                // Water minus
+                Button {
+                    guard waterGlasses > 0 else { return }
+                    profile.waterIntake = waterGlasses - 1
+                    try? context.save()
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundColor(waterGlasses > 0 ? .blue : .gray.opacity(0.3))
                 }
+                .buttonStyle(.plain)
+                .disabled(waterGlasses == 0)
+                .frame(maxWidth: .infinity)
+
+                // Calorie ring
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 8)
+                        .frame(width: 120, height: 120)
+
+                    let netGoal = dailyCalorieGoal + exerciseBurnCalories
+                    Circle()
+                        .trim(from: 0, to: min(Double(actualConsumedCalories) / Double(max(1, netGoal)), 1.0))
+                        .stroke(
+                            remainingCalories < 0 ? Color.red : Color.blue,
+                            style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                        )
+                        .frame(width: 120, height: 120)
+                        .rotationEffect(.degrees(-90))
+
+                    VStack(spacing: 2) {
+                        Text("\(abs(remainingCalories))")
+                            .font(.title.weight(.bold))
+                            .foregroundColor(remainingCalories < 0 ? .red : .primary)
+                        Text(remainingCalories < 0 ? "over" : "remaining")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                // Water plus
+                Button {
+                    profile.recordWaterIntake()
+                    try? context.save()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
             }
 
-            // Calorie breakdown: Goal + Exercise − Food = Remaining
+            // Calorie breakdown: Goal + Exercise − Food = Left
             HStack(spacing: 0) {
                 VStack(spacing: 4) {
                     Text("\(dailyCalorieGoal)")
@@ -431,6 +538,23 @@ struct DietView: View {
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity)
+
+                Divider().frame(height: 28).padding(.horizontal, 6)
+
+                VStack(spacing: 4) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "drop.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(waterGlasses >= waterGoal ? .cyan : .blue)
+                        Text("\(waterGlasses)/\(waterGoal)")
+                            .font(.headline.weight(.semibold))
+                            .foregroundColor(waterGlasses >= waterGoal ? .cyan : .blue)
+                    }
+                    Text("Water")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 8)
         }
@@ -441,55 +565,82 @@ struct DietView: View {
                 .fill(colorScheme == .dark ? .black : .white)
                 .stroke(.separator, lineWidth: 0.5)
         )
+        .onAppear {
+            profile.updateNutritionFromFoodEntries(todaysFoodEntries)
+        }
+        .onChange(of: todaysFoodEntries.count) { _, _ in
+            profile.updateNutritionFromFoodEntries(todaysFoodEntries)
+            try? context.save()
+        }
     }
     
     // MARK: - Macro Breakdown
     private var macroBreakdownView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Macronutrients")
-                .font(.headline.weight(.semibold))
-                .padding(.horizontal)
-
-            VStack(spacing: 14) {
-                macroRow(name: "Protein", consumed: Int(todaysProtein), goal: proteinGoal, color: .green)
-                macroRow(name: "Carbs", consumed: Int(todaysCarbs), goal: carbGoal, color: .blue)
-                // Net carbs sub-row (indented, no progress bar)
+        VStack(alignment: .leading, spacing: 0) {
+            // Collapsible header
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    macrosExpanded.toggle()
+                }
+            } label: {
                 HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                        Text("Net Carbs")
-                            .font(.caption.weight(.medium))
+                    Text("Macronutrients")
+                        .font(.headline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: macrosExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if macrosExpanded {
+                VStack(spacing: 14) {
+                    macroRow(name: "Protein", consumed: Int(todaysProtein), goal: proteinGoal, color: .green)
+                    macroRow(name: "Carbs", consumed: Int(todaysCarbs), goal: carbGoal, color: .blue)
+                    // Net carbs sub-row (indented, no progress bar)
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                            Text("Net Carbs")
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(width: 80, alignment: .leading)
+                        Spacer()
+                        Text("\(Int(todaysNetCarbs))g")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.blue.opacity(0.7))
+                        Text("(\(Int(todaysFiber))g fiber deducted)")
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                     }
-                    .frame(width: 80, alignment: .leading)
-                    Spacer()
-                    Text("\(Int(todaysNetCarbs))g")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.blue.opacity(0.7))
-                    Text("(\(Int(todaysFiber))g fiber deducted)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.leading, 8)
+                    .padding(.leading, 8)
 
-                macroRow(name: "Fat", consumed: Int(todaysFat), goal: fatGoal, color: .red)
+                    macroRow(name: "Fat", consumed: Int(todaysFat), goal: fatGoal, color: .red)
 
-                // Fiber row — no goal line, informational
-                HStack {
-                    Text("Fiber")
-                        .font(.subheadline.weight(.medium))
-                        .frame(width: 60, alignment: .leading)
-                    ProgressView(value: min(1.0, todaysFiber / 25.0))
-                        .progressViewStyle(LinearProgressViewStyle(tint: .purple))
-                    Text("\(Int(todaysFiber))g / 25g")
-                        .font(.caption.weight(.medium))
-                        .foregroundColor(.secondary)
-                        .frame(width: 80, alignment: .trailing)
+                    // Fiber row — no goal line, informational
+                    HStack {
+                        Text("Fiber")
+                            .font(.subheadline.weight(.medium))
+                            .frame(width: 60, alignment: .leading)
+                        ProgressView(value: min(1.0, todaysFiber / 25.0))
+                            .progressViewStyle(LinearProgressViewStyle(tint: .purple))
+                        Text("\(Int(todaysFiber))g / 25g")
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.secondary)
+                            .frame(width: 80, alignment: .trailing)
+                    }
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
             }
-            .padding()
         }
         .background(
             RoundedRectangle(cornerRadius: 12)
@@ -823,62 +974,7 @@ struct DietView: View {
         }
     }
     
-    // MARK: - Water Tracking
-    private var waterTrackingView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Water")
-                    .font(.headline.weight(.semibold))
-                
-                Spacer()
-                
-                Text("\(waterGlasses) / \(waterGoal) glasses")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(.blue)
-            }
-            .padding(.horizontal)
-            
-            HStack {
-                ForEach(0..<waterGoal, id: \.self) { index in
-                    Button {
-                        if index < waterGlasses {
-                            // Remove water — set directly, no stat bonus for removal
-                            profile.waterIntake = index
-                        } else {
-                            // Add water — recordWaterIntake increments and awards stats
-                            profile.recordWaterIntake()
-                        }
-                        try? context.save()
-                    } label: {
-                        Image(systemName: "drop.fill")
-                            .foregroundColor(index < waterGlasses ? .blue : .gray.opacity(0.3))
-                            .font(.title2)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 6)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-        }
-        .padding(.vertical)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(colorScheme == .dark ? .black : .white)
-                .stroke(.separator, lineWidth: 0.5)
-        )
-        .onAppear {
-            // Update profile nutrition from today's food entries
-            profile.updateNutritionFromFoodEntries(todaysFoodEntries)
-        }
-        .onChange(of: todaysFoodEntries.count) { _, _ in
-            // Update nutrition when food entries change
-            profile.updateNutritionFromFoodEntries(todaysFoodEntries)
-            try? context.save()
-        }
-    }
+
 
     // MARK: - Copy Yesterday's Meals
     private func deleteFoodEntry(_ entry: FoodEntry) {

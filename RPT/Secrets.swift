@@ -17,13 +17,12 @@ import Foundation
 enum Secrets {
     /// Supabase project URL — safe to commit.
     static let supabaseURL = "https://erghbsnxtsbnmfuycnyb.supabase.co"
-
+    
     /// Supabase anon key — safe to commit (public by design).
     /// Set this value from your Supabase project dashboard → Settings → API.
     static let supabaseAnonKey: String = {
         Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String ?? ""
     }()
-
     /// Shared secret that Edge Functions verify to ensure requests come from RPT.
     /// Value is injected via the APP_SECRET Xcode build setting — never commit
     /// the actual value to source control.

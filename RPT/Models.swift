@@ -731,6 +731,7 @@ enum MealHealthiness: String, CaseIterable, Identifiable {
 }
 
 enum QuestType: String, Codable, CaseIterable, Identifiable {
+    case oneTime = "oneTime"
     case daily
     case weekly
     case custom
@@ -739,17 +740,19 @@ enum QuestType: String, Codable, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .daily: return .orange
-        case .weekly: return .purple
-        case .custom: return .cyan
+        case .oneTime: return .blue
+        case .daily:   return .orange
+        case .weekly:  return .purple
+        case .custom:  return .cyan
         }
     }
 
     var displayName: String {
         switch self {
-        case .daily: return "DAILY"
-        case .weekly: return "WEEKLY"
-        case .custom: return "CUSTOM"
+        case .oneTime: return "One Time"
+        case .daily:   return "Daily"
+        case .weekly:  return "Weekly"
+        case .custom:  return "Custom"
         }
     }
 }
@@ -786,7 +789,9 @@ final class Quest {
     var completedAt: Date?
     var repeatDays: [Int] = []
     var xpReward: Int = 20
+    var creditReward: Int = 0
     var dateTag: Date = Date()
+    var isUserCreated: Bool = false
     var statTarget: String?
     /// Encodes how the quest is verified automatically. Format:
     ///   "steps:10000"    — complete when HealthKit steps >= target
@@ -796,7 +801,7 @@ final class Quest {
     ///   "manual"         — user taps to confirm (default for system quests)
     var completionCondition: String?
 
-    init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, statTarget: String? = nil, completionCondition: String? = nil, dateTag: Date = Calendar.current.startOfDay(for: Date())) {
+    init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, creditReward: Int = 0, isUserCreated: Bool = false, statTarget: String? = nil, completionCondition: String? = nil, dateTag: Date = Calendar.current.startOfDay(for: Date())) {
         self.id = UUID()
         self.title = title
         self.details = details
@@ -807,6 +812,8 @@ final class Quest {
         self.completedAt = completedAt
         self.repeatDays = repeatDays
         self.xpReward = xpReward
+        self.creditReward = creditReward
+        self.isUserCreated = isUserCreated
         self.statTarget = statTarget
         self.completionCondition = completionCondition
         self.dateTag = dateTag

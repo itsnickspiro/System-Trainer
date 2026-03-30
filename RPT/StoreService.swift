@@ -15,12 +15,19 @@ import SwiftUI
 // Active XP boost consumables expose activeXPMultiplier, which DataManager
 // multiplies all XP awards by.
 //
+// Gold Pieces (GP) are a secondary currency. Items may have a credit_price in
+// addition to the XP price. Use PaymentMethod to select which currency to use
+// when calling purchase().
+//
 // Usage:
 //   await StoreService.shared.refresh()
-//   StoreService.shared.storeItems        // items for sale
-//   StoreService.shared.inventory         // items the player owns
-//   StoreService.shared.equippedBonuses   // stat bonuses to add to base stats
+//   StoreService.shared.storeItems         // items for sale
+//   StoreService.shared.inventory          // items the player owns
+//   StoreService.shared.equippedBonuses    // stat bonuses to add to base stats
 //   StoreService.shared.activeXPMultiplier // multiply all XP by this value
+//   StoreService.shared.playerCredits      // player's current GP balance
+//   StoreService.shared.currencyName       // "Gold Pieces"
+//   StoreService.shared.saleActive         // true when a sale is running
 
 @MainActor
 final class StoreService: ObservableObject {
@@ -38,6 +45,18 @@ final class StoreService: ObservableObject {
 
     /// Multiplier from active XP-boost consumables (1.0 = no boost).
     @Published private(set) var activeXPMultiplier: Double = 1.0
+
+    /// Player's current Gold Pieces balance (mirrors PlayerProfileService.shared.systemCredits).
+    @Published private(set) var playerCredits: Int = 0
+
+    // MARK: - Currency Metadata
+    @Published private(set) var currencyName:   String = "Gold Pieces"
+    @Published private(set) var currencySymbol: String = "GP"
+    @Published private(set) var currencyIcon:   String = "centsign.circle.fill"
+
+    // MARK: - Sale Info
+    @Published private(set) var saleActive: Bool   = false
+    @Published private(set) var salePct:    Int    = 0   // e.g. 20 for 20% off
 
     private static let proxyURL = "\(Secrets.supabaseURL)/functions/v1/store-proxy"
     private static let catalogCacheURL: URL = {
@@ -58,7 +77,7 @@ final class StoreService: ObservableObject {
         lastError = nil
         defer { isLoading = false }
 
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
 
         do {
@@ -70,6 +89,30 @@ final class StoreService: ObservableObject {
             }
 
             inventory = payload.inventory
+
+            // Apply currency metadata from server
+            if let currency = payload.currency {
+                currencyName   = currency.name
+                currencySymbol = currency.symbol
+                currencyIcon   = currency.icon
+            }
+
+            // Apply sale info
+            if let sale = payload.sale {
+                saleActive = sale.active
+                salePct    = sale.pct
+            } else {
+                saleActive = false
+                salePct    = 0
+            }
+
+            // Mirror GP balance from server (server is authoritative)
+            if let serverCredits = payload.playerCredits {
+                playerCredits = serverCredits
+            } else {
+                playerCredits = PlayerProfileService.shared.systemCredits
+            }
+
             recomputeBonuses()
         } catch {
             lastError = error.localizedDescription
@@ -78,27 +121,40 @@ final class StoreService: ObservableObject {
 
     // MARK: - Purchase
 
-    func purchase(itemKey: String) async -> Bool {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+    func purchase(itemKey: String, method: PaymentMethod = .xp) async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return false }
 
         guard let item = storeItems.first(where: { $0.key == itemKey }) else { return false }
 
-        // Optimistic XP deduction
-        DataManager.shared.addXPToProfile(-item.price, source: "Store: \(item.name)")
+        // Optimistic deduction based on payment method
+        switch method {
+        case .xp:
+            DataManager.shared.addXPToProfile(-item.finalPriceXP, source: "Store: \(item.name)")
+        case .goldPieces:
+            playerCredits = max(0, playerCredits - item.finalPriceCredits)
+        }
 
         do {
-            let body: [String: Any] = [
+            var body: [String: Any] = [
                 "action": "purchase",
                 "cloudkit_user_id": cloudKitID,
                 "item_key": itemKey
             ]
+            if method == .goldPieces {
+                body["pay_with"] = "credits"
+            }
             try await postToProxy(body: body)
             await refresh()
             return true
         } catch {
             // Revert optimistic deduction
-            DataManager.shared.addXPToProfile(item.price, source: "Store refund: \(item.name)")
+            switch method {
+            case .xp:
+                DataManager.shared.addXPToProfile(item.finalPriceXP, source: "Store refund: \(item.name)")
+            case .goldPieces:
+                playerCredits = PlayerProfileService.shared.systemCredits
+            }
             lastError = error.localizedDescription
             return false
         }
@@ -107,7 +163,7 @@ final class StoreService: ObservableObject {
     // MARK: - Equip / Unequip
 
     func equip(itemKey: String, equip: Bool) async {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
         do {
             let body: [String: Any] = [
@@ -164,7 +220,8 @@ final class StoreService: ObservableObject {
             "cloudkit_user_id": cloudKitUserID
         ]
         let data = try await postToProxy(body: body)
-        return (try? JSONDecoder().decode(StorePayload.self, from: data)) ?? StorePayload(store: [], inventory: [])
+        return (try? JSONDecoder().decode(StorePayload.self, from: data))
+            ?? StorePayload(store: [], inventory: [], currency: nil, sale: nil, playerCredits: nil)
     }
 
     @discardableResult
@@ -198,9 +255,15 @@ struct StoreItem: Codable, Identifiable {
     let iconSymbol:    String
     let itemType:      String   // "equipment" | "consumable" | "cosmetic"
     let rarity:        String   // "common" | "rare" | "epic" | "legendary"
-    let price:         Int      // XP cost
+    let price:         Int      // Base XP cost
+    let creditPrice:   Int?     // Base GP cost (nil if XP-only item)
     let storeSection:  String   // "featured" | "daily" | "weekly" | "permanent"
     let isEnabled:     Bool
+
+    // Server-computed sale prices (present when a sale is active)
+    let finalPriceXP:         Int     // price after any active discount
+    let finalPriceCredits:    Int     // creditPrice after any active discount (0 if XP-only)
+    let effectiveDiscountPct: Int     // 0–100; 0 when no sale
 
     // Stat bonuses (equipment only)
     let bonusStrength:  Double?
@@ -214,16 +277,44 @@ struct StoreItem: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case key, name, description, rarity, price
-        case iconSymbol    = "icon_symbol"
-        case itemType      = "item_type"
-        case storeSection  = "store_section"
-        case isEnabled     = "is_enabled"
-        case bonusStrength  = "bonus_strength"
-        case bonusEndurance = "bonus_endurance"
-        case bonusEnergy   = "bonus_energy"
-        case bonusFocus    = "bonus_focus"
-        case bonusHealth   = "bonus_health"
-        case xpMultiplier  = "xp_multiplier"
+        case creditPrice          = "credit_price"
+        case iconSymbol           = "icon_symbol"
+        case itemType             = "item_type"
+        case storeSection         = "store_section"
+        case isEnabled            = "is_enabled"
+        case finalPriceXP         = "final_price_xp"
+        case finalPriceCredits    = "final_price_credits"
+        case effectiveDiscountPct = "effective_discount_pct"
+        case bonusStrength        = "bonus_strength"
+        case bonusEndurance       = "bonus_endurance"
+        case bonusEnergy          = "bonus_energy"
+        case bonusFocus           = "bonus_focus"
+        case bonusHealth          = "bonus_health"
+        case xpMultiplier         = "xp_multiplier"
+    }
+
+    /// Custom init so we can fall back to `price` when server omits final_price_xp.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key          = try c.decode(String.self, forKey: .key)
+        name         = try c.decode(String.self, forKey: .name)
+        description  = try c.decode(String.self, forKey: .description)
+        iconSymbol   = try c.decode(String.self, forKey: .iconSymbol)
+        itemType     = try c.decode(String.self, forKey: .itemType)
+        rarity       = try c.decode(String.self, forKey: .rarity)
+        price        = try c.decode(Int.self, forKey: .price)
+        creditPrice  = try c.decodeIfPresent(Int.self, forKey: .creditPrice)
+        storeSection = try c.decode(String.self, forKey: .storeSection)
+        isEnabled    = try c.decode(Bool.self, forKey: .isEnabled)
+        finalPriceXP         = (try? c.decode(Int.self, forKey: .finalPriceXP))         ?? price
+        finalPriceCredits    = (try? c.decode(Int.self, forKey: .finalPriceCredits))    ?? (creditPrice ?? 0)
+        effectiveDiscountPct = (try? c.decode(Int.self, forKey: .effectiveDiscountPct)) ?? 0
+        bonusStrength  = try c.decodeIfPresent(Double.self, forKey: .bonusStrength)
+        bonusEndurance = try c.decodeIfPresent(Double.self, forKey: .bonusEndurance)
+        bonusEnergy    = try c.decodeIfPresent(Double.self, forKey: .bonusEnergy)
+        bonusFocus     = try c.decodeIfPresent(Double.self, forKey: .bonusFocus)
+        bonusHealth    = try c.decodeIfPresent(Double.self, forKey: .bonusHealth)
+        xpMultiplier   = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
     }
 
     var rarityColor: Color {
@@ -234,6 +325,9 @@ struct StoreItem: Codable, Identifiable {
         default:          return .gray
         }
     }
+
+    /// True when this item has a GP price and GP purchases are possible.
+    var hasCreditPrice: Bool { (creditPrice ?? 0) > 0 }
 }
 
 struct InventoryEntry: Codable, Identifiable {
@@ -259,9 +353,36 @@ struct StatBonuses {
     var health:    Double = 0
 }
 
-// MARK: - Wire Model (private)
+// MARK: - Payment Method
+
+/// Selects which currency to use when purchasing a store item.
+enum PaymentMethod: Equatable {
+    case xp
+    case goldPieces
+}
+
+// MARK: - Wire Models (private)
 
 private struct StorePayload: Decodable {
-    let store:     [StoreItem]
-    let inventory: [InventoryEntry]
+    let store:          [StoreItem]
+    let inventory:      [InventoryEntry]
+    let currency:       StoreCurrencyInfo?
+    let sale:           StoreSaleInfo?
+    let playerCredits:  Int?
+
+    enum CodingKeys: String, CodingKey {
+        case store, inventory, currency, sale
+        case playerCredits = "player_credits"
+    }
+}
+
+private struct StoreCurrencyInfo: Decodable {
+    let name:   String
+    let symbol: String
+    let icon:   String
+}
+
+private struct StoreSaleInfo: Decodable {
+    let active: Bool
+    let pct:    Int
 }

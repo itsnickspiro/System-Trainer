@@ -5,8 +5,9 @@ import Combine
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
     @StateObject private var achievementManager = AchievementManager.shared
+    @ObservedObject private var avatarService = AvatarService.shared
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var recentSessions: [WorkoutSession]
     @State private var now: Date = Date()
     @State private var rotationAngle: Double = 0
@@ -35,17 +36,6 @@ struct HomeView: View {
                 .fill(colorScheme == .dark ? .black.opacity(0.8) : .white)
                 .ignoresSafeArea(.all)
             
-            // Animated grid overlay (only in dark mode)
-            if colorScheme == .dark {
-                VStack(spacing: 0) {
-                    ForEach(0..<10, id: \.self) { _ in
-                        Rectangle()
-                            .stroke(.cyan.opacity(0.1), lineWidth: 0.5)
-                            .frame(height: 50)
-                    }
-                }
-                .ignoresSafeArea()
-            }
             
             ScrollView {
                 VStack(spacing: 32) {
@@ -60,11 +50,6 @@ struct HomeView: View {
                     // Exemption Pass earned notification
                     if let currentProfile = profile, currentProfile.exemptionPassCount > 0 {
                         exemptionPassBanner(for: currentProfile)
-                    }
-
-                    // Motivational coaching banner
-                    if let currentProfile = profile {
-                        coachingBanner(for: currentProfile)
                     }
 
                     // Recovery / deload recommendation
@@ -172,14 +157,18 @@ struct HomeView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $selectedStatForDetails) { stat in
-            if let currentProfile = profile {
-                VStack {
-                    StatDetailView(stat: stat, profile: currentProfile)
-                }
-                .padding()
-                .presentationDetents([.medium, .large])
-                .presentationBackgroundInteraction(.enabled)
+        .sheet(isPresented: Binding(
+            get: { selectedStatForDetails != nil },
+            set: { if !$0 { selectedStatForDetails = nil } }
+        )) {
+            if let stat = selectedStatForDetails, let currentProfile = profile {
+                StatDetailView(stat: stat, profile: currentProfile)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .presentationDetents([.height(220)])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackgroundInteraction(.enabled)
+                    .presentationCornerRadius(20)
             }
         }
     }
@@ -193,7 +182,7 @@ struct HomeView: View {
                         .fill(.ultraThinMaterial)
                         .background(
                             RoundedRectangle(cornerRadius: 20)
-                                .stroke(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 2)
+                                .stroke(LinearGradient(colors: [.cyan.opacity(0.4), .blue.opacity(0.4)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
                                 .shadow(color: .cyan, radius: 10, x: 0, y: 0)
                         )
                     
@@ -244,7 +233,8 @@ struct HomeView: View {
                                 currentXP: currentProfile.xp,
                                 level: currentProfile.level,
                                 threshold: currentProfile.levelXPThreshold(level: currentProfile.level),
-                                profileName: currentProfile.name
+                                profileName: currentProfile.name,
+                                avatarKey: avatarService.current?.key
                             )
                             .frame(maxWidth: .infinity, alignment: .center)
 
@@ -302,8 +292,9 @@ struct HomeView: View {
                             .padding(.leading, 0)
                         }
                         
-                        // Compact Streak/Best below XP bar, aligned to trailing
-                        HStack {
+                        // Coaching tagline + streak stats on one balanced row
+                        HStack(alignment: .center) {
+                            coachingBanner(for: currentProfile)
                             Spacer()
                             HStack(spacing: 12) {
                                 VStack(spacing: 2) {
@@ -354,11 +345,8 @@ struct HomeView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(colorScheme == .dark ? .black.opacity(0.3) : .gray.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(color.opacity(0.5), lineWidth: 1)
-                )
+                .fill(color.opacity(0.08))
+                .stroke(color.opacity(0.1), lineWidth: 0.5)
         )
     }
     
@@ -414,7 +402,7 @@ struct HomeView: View {
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.red.opacity(0.4), lineWidth: 1.5)
+                        .stroke(Color.red.opacity(0.1), lineWidth: 1)
                 )
         )
     }
@@ -464,7 +452,7 @@ struct HomeView: View {
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.cyan.opacity(0.4), lineWidth: 1.5)
+                        .stroke(Color.cyan.opacity(0.1), lineWidth: 1)
                 )
         )
     }
@@ -622,9 +610,19 @@ struct HomeView: View {
                             
                             Spacer()
                             
-                            Text("+\(quest.xpReward) XP")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.cyan)
+                            HStack(spacing: 6) {
+                                Text("+\(quest.xpReward) XP")
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.cyan)
+                                if quest.creditReward > 0 {
+                                    Text("•")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                    Text("+\(quest.creditReward) \(RemoteConfigService.shared.string("currency_symbol", default: "GP"))")
+                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(Color(red: 1.0, green: 0.8, blue: 0.0))
+                                }
+                            }
                         }
                         .padding(.vertical, 4)
                     }
@@ -637,7 +635,7 @@ struct HomeView: View {
                 .fill(.ultraThinMaterial)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(.orange.opacity(0.5), lineWidth: 1)
+                        .stroke(.orange.opacity(0.1), lineWidth: 1)
                 )
         )
     }
@@ -651,45 +649,16 @@ struct HomeView: View {
         let weak = weakestStat(for: currentProfile)
         let message = coachingMessage(stat: weak.name, tier: tier.rank, value: weak.value)
 
-        HStack(spacing: 14) {
-            // Icon
+        HStack(spacing: 8) {
             Image(systemName: weak.icon)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(weak.color)
-                .frame(width: 36)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(message.headline)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundColor(colorScheme == .dark ? .white : .black)
-                    .lineLimit(2)
-                Text(message.tip)
-                    .font(.system(size: 11, weight: .regular, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer()
-
-            // Stat value pill
-            Text(String(format: "%.0f", weak.value))
-                .font(.system(size: 15, weight: .black, design: .monospaced))
-                .foregroundColor(weak.color)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(weak.color.opacity(0.15))
-                )
+            Text(message.headline)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.ultraThinMaterial)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(weak.color.opacity(0.45), lineWidth: 1)
-                )
-        )
     }
 
     private struct WeakStat {

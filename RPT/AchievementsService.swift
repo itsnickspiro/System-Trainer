@@ -73,9 +73,14 @@ final class AchievementsService: ObservableObject {
         guard let profile = DataManager.shared.currentProfile else { return }
 
         let unlocked = unlockedKeys()
+        // Aggregate counters incremented by DataManager on each event
+        let workoutsLogged  = UserDefaults.standard.integer(forKey: "rpt_total_workouts_logged")
+        let questsCompleted = UserDefaults.standard.integer(forKey: "rpt_total_quests_completed")
 
         for achievement in achievements where !unlocked.contains(achievement.key) {
-            if conditionMet(achievement, profile: profile) {
+            if conditionMet(achievement, profile: profile,
+                            workoutsLogged: workoutsLogged,
+                            questsCompleted: questsCompleted) {
                 unlock(achievement, profile: profile)
             }
         }
@@ -83,7 +88,10 @@ final class AchievementsService: ObservableObject {
 
     // MARK: - Private Helpers
 
-    private func conditionMet(_ a: AchievementTemplate, profile: Profile) -> Bool {
+    private func conditionMet(_ a: AchievementTemplate,
+                               profile: Profile,
+                               workoutsLogged: Int,
+                               questsCompleted: Int) -> Bool {
         let value = Double(a.conditionValue)
         switch a.conditionType {
         case "streak_days":
@@ -93,9 +101,9 @@ final class AchievementsService: ObservableObject {
         case "level_reached":
             return Double(profile.level) >= value
         case "workouts_logged":
-            return Double(profile.totalWorkoutsLogged) >= value
+            return Double(workoutsLogged) >= value
         case "quests_completed":
-            return Double(profile.totalQuestsCompleted) >= value
+            return Double(questsCompleted) >= value
         case "xp_earned":
             return Double(profile.xp) >= value
         default:
@@ -109,10 +117,24 @@ final class AchievementsService: ObservableObject {
             DataManager.shared.addXPToProfile(achievement.xpReward, source: "Achievement: \(achievement.title)")
         }
 
+        // Award GP credits
+        if achievement.creditReward > 0 {
+            Task {
+                await PlayerProfileService.shared.addCredits(
+                    amount: achievement.creditReward,
+                    type: "achievement_reward",
+                    referenceKey: achievement.key
+                )
+            }
+        }
+
         // Persist unlock key
         var keys = unlockedKeys()
         keys.insert(achievement.key)
         UserDefaults.standard.set(Array(keys), forKey: Self.unlockedDefaultsKey)
+
+        // Re-evaluate avatar unlocks (achievement-gated avatars may now be available)
+        Task { await AvatarService.shared.refresh() }
 
         // Show banner
         pendingUnlockTitle = achievement.title
@@ -158,6 +180,7 @@ struct AchievementTemplate: Codable, Identifiable {
     let conditionType: String   // "streak_days" | "level_reached" | "workouts_logged" | ...
     let conditionValue: Int
     let xpReward:      Int
+    let creditReward:  Int      // GP awarded on unlock
     let rarity:        String   // "common" | "rare" | "epic" | "legendary"
     let isEnabled:     Bool
 
@@ -169,16 +192,17 @@ struct AchievementTemplate: Codable, Identifiable {
         case conditionType  = "condition_type"
         case conditionValue = "condition_value"
         case xpReward      = "xp_reward"
+        case creditReward  = "credit_reward"
         case rarity
         case isEnabled     = "is_enabled"
     }
 }
 
-// MARK: - Achievement Banner View
+// MARK: - Service Achievement Banner View
 
-/// Slide-in banner shown when an achievement is unlocked.
+/// Slide-in banner driven by AchievementsService.shared.pendingUnlockTitle.
 /// Drop into HomeView with `.overlay(alignment: .top)`.
-struct AchievementUnlockBanner: View {
+struct ServiceAchievementBanner: View {
     let title: String
 
     var body: some View {

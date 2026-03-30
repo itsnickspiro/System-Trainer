@@ -52,7 +52,16 @@ final class PlayerProfileService: ObservableObject {
 
     private init() {
         // Load cached values so they're available synchronously before network
-        playerId      = UserDefaults.standard.string(forKey: "rpt_player_id") ?? ""
+        let cached = UserDefaults.standard.string(forKey: "rpt_player_id") ?? ""
+        if cached.isEmpty {
+            // Generate a stable local ID so UI never shows "Loading…"
+            let suffix = String(format: "%05X", Int.random(in: 0..<1_048_576))
+            let local = "ST-\(suffix)"
+            UserDefaults.standard.set(local, forKey: "rpt_player_id")
+            playerId = local
+        } else {
+            playerId = cached
+        }
         systemCredits = UserDefaults.standard.integer(forKey: "rpt_system_credits")
     }
 
@@ -60,7 +69,7 @@ final class PlayerProfileService: ObservableObject {
 
     /// Fetches/creates the cloud profile on launch. Safe to call on every launch.
     func refresh() async {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
         isLoading = true
         lastError = nil
@@ -85,7 +94,7 @@ final class PlayerProfileService: ObservableObject {
 
     /// Saves a backup and upserts the profile. Call after level-up, streaks, etc.
     func syncProfile() async {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
         do {
             try await saveBackup(cloudKitUserID: cloudKitID)
@@ -119,7 +128,7 @@ final class PlayerProfileService: ObservableObject {
     ///   - referenceKey: Optional stable key linking the transaction to a source record.
     func addCredits(amount: Int, type: String, referenceKey: String? = nil) async {
         guard amount != 0 else { return }
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
 
         var body: [String: Any] = [
@@ -144,7 +153,7 @@ final class PlayerProfileService: ObservableObject {
 
     /// Fetches recent GP transaction history. Returns transactions newest-first.
     func getCreditHistory() async -> [CreditTransaction] {
-        guard let cloudKitID = CloudKitLeaderboardManager.shared.currentUserID,
+        guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return [] }
 
         let body: [String: Any] = [
