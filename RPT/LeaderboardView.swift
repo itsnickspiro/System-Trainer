@@ -5,7 +5,7 @@ import SwiftUI
 // Displays the Supabase-backed leaderboard with three tabs:
 //   Global  — all-time XP rankings (paginated, top 50)
 //   Weekly  — XP earned this week, resets each Monday
-//   Friends — players you follow via RPT-XXXXX codes
+//   Friends — players you follow via ST-XXXXX codes
 //
 // The current player's row is highlighted; if they fall outside the top 50 on
 // Global/Weekly their row is pinned to the bottom of the list.
@@ -151,7 +151,7 @@ private struct GlobalLeaderboardView: View {
 
     private var leaderboardList: some View {
         let entries      = leaderboard.globalEntries
-        let currentEntry = entries.first { $0.isCurrentUser }
+        let currentEntry = entries.first { $0.isCurrentUser == true }
         let inTopList    = currentEntry != nil
 
         return Group {
@@ -172,15 +172,16 @@ private struct GlobalLeaderboardView: View {
     private func currentPlayerPlaceholder(rank: Int) -> LeaderboardEntry {
         let dm = DataManager.shared
         return LeaderboardEntry(
-            playerId:      PlayerProfileService.shared.playerId ?? "RPT-???",
-            displayName:   dm.currentProfile?.name ?? "You",
-            level:         dm.currentProfile?.level ?? 1,
-            xp:            dm.currentProfile?.xp ?? 0,
-            weeklyXP:      0,
-            streak:        dm.currentProfile?.currentStreak ?? 0,
-            rank:          rank,
-            avatarKey:     nil,
-            isCurrentUser: true
+            playerId:       PlayerProfileService.shared.playerId,
+            displayName:    dm.currentProfile?.name ?? "You",
+            level:          dm.currentProfile?.level ?? 1,
+            totalXP:        dm.currentProfile?.xp ?? 0,
+            weeklyXP:       0,
+            weeklyWorkouts: nil,
+            rank:           rank,
+            currentStreak:  dm.currentProfile?.currentStreak ?? 0,
+            avatarKey:      nil,
+            isCurrentUser:  true
         )
     }
 
@@ -338,7 +339,7 @@ private struct FriendsLeaderboardView: View {
 
             if showAddField {
                 HStack(spacing: 10) {
-                    TextField("Enter RPT-XXXXX code", text: $enteredCode)
+                    TextField("Enter ST-XXXXX code", text: $enteredCode)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                         .font(.system(size: 15, design: .monospaced))
@@ -373,7 +374,7 @@ private struct FriendsLeaderboardView: View {
                 .foregroundColor(.cyan.opacity(0.4))
             Text("No Friends Added Yet")
                 .font(.headline)
-            Text("Tap \"Add Friend\" and enter a friend's RPT-XXXXX code to follow their progress.")
+            Text("Tap \"Add Friend\" and enter a friend's ST-XXXXX code to follow their progress.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -386,7 +387,7 @@ private struct FriendsLeaderboardView: View {
             LeaderboardRow(entry: entry)
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
-                        Task { await leaderboard.removeFriend(playerID: entry.playerId) }
+                        Task { await leaderboard.removeFriend(playerID: entry.playerId ?? "") }
                     } label: {
                         Label("Remove", systemImage: "person.badge.minus")
                     }
@@ -407,7 +408,7 @@ struct YourPlayerIDView: View {
     @State private var showCopied = false
 
     private var playerID: String {
-        PlayerProfileService.shared.playerId ?? ""
+        PlayerProfileService.shared.playerId
     }
 
     var body: some View {
@@ -418,12 +419,12 @@ struct YourPlayerIDView: View {
                         .padding(.top, 20)
                 }
 
-                if let entry = leaderboard.globalEntries.first(where: { $0.isCurrentUser }) {
+                if let entry = leaderboard.globalEntries.first(where: { $0.isCurrentUser == true }) {
                     VStack(spacing: 8) {
                         Text("YOUR RANK")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyan.opacity(0.8))
-                        PodiumCard(entry: entry, position: entry.rank)
+                        PodiumCard(entry: entry, position: entry.rank ?? 0)
                             .scaleEffect(1.05)
                     }
                 } else if let rank = leaderboard.playerGlobalRank {
@@ -473,8 +474,8 @@ struct YourPlayerIDView: View {
                 if let shareURL = URL(string: "rpt://addfriend/\(playerID)") {
                     ShareLink(
                         item: shareURL,
-                        subject: Text("Add me on RPT!"),
-                        message: Text("Use my player ID \(playerID) to add me on RPT. Tap: \(shareURL.absoluteString)")
+                        subject: Text("Add me on System Trainer!"),
+                        message: Text("Use my player ID \(playerID) to add me on System Trainer. Tap: \(shareURL.absoluteString)")
                     ) {
                         Label("Share", systemImage: "square.and.arrow.up")
                             .font(.system(size: 13, weight: .semibold))
@@ -525,9 +526,17 @@ struct PodiumCard: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: positionIcon)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(positionColor)
+            ZStack(alignment: .topTrailing) {
+                AvatarImageView(key: entry.avatarKey ?? "avatar_default", size: 50)
+                    .overlay(Circle().stroke(positionColor.opacity(0.8), lineWidth: 2))
+
+                Image(systemName: positionIcon)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(positionColor)
+                    .padding(4)
+                    .background(Circle().fill(colorScheme == .dark ? Color.black : Color.white))
+                    .offset(x: 4, y: -4)
+            }
 
             Text(entry.displayName)
                 .font(.system(size: 14, weight: .bold))
@@ -536,17 +545,17 @@ struct PodiumCard: View {
                 .minimumScaleFactor(0.8)
 
             VStack(spacing: 4) {
-                Text("LVL \(entry.level)")
+                Text("LVL \(entry.level ?? 1)")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundColor(positionColor)
 
-                Text("\(entry.xp) XP")
+                Text("\(entry.totalXP ?? 0) XP")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 2) {
                     Image(systemName: "flame.fill").font(.system(size: 8)).foregroundColor(.orange)
-                    Text("\(entry.streak)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
+                    Text("\(entry.currentStreak ?? 0)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
                 }
             }
         }
@@ -566,19 +575,22 @@ struct LeaderboardRow: View {
     var showWeeklyXP: Bool = false
 
     var body: some View {
-        HStack(spacing: 16) {
-            Text("#\(entry.rank)")
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundColor(entry.isCurrentUser ? .cyan : .secondary)
-                .frame(width: 40, alignment: .leading)
+        HStack(spacing: 12) {
+            Text("#\(entry.rank ?? 0)")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundColor(entry.isCurrentUser == true ? .cyan : .secondary)
+                .frame(width: 32, alignment: .leading)
+
+            AvatarImageView(key: entry.avatarKey ?? "avatar_default", size: 36)
+                .overlay(Circle().stroke(entry.isCurrentUser == true ? Color.cyan : Color.gray.opacity(0.3), lineWidth: 1.5))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(entry.displayName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(entry.isCurrentUser ? .cyan : (colorScheme == .dark ? .white : .black))
+                        .foregroundColor(entry.isCurrentUser == true ? .cyan : (colorScheme == .dark ? .white : .black))
 
-                    if entry.isCurrentUser {
+                    if entry.isCurrentUser == true {
                         Text("YOU")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
@@ -588,12 +600,12 @@ struct LeaderboardRow: View {
                 }
 
                 HStack(spacing: 12) {
-                    Text("LVL \(entry.level)")
+                    Text("LVL \(entry.level ?? 1)")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundColor(.orange)
                     HStack(spacing: 2) {
                         Image(systemName: "flame.fill").font(.system(size: 10)).foregroundColor(.orange)
-                        Text("\(entry.streak)").font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
+                        Text("\(entry.currentStreak ?? 0)").font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
                     }
                 }
             }
@@ -601,9 +613,9 @@ struct LeaderboardRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(showWeeklyXP ? entry.weeklyXP : entry.xp)")
+                Text("\(showWeeklyXP ? (entry.weeklyXP ?? 0) : (entry.totalXP ?? 0))")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(entry.isCurrentUser ? .cyan : (colorScheme == .dark ? .white : .black))
+                    .foregroundColor(entry.isCurrentUser == true ? .cyan : (colorScheme == .dark ? .white : .black))
                 Text(showWeeklyXP ? "WK XP" : "XP")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
@@ -612,13 +624,13 @@ struct LeaderboardRow: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(entry.isCurrentUser ?
+                .fill(entry.isCurrentUser == true ?
                       (colorScheme == .dark ? .cyan.opacity(0.1) : .cyan.opacity(0.05)) :
                       (colorScheme == .dark ? .black.opacity(0.2) : .white.opacity(0.8)))
                 .overlay(RoundedRectangle(cornerRadius: 12)
-                    .stroke(entry.isCurrentUser ? .cyan.opacity(0.5) : .gray.opacity(0.2), lineWidth: 1))
+                    .stroke(entry.isCurrentUser == true ? .cyan.opacity(0.5) : .gray.opacity(0.2), lineWidth: 1))
         )
-        .shadow(color: entry.isCurrentUser ? .cyan.opacity(0.2) : .clear, radius: 4, x: 0, y: 2)
+        .shadow(color: entry.isCurrentUser == true ? .cyan.opacity(0.2) : .clear, radius: 4, x: 0, y: 2)
     }
 }
 

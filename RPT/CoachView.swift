@@ -4,13 +4,33 @@ import SwiftData
 struct CoachView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var context
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
     private var ai: AIManager { AIManager.shared }
     @State private var userInput = ""
     @State private var messages: [ChatMessage] = []
     @State private var isTyping = false
     @State private var showingSleepPicker = false
     @State private var sleepHoursInput: Double = 7.5
+
+    private static let historyKey = "coach_chat_history_v1"
+    private static let maxStoredMessages = 50
+
+    private func loadHistory() {
+        guard let data = UserDefaults.standard.data(forKey: Self.historyKey),
+              let decoded = try? JSONDecoder().decode([ChatMessage].self, from: data) else { return }
+        messages = decoded
+    }
+
+    private func saveHistory() {
+        let toSave = Array(messages.suffix(Self.maxStoredMessages))
+        guard let data = try? JSONEncoder().encode(toSave) else { return }
+        UserDefaults.standard.set(data, forKey: Self.historyKey)
+    }
+
+    private func clearHistory() {
+        messages = []
+        UserDefaults.standard.removeObject(forKey: Self.historyKey)
+    }
 
     var body: some View {
         NavigationStack {
@@ -122,6 +142,20 @@ struct CoachView: View {
             .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color(.systemGroupedBackground))
             .navigationTitle("THE SYSTEM")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !messages.isEmpty {
+                        Button {
+                            clearHistory()
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 14))
+                                .foregroundColor(.red.opacity(0.7))
+                        }
+                    }
+                }
+            }
+            .onAppear { loadHistory() }
             .sheet(isPresented: $showingSleepPicker) {
                 SleepLogSheet(hours: $sleepHoursInput) { hours in
                     logSleep(hours: hours)
@@ -204,6 +238,7 @@ struct CoachView: View {
             : "Notice: Water intake updated — \(glasses)/8 glasses logged. \(8 - glasses) remaining to threshold. Continue."
         messages.append(ChatMessage(content: "Log water (+1 glass)", isUser: true))
         messages.append(ChatMessage(content: systemMsg, isUser: false))
+        saveHistory()
     }
 
     private func logSleep(hours: Double) {
@@ -221,6 +256,7 @@ struct CoachView: View {
         }
         messages.append(ChatMessage(content: "Log sleep: \(formatted) hours", isUser: true))
         messages.append(ChatMessage(content: systemMsg, isUser: false))
+        saveHistory()
     }
 
     // MARK: - Send
@@ -240,18 +276,21 @@ struct CoachView: View {
                 let reply = try await ai.chat(message: trimmed, context: ctx)
                 isTyping = false
                 messages.append(ChatMessage(content: reply, isUser: false))
+                saveHistory()
             } catch AIManagerError.unavailable {
                 isTyping = false
                 messages.append(ChatMessage(
                     content: "SYSTEM OFFLINE. Apple Intelligence must be enabled in iOS Settings > Apple Intelligence & Siri.",
                     isUser: false
                 ))
+                saveHistory()
             } catch {
                 isTyping = false
                 messages.append(ChatMessage(
                     content: "SYSTEM ERROR: \(error.localizedDescription)",
                     isUser: false
                 ))
+                saveHistory()
             }
         }
     }
@@ -375,11 +414,18 @@ struct SleepLogSheet: View {
 
 // MARK: - Chat Message Model
 
-struct ChatMessage: Identifiable {
-    let id = UUID()
+struct ChatMessage: Identifiable, Codable {
+    let id: UUID
     let content: String
     let isUser: Bool
-    let timestamp = Date()
+    let timestamp: Date
+
+    init(content: String, isUser: Bool) {
+        self.id = UUID()
+        self.content = content
+        self.isUser = isUser
+        self.timestamp = Date()
+    }
 }
 
 // MARK: - Chat Bubble

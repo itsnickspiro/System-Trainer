@@ -9,11 +9,17 @@ struct ContentView: View {
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
 
     @State private var selectedTab = 0
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
+    @ObservedObject private var remoteConfig = RemoteConfigService.shared
     @State private var now = Date()
     @State private var showingSettings = false
     @State private var showingTrainer = false
     private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    // MARK: - Feature flags (backed by RemoteConfigService)
+    private var coachEnabled: Bool     { remoteConfig.bool("feature_coach_enabled",       default: true) }
+    private var leaderboardEnabled: Bool { remoteConfig.bool("feature_leaderboard_enabled", default: true) }
+    private var animePlansEnabled: Bool  { remoteConfig.bool("feature_anime_plans_enabled", default: true) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,9 +51,11 @@ struct ContentView: View {
                     .tabItem { Label("Training", systemImage: "figure.strengthtraining.traditional") }
                     .tag(3)
 
-                LeaderboardView()
-                    .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
-                    .tag(4)
+                if leaderboardEnabled {
+                    LeaderboardView()
+                        .tabItem { Label("Leaderboard", systemImage: "trophy.fill") }
+                        .tag(4)
+                }
             }
             .background(
                 (colorScheme == .dark ? Color.black : Color.white)
@@ -56,6 +64,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
         .background(colorScheme == .dark ? Color.black : Color.white)
+        .id(savedColorScheme) // Force re-render when theme changes so auto/light/dark takes effect immediately
 
         .onAppear {
             // Configure DataManager with SwiftData context
@@ -99,6 +108,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
+                .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
         }
         .sheet(isPresented: $showingTrainer) {
             CoachView()
@@ -115,24 +125,26 @@ struct ContentView: View {
                 .foregroundStyle(.cyan)
             Spacer()
             HStack(spacing: 8) {
-                // System Trainer quick-access button
-                Button(action: { showingTrainer = true }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "waveform.badge.magnifyingglass")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("SYSTEM")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                // System Trainer quick-access button (hidden when coach feature is disabled)
+                if coachEnabled {
+                    Button(action: { showingTrainer = true }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "waveform.badge.magnifyingglass")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("SYSTEM")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundStyle(.cyan)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(Color.cyan.opacity(0.12))
+                                .overlay(Capsule().stroke(Color.cyan.opacity(0.4), lineWidth: 1))
+                        )
                     }
-                    .foregroundStyle(.cyan)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule()
-                            .fill(Color.cyan.opacity(0.12))
-                            .overlay(Capsule().stroke(Color.cyan.opacity(0.4), lineWidth: 1))
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 // Settings quick-access button
                 Button(action: { showingSettings = true }) {

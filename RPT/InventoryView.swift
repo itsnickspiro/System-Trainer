@@ -62,7 +62,7 @@ struct InventoryView: View {
                     .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("Inventory")
+            .navigationTitle("Item Shop")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -175,9 +175,9 @@ private struct InventoryItemRow: View {
                 }
             }
         } else if let mult = item.xpMultiplier {
-            Text("×\(String(format: "%.1f", mult)) XP boost")
+            Text("×\(String(format: "%.1f", mult)) XP Boost")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.yellow)
+                .foregroundColor(.cyan)
         }
     }
 }

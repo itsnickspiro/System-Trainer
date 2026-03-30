@@ -37,7 +37,8 @@ extension WorkoutType {
 struct WorkoutView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var context
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
+    @ObservedObject private var planService = AnimeWorkoutPlanService.shared
     @Query private var profiles: [Profile]
     @State private var selectedWorkoutType: WorkoutType = .strength
     @State private var searchQuery = ""
@@ -51,16 +52,18 @@ struct WorkoutView: View {
     @State private var showingWeeklySchedule = false
     @State private var selectedDay = Date()
     @State private var sessionToEdit: WorkoutSession? = nil
+    @State private var selectedPlannedExercise: PlannedExerciseDetail? = nil
     @State private var showingPlanWorkoutLogger = false
+    @State private var planLoggerDuration = 45
     @State private var planLoggerExercises: [LoggedExerciseEntry] = []
     @State private var planLoggerRoutineName: String = ""
-    @State private var planLoggerDuration: Int = 45
-    @State private var selectedPlannedExercise: PlannedExerciseDetail? = nil
     /// Exercises queued from the database to add to a new workout
     @State private var pendingExercises: [LoggedExerciseEntry] = []
     @State private var showingDatabaseLogger = false
     /// Debounce task so we don't fire a network call on every keystroke
     @State private var searchDebounceTask: Task<Void, Never>? = nil
+    @State private var isProgramExpanded = false
+    @State private var showingDatePicker = false
 
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var allSessions: [WorkoutSession]
 
@@ -117,47 +120,102 @@ struct WorkoutView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 4)
 
-                    WeekScroller(selectedDay: $selectedDay)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal)
+                    // Date selector — same style as My Diary
+                    HStack {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedDay = Calendar.current.date(byAdding: .day, value: -1, to: selectedDay) ?? selectedDay
+                            }
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            showingDatePicker = true
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text(Calendar.current.isDateInToday(selectedDay) ? "Today" : selectedDay.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                HStack(spacing: 4) {
+                                    Image(systemName: "calendar")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                    Text(isDayLocked
+                                         ? (Calendar.current.isDateInFuture(selectedDay) ? "Future" : "Past")
+                                         : "Tap to jump")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedDay = Calendar.current.date(byAdding: .day, value: 1, to: selectedDay) ?? selectedDay
+                            }
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(colorScheme == .dark ? Color.black : Color.white)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color(.separator), lineWidth: 0.5)
+                            )
+                    )
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
                 .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        // Active Program Banner (shown when a plan is selected)
-                        activeProgramSection
+                        let isPastDay = isDayLocked && !Calendar.current.isDateInFuture(selectedDay)
 
-                        // Workout Type Selector
-                        workoutTypeSelector
-
-                        // Quick Start: only show when no active plan is set
-                        // (the day plan section has its own Start button when a plan is active)
-                        if activePlan == nil {
-                            quickStartSection
-                        }
-
-                        // Today's (or selected day's) logged sessions
-                        sessionsSection
-
-                        // Selected day's plan from active program
-                        if let plan = activePlan {
-                            dayPlanSection(plan: plan)
-                        }
-
-                        // Exercise Search
-                        exerciseSearchSection
-
-                        // Exercise Results
-                        if isSearching {
-                            ProgressView("Loading exercises...")
-                                .padding(.vertical, 40)
-                        } else if let error = searchError {
-                            exerciseErrorView(message: error)
-                        } else if exercises.isEmpty {
-                            exerciseEmptyState
+                        if isPastDay {
+                            // Past date: show what they actually logged
+                            sessionsSection
                         } else {
-                            exerciseResults
+                            // Today or future: show active plan card
+                            activeProgramSection
+
+                            if activePlan == nil && !Calendar.current.isDateInFuture(selectedDay) {
+                                quickStartSection
+                            }
+
+                            // Today only: also show logged sessions below the plan
+                            if !isDayLocked {
+                                sessionsSection
+                            }
+
+                            // Exercise search (browse exercises / add on to plan)
+                            exerciseSearchSection
+
+                            // Exercise Results
+                            if isSearching {
+                                ProgressView("Loading exercises...")
+                                    .padding(.vertical, 40)
+                            } else if let error = searchError {
+                                exerciseErrorView(message: error)
+                            } else if exercises.isEmpty {
+                                exerciseEmptyState
+                            } else {
+                                exerciseResults
+                            }
                         }
                     }
                     .padding()
@@ -171,6 +229,21 @@ struct WorkoutView: View {
                 if exercises.isEmpty {
                     searchExercises(type: selectedWorkoutType.apiType)
                 }
+            }
+            .sheet(isPresented: $showingDatePicker) {
+                NavigationStack {
+                    DatePicker("Jump to Date", selection: $selectedDay, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .padding()
+                        .navigationTitle("Jump to Date")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showingDatePicker = false }
+                            }
+                        }
+                }
+                .presentationDetents([.medium])
             }
             .sheet(isPresented: $showingProgress) {
                 ProgressChartsView()
@@ -223,14 +296,6 @@ struct WorkoutView: View {
             .sheet(item: $sessionToEdit) { session in
                 WorkoutSessionEditView(session: session)
             }
-            .sheet(isPresented: $showingPlanWorkoutLogger) {
-                WorkoutLoggerView(
-                    workoutType: selectedWorkoutType,
-                    duration: $planLoggerDuration,
-                    preloadedExercises: planLoggerExercises,
-                    routineName: planLoggerRoutineName
-                )
-            }
             .sheet(item: $selectedPlannedExercise) { detail in
                 PlannedExerciseDetailSheet(detail: detail, accentColor: detail.accentColor)
             }
@@ -240,6 +305,14 @@ struct WorkoutView: View {
                     duration: $workoutDuration,
                     preloadedExercises: pendingExercises,
                     routineName: ""
+                )
+            }
+            .sheet(isPresented: $showingPlanWorkoutLogger, onDismiss: { planLoggerExercises = [] }) {
+                WorkoutLoggerView(
+                    workoutType: .strength,
+                    duration: $planLoggerDuration,
+                    preloadedExercises: planLoggerExercises,
+                    routineName: planLoggerRoutineName
                 )
             }
         }
@@ -255,15 +328,23 @@ struct WorkoutView: View {
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundColor(.secondary)
                 Spacer()
-                Button(activePlan == nil ? "Choose Plan" : "Change") {
-                    showingPlanPicker = true
+                if activePlan == nil {
+                    Button("Choose Plan") {
+                        showingPlanPicker = true
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.blue)
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.blue)
             }
 
             if let plan = activePlan {
-                activePlanCard(plan: plan)
+                if isProgramExpanded {
+                    activePlanCard(plan: plan)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                } else {
+                    activePlanCardCollapsed(plan: plan)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             } else {
                 // Empty state — prompt to pick a plan
                 Button(action: { showingPlanPicker = true }) {
@@ -294,14 +375,65 @@ struct WorkoutView: View {
         }
     }
 
+    /// Compact single-row card shown when the program section is collapsed.
+    private func activePlanCardCollapsed(plan: AnimeWorkoutPlan) -> some View {
+        let dayPlan = plan.weeklySchedule[planDayIndex]
+        let dayLabel = Calendar.current.isDateInToday(selectedDay)
+            ? "Today"
+            : selectedDay.formatted(.dateTime.weekday(.wide))
+
+        return HStack(spacing: 0) {
+            // Left zone: tap anywhere here to expand the card
+            Button {
+                withAnimation(.spring(duration: 0.3)) { isProgramExpanded = true }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: plan.iconSymbol)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(plan.accentColor)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(plan.character)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                        Text(dayPlan.isRest ? "\(dayLabel): Rest Day" : "\(dayLabel): \(dayPlan.focus)")
+                            .font(.caption)
+                            .foregroundColor(dayPlan.isRest ? .secondary : plan.accentColor)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(plan.accentColor.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
     private func activePlanCard(plan: AnimeWorkoutPlan) -> some View {
-        // Determine today's day plan
-        let calWeekday = Calendar.current.component(.weekday, from: Date())
-        let planIndex = (calWeekday + 5) % 7
-        let dayPlan = plan.weeklySchedule[planIndex]
+        // Use selected day so the card tracks the week scroller
+        let dayPlan = plan.weeklySchedule[planDayIndex]
+        let dayLabel = Calendar.current.isDateInToday(selectedDay)
+            ? "TODAY"
+            : selectedDay.formatted(.dateTime.weekday(.wide)).uppercased()
 
         return VStack(alignment: .leading, spacing: 12) {
-            // Header
+            // Header: icon, name, tagline, difficulty — tap to collapse
             HStack(spacing: 10) {
                 Image(systemName: plan.iconSymbol)
                     .font(.title2)
@@ -324,91 +456,164 @@ struct WorkoutView: View {
                     .background(plan.accentColor.opacity(0.15))
                     .foregroundColor(plan.accentColor)
                     .clipShape(Capsule())
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.spring(duration: 0.3)) { isProgramExpanded = false }
             }
 
             Divider()
 
-            // Today's session
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("TODAY — \(dayPlan.focus.uppercased())")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(dayPlan.isRest ? .secondary : plan.accentColor)
-                    Spacer()
-                    if dayPlan.isRest {
-                        Label("Rest Day", systemImage: "moon.fill")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
+            // Day + focus label
+            HStack {
+                Text("\(dayLabel) — \(dayPlan.focus.uppercased())")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(dayPlan.isRest ? .secondary : plan.accentColor)
+                Spacer()
                 if dayPlan.isRest {
-                    Text("Active recovery: stretch, mobility, walk. Let the adaptations compound.")
+                    Label("Rest Day", systemImage: "moon.fill")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                } else {
-                    ForEach(dayPlan.exercises.prefix(4), id: \.name) { ex in
-                        HStack(spacing: 8) {
-                            Text("•")
+                }
+            }
+
+            if dayPlan.isRest {
+                Text("Active recovery: stretch, mobility, walk. Let the adaptations compound.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                // Exercise list — tap row for details, play icon to start individually
+                VStack(spacing: 0) {
+                    ForEach(Array(dayPlan.exercises.enumerated()), id: \.offset) { idx, ex in
+                        HStack(spacing: 10) {
+                            Text("\(idx + 1)")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
                                 .foregroundColor(plan.accentColor)
-                            Text("\(ex.sets)×\(ex.reps) \(ex.name)")
-                                .font(.caption.weight(.medium))
-                                .foregroundColor(.primary)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(width: 20, alignment: .center)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ex.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(isDayLocked ? .secondary : .primary)
+                                HStack(spacing: 6) {
+                                    Text("\(ex.sets) sets × \(ex.reps)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    if ex.restSeconds > 0 {
+                                        Text("· \(ex.restSeconds)s rest")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+
                             Spacer()
+
+                            // Tap to view exercise details
+                            Button {
+                                selectedPlannedExercise = PlannedExerciseDetail(
+                                    exercise: ex, accentColor: plan.accentColor
+                                )
+                            } label: {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(plan.accentColor.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedPlannedExercise = PlannedExerciseDetail(
+                                exercise: ex, accentColor: plan.accentColor
+                            )
+                        }
+
+                        if idx < dayPlan.exercises.count - 1 {
+                            Divider().padding(.leading, 44)
                         }
                     }
-                    if dayPlan.exercises.count > 4 {
-                        Text("+ \(dayPlan.exercises.count - 4) more exercises")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemGray6).opacity(0.5))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                if isDayLocked {
+                    Label(
+                        Calendar.current.isDateInFuture(selectedDay)
+                            ? "Future day — unlocks when it arrives"
+                            : "Past day — read-only. Log workouts on today's date to earn XP.",
+                        systemImage: "lock.fill"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
                 }
             }
 
             Divider()
 
-            // Weekly schedule button
-            Button(action: { showingWeeklySchedule = true }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 13))
-                        .foregroundColor(plan.accentColor)
-                    Text("View Full 7-Day Schedule")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(plan.accentColor)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
+            HStack(spacing: 10) {
+                if !dayPlan.isRest && !isDayLocked {
+                    Button(action: { startSessionForDay(plan: plan, dayPlan: dayPlan) }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 14))
+                            Text("Start Session")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(plan.accentColor))
+                    }
+                    .buttonStyle(.plain)
                 }
+
+                Spacer()
+
+                Button(action: { showingWeeklySchedule = true }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 13))
+                        Text("Schedule")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(plan.accentColor)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(plan.accentColor.opacity(0.06))
-                .stroke(plan.accentColor.opacity(0.3), lineWidth: 1)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(plan.accentColor.opacity(0.15), lineWidth: 1)
+                )
         )
     }
 
-    private var workoutTypeSelector: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("BROWSE BY TYPE")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(WorkoutType.allCases, id: \.self) { type in
-                        workoutTypeChip(type)
-                    }
-                }
-                .padding(.horizontal, 2)
-            }
+    private func startSessionForDay(plan: AnimeWorkoutPlan, dayPlan: AnimeWorkoutPlan.DayPlan) {
+        planLoggerRoutineName = dayPlan.focus
+        planLoggerDuration = 45
+        planLoggerExercises = dayPlan.exercises.map { ex in
+            var entry = LoggedExerciseEntry()
+            entry.name = ex.name
+            entry.sets = ex.sets
+            // Parse reps string: "10", "10-12", "Max" → use first number or default to 10
+            entry.reps = Int(ex.reps.components(separatedBy: CharacterSet(charactersIn: "-–")).first ?? "10") ?? 10
+            return entry
         }
+        showingPlanWorkoutLogger = true
     }
 
     private func workoutTypeChip(_ type: WorkoutType) -> some View {
@@ -628,57 +833,60 @@ struct WorkoutView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(dayPlan.exercises.enumerated()), id: \.offset) { idx, ex in
-                        Button(action: {
-                            selectedPlannedExercise = PlannedExerciseDetail(
-                                exercise: ex,
-                                accentColor: plan.accentColor
-                            )
-                        }) {
-                            HStack(spacing: 10) {
-                                Text("\(idx + 1)")
-                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                    .foregroundColor(plan.accentColor)
-                                    .frame(width: 20, alignment: .center)
+                        HStack(spacing: 10) {
+                            Text("\(idx + 1)")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(plan.accentColor)
+                                .frame(width: 20, alignment: .center)
 
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(ex.name)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundColor(isDayLocked ? .secondary : .primary)
-                                    HStack(spacing: 6) {
-                                        Text("\(ex.sets) sets × \(ex.reps)")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ex.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(isDayLocked ? .secondary : .primary)
+                                HStack(spacing: 6) {
+                                    Text("\(ex.sets) sets × \(ex.reps)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    if ex.restSeconds > 0 {
+                                        Text("· \(ex.restSeconds)s rest")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
-                                        if ex.restSeconds > 0 {
-                                            Text("· \(ex.restSeconds)s rest")
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
                                     }
                                 }
-                                Spacer()
+                            }
+                            Spacer()
+                            // Info button — tap to see exercise details without starting workout
+                            Button(action: {
+                                selectedPlannedExercise = PlannedExerciseDetail(
+                                    exercise: ex,
+                                    accentColor: plan.accentColor
+                                )
+                            }) {
                                 Image(systemName: "info.circle")
                                     .font(.system(size: 14))
                                     .foregroundColor(plan.accentColor.opacity(0.7))
-                                if isDayLocked {
-                                    Image(systemName: "lock.fill")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary.opacity(0.5))
-                                }
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            if isDayLocked {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.5))
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
                         if idx < dayPlan.exercises.count - 1 {
                             Divider().padding(.leading, 44)
                         }
                     }
                 }
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(plan.accentColor.opacity(0.25), lineWidth: 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(plan.accentColor.opacity(0.15), lineWidth: 1)
+                        )
                 )
 
                 if isDayLocked {
@@ -692,79 +900,13 @@ struct WorkoutView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
-                } else {
-                    // Today: show Start This Workout button
-                    Button(action: {
-                        startPlanWorkout(plan: plan, dayPlan: dayPlan)
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 18))
-                            Text("Start \(dayPlan.focus) Workout")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text("+XP")
-                                .font(.caption.weight(.bold))
-                                .foregroundColor(.orange)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.orange.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(plan.accentColor)
-                        )
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
-    /// Converts a plan's DayPlan into LoggedExerciseEntry objects and opens the logger.
-    private func startPlanWorkout(plan: AnimeWorkoutPlan, dayPlan: AnimeWorkoutPlan.DayPlan) {
-        planLoggerRoutineName = "\(plan.character) — \(dayPlan.focus)"
-
-        // Detect workout type from the day's focus string
-        let focusLower = dayPlan.focus.lowercased()
-        if focusLower.contains("cardio") || focusLower.contains("run") || focusLower.contains("endurance") {
-            selectedWorkoutType = .cardio
-        } else if focusLower.contains("flex") || focusLower.contains("stretch") || focusLower.contains("yoga") || focusLower.contains("mobility") {
-            selectedWorkoutType = .flexibility
-        } else {
-            selectedWorkoutType = .strength
-        }
-
-        // Convert PlannedExercise → LoggedExerciseEntry
-        planLoggerExercises = dayPlan.exercises.map { ex in
-            var entry = LoggedExerciseEntry()
-            entry.name = ex.name
-            // Parse reps string — handle "10", "10-12", "Max", "100" etc.
-            if let repsInt = Int(ex.reps) {
-                entry.reps = repsInt
-            } else if ex.reps.contains("-"),
-                      let first = ex.reps.split(separator: "-").first,
-                      let repsInt = Int(first) {
-                entry.reps = repsInt
-            } else {
-                // "Max" or other non-numeric — default to 10
-                entry.reps = 10
-            }
-            entry.sets = ex.sets
-            entry.minutes = ex.restSeconds > 0 ? (ex.restSeconds / 60) + 1 : 10
-            return entry
-        }
-
-        planLoggerDuration = 45
-        showingPlanWorkoutLogger = true
-    }
-
     private var exerciseSearchSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("EXERCISE DATABASE")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundColor(.secondary)
@@ -808,6 +950,15 @@ struct WorkoutView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color(.systemGray6))
             )
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(WorkoutType.allCases, id: \.self) { type in
+                        workoutTypeChip(type)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
         }
     }
 
@@ -1494,7 +1645,7 @@ struct LoggedExerciseEntry: Identifiable {
 struct WorkoutLoggerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
     @Query private var personalRecords: [PersonalRecord]
     @Query private var profiles: [Profile]
     let workoutType: WorkoutType
@@ -1503,6 +1654,16 @@ struct WorkoutLoggerView: View {
     var preloadedExercises: [LoggedExerciseEntry] = []
     /// Optional routine name override (e.g. from a plan day)
     var routineName: String = ""
+
+    init(workoutType: WorkoutType, duration: Binding<Int>, preloadedExercises: [LoggedExerciseEntry] = [], routineName: String = "") {
+        self.workoutType = workoutType
+        self._duration = duration
+        self.preloadedExercises = preloadedExercises
+        self.routineName = routineName
+        // Seed exercises at init time so they're ready before onAppear fires,
+        // avoiding a SwiftUI sheet timing bug where preloadedExercises arrives stale.
+        self._exercises = State(initialValue: preloadedExercises)
+    }
 
     private var useMetric: Bool { profiles.first?.useMetric ?? true }
 
@@ -2553,8 +2714,11 @@ struct AnimePlanCard: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isActive ? plan.accentColor.opacity(0.06) : Color(.systemGray6))
-                .stroke(isActive ? plan.accentColor.opacity(0.4) : Color.clear, lineWidth: 1.5)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isActive ? plan.accentColor.opacity(0.15) : Color(.systemGray4).opacity(0.3), lineWidth: 1)
+                )
         )
     }
 }

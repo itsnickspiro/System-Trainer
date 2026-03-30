@@ -91,6 +91,9 @@ final class DataManager: ObservableObject {
 
         // Generate default daily quests if they don't exist
         generateDefaultDailyQuests()
+
+        // Award daily login GP bonus (once per day)
+        Task { await checkDailyLoginBonus() }
     }
     
     private func refreshTodaysQuests() {
@@ -139,22 +142,90 @@ final class DataManager: ObservableObject {
     
     func addXPToProfile(_ xp: Int, source: String = "General") {
         guard let profile = currentProfile else { return }
-        
+
+        // Apply active XP multipliers from equipped items and events
+        let storeMultiplier = StoreService.shared.activeXPMultiplier
+        let eventMultiplier = EventsService.shared.activeXPMultiplier
+        let scaledXP = xp > 0 ? Int(Double(xp) * storeMultiplier * eventMultiplier) : xp
+
         let oldLevel = profile.level
-        profile.addXP(xp)
-        
+        profile.addXP(scaledXP)
+
         // Check for level up
         if profile.level > oldLevel {
             handleLevelUp(from: oldLevel, to: profile.level)
         }
-        
+
         saveLocalChanges()
     }
-    
+
     private func handleLevelUp(from oldLevel: Int, to newLevel: Int) {
         print("Level up! \(oldLevel) -> \(newLevel)")
+        // Sync progress to cloud, award level-up GP, evaluate achievements, and update leaderboard
+        Task {
+            await PlayerProfileService.shared.syncProfile()
+            await PlayerProfileService.shared.syncIfStreakMilestone(
+                currentProfile?.currentStreak ?? 0
+            )
+            AchievementsService.shared.evaluate()
+
+            // Award GP for level-up
+            let rc = RemoteConfigService.shared
+            let levelUpBonus = rc.int("credits_per_level_up", default: 50)
+            if levelUpBonus > 0 {
+                await PlayerProfileService.shared.addCredits(
+                    amount: levelUpBonus,
+                    type: "level_up_bonus",
+                    referenceKey: "level_\(newLevel)"
+                )
+            }
+
+            // Update leaderboard with new level/XP
+            await LeaderboardService.shared.upsertEntry()
+        }
     }
-    
+    // MARK: - GP Bonus Helpers
+
+    /// Awards daily login GP bonus once per calendar day.
+    private func checkDailyLoginBonus() async {
+        let key = "rpt_last_daily_login_credit_date"
+        let today = Calendar.current.startOfDay(for: Date())
+        if let last = UserDefaults.standard.object(forKey: key) as? Date,
+           Calendar.current.isDate(last, inSameDayAs: today) { return }
+
+        let rc = RemoteConfigService.shared
+        let bonus = rc.int("credits_daily_login_bonus", default: 5)
+        if bonus > 0 {
+            await PlayerProfileService.shared.addCredits(amount: bonus, type: "daily_login")
+        }
+        UserDefaults.standard.set(today, forKey: key)
+    }
+
+    /// Awards GP for streak milestones (7-day and 30-day). Called after streak changes.
+    private func checkStreakMilestoneBonus(streak: Int) {
+        let rc = RemoteConfigService.shared
+        let milestones: [(threshold: Int, key: String, configKey: String)] = [
+            (7,  "rpt_streak_credit_7",  "credits_streak_bonus_7day"),
+            (30, "rpt_streak_credit_30", "credits_streak_bonus_30day"),
+        ]
+        for m in milestones {
+            guard streak == m.threshold else { continue }
+            let awarded = UserDefaults.standard.bool(forKey: "\(m.key)_\(streak)")
+            guard !awarded else { continue }
+            let bonus = rc.int(m.configKey, default: m.threshold == 7 ? 25 : 100)
+            if bonus > 0 {
+                Task {
+                    await PlayerProfileService.shared.addCredits(
+                        amount: bonus,
+                        type: "streak_bonus",
+                        referenceKey: "\(m.threshold)_day_streak"
+                    )
+                }
+                UserDefaults.standard.set(true, forKey: "\(m.key)_\(streak)")
+            }
+        }
+    }
+
     // MARK: - Quest Management
     func addQuest(_ quest: Quest) {
         guard let context = modelContext else { return }
@@ -178,13 +249,53 @@ final class DataManager: ObservableObject {
             if profile.exemptionPassCount > prevPassCount {
                 syncExemptionPassToInventory(profile: profile)
             }
+
+            // Check streak milestone GP bonuses
+            checkStreakMilestoneBonus(streak: profile.currentStreak)
         }
 
         // Haptic feedback for quest completion
         UINotificationFeedbackGenerator().notificationOccurred(.success)
 
+        // Increment the aggregate quests-completed counter for achievement evaluation
+        let questCount = UserDefaults.standard.integer(forKey: "rpt_total_quests_completed") + 1
+        UserDefaults.standard.set(questCount, forKey: "rpt_total_quests_completed")
+
         saveLocalChanges()
         refreshTodaysQuests()
+
+        // Evaluate achievements and report progress to events
+        AchievementsService.shared.evaluate()
+        Task { await EventsService.shared.updateAllEventProgress() }
+
+        // Award GP for quest completion and sync to activity/leaderboard backends
+        Task {
+            let rc = RemoteConfigService.shared
+            let baseCreditsPerQuest = rc.int("credits_quest_completion", default: 10)
+            let baseMultiplier = rc.float("credits_multiplier_base", default: 1.0)
+            let eventMultiplier = EventsService.shared.activeCreditMultiplier
+            let scaledAmount = Int(Double(baseCreditsPerQuest) * Double(baseMultiplier) * eventMultiplier)
+            if scaledAmount > 0 {
+                await PlayerProfileService.shared.addCredits(
+                    amount: scaledAmount,
+                    type: "quest_reward",
+                    referenceKey: quest.title
+                )
+            }
+
+            // Log streak day activity to Supabase
+            let totalQuests = UserDefaults.standard.integer(forKey: "rpt_quests_today") + 1
+            UserDefaults.standard.set(totalQuests, forKey: "rpt_quests_today")
+            await ActivitySyncService.shared.logStreakDay(
+                activityTypes: ["quest"],
+                questCount: totalQuests,
+                workoutCount: UserDefaults.standard.integer(forKey: "rpt_workouts_today"),
+                steps: currentProfile?.dailySteps ?? 0
+            )
+
+            // Update leaderboard with latest XP
+            await LeaderboardService.shared.upsertEntry()
+        }
     }
 
     /// Ensures the InventoryItem for hermitMiracleSeed matches profile.exemptionPassCount.
@@ -225,6 +336,28 @@ final class DataManager: ObservableObject {
         } catch {
             print("Failed to delete quest: \(error)")
         }
+    }
+
+    /// Delete a user-created quest, reversing XP/GP awards if it was already completed.
+    func deleteUserCreatedQuest(_ quest: Quest) {
+        guard quest.isUserCreated else { return }
+        if quest.isCompleted {
+            // Reverse XP
+            if let profile = currentProfile {
+                profile.subtractXP(quest.xpReward)
+            }
+            // Reverse GP (credits) via PlayerProfileService (negative amount = debit)
+            if quest.creditReward > 0 {
+                Task { @MainActor in
+                    await PlayerProfileService.shared.addCredits(
+                        amount: -quest.creditReward,
+                        type: "quest_deletion_reversal",
+                        referenceKey: quest.id.uuidString
+                    )
+                }
+            }
+        }
+        deleteQuest(quest)
     }
 
     // MARK: - Workout Quest Auto-Complete
@@ -273,6 +406,16 @@ final class DataManager: ObservableObject {
                 completed += 1
             }
         }
+
+        if completed > 0 {
+            // Increment workout counter for achievement evaluation
+            let workoutCount = UserDefaults.standard.integer(forKey: "rpt_total_workouts_logged") + 1
+            UserDefaults.standard.set(workoutCount, forKey: "rpt_total_workouts_logged")
+            // Evaluate achievements and report to events after workout
+            AchievementsService.shared.evaluate()
+            Task { await EventsService.shared.updateAllEventProgress() }
+        }
+
         return completed
     }
 
@@ -439,23 +582,24 @@ final class DataManager: ObservableObject {
     private func buildHealthDrivenQuests(for profile: Profile, on date: Date) -> [Quest] {
         var quests: [Quest] = []
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: date)
+        let rc = RemoteConfigService.shared
 
         // ── Steps ──────────────────────────────────────────────────────────────
-        let stepGoal = 10_000
+        let stepGoal = rc.int("daily_step_goal", default: 10_000)
         let stepGap = stepGoal - profile.dailySteps
         if stepGap > 5_000 {
             quests.append(Quest(
                 title: "Step Count Protocol",
                 details: "Reach \(stepGoal.formatted()) steps today. Current: \(profile.dailySteps.formatted()). Endurance stat will increase.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 75, statTarget: "endurance", dateTag: date
+                xpReward: rc.int("xp_steps_urgent", default: 75), statTarget: "endurance", dateTag: date
             ))
         } else {
             quests.append(Quest(
                 title: "Maintain Pace",
                 details: "Hit \(stepGoal.formatted()) steps. You're on track — keep moving.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 50, statTarget: "endurance", dateTag: date
+                xpReward: rc.int("xp_steps_normal", default: 50), statTarget: "endurance", dateTag: date
             ))
         }
 
@@ -465,42 +609,43 @@ final class DataManager: ObservableObject {
                 title: "Sleep Debt Recovery",
                 details: "Last night: \(String(format: "%.1f", profile.sleepHours))h. Sleep deficit detected. Achieve 8h tonight to restore Energy and Focus stats.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 100, statTarget: "energy", dateTag: date
+                xpReward: rc.int("xp_sleep_debt", default: 100), statTarget: "energy", dateTag: date
             ))
         } else if profile.sleepHours < 7.5 {
             quests.append(Quest(
                 title: "Rest Optimization",
                 details: "Sleep logged: \(String(format: "%.1f", profile.sleepHours))h. Target 8h for maximum stat recovery.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 60, statTarget: "energy", dateTag: date
+                xpReward: rc.int("xp_sleep_normal", default: 60), statTarget: "energy", dateTag: date
             ))
         }
 
         // ── Active Calories ────────────────────────────────────────────────────
-        let calGoal = 400
+        let calGoal = rc.int("daily_active_calories_goal", default: 400)
         if profile.dailyActiveCalories < calGoal / 2 {
             quests.append(Quest(
                 title: "Burn Protocol — URGENT",
                 details: "Active calories today: \(profile.dailyActiveCalories) kcal. Target: \(calGoal) kcal. Complete any 30-min workout.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 120, statTarget: "strength", dateTag: date
+                xpReward: rc.int("xp_calories_urgent", default: 120), statTarget: "strength", dateTag: date
             ))
         } else if profile.dailyActiveCalories < calGoal {
             quests.append(Quest(
                 title: "Burn Target",
                 details: "Active calories: \(profile.dailyActiveCalories)/\(calGoal) kcal. Close the gap with a workout session.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 80, statTarget: "strength", dateTag: date
+                xpReward: rc.int("xp_calories_normal", default: 80), statTarget: "strength", dateTag: date
             ))
         }
 
         // ── Resting Heart Rate ────────────────────────────────────────────────
-        if profile.restingHeartRate > 75 {
+        let hrThreshold = rc.int("resting_hr_threshold", default: 75)
+        if profile.restingHeartRate > hrThreshold {
             quests.append(Quest(
                 title: "Cardiovascular Conditioning",
-                details: "Resting HR: \(profile.restingHeartRate) bpm — above optimal. 20 minutes of zone-2 cardio will improve Health stat.",
+                details: "Resting HR: \(profile.restingHeartRate) bpm — above optimal (>\(hrThreshold) bpm). 20 minutes of zone-2 cardio will improve Health stat.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 90, statTarget: "health", dateTag: date
+                xpReward: rc.int("xp_cardio_conditioning", default: 90), statTarget: "health", dateTag: date
             ))
         }
 
@@ -509,16 +654,17 @@ final class DataManager: ObservableObject {
             title: "Daily Discipline Check",
             details: "Current streak: \(profile.currentStreak) days. Log at least one meal and complete one quest before midnight.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: 50, statTarget: "discipline", dateTag: date
+            xpReward: rc.int("xp_discipline_check", default: 50), statTarget: "discipline", dateTag: date
         ))
 
         // ── Low stat — Focus ──────────────────────────────────────────────────
-        if profile.focus < 40 {
+        let focusThreshold = rc.int("focus_low_threshold", default: 40)
+        if profile.focus < Double(focusThreshold) {
             quests.append(Quest(
                 title: "Cognitive Training",
                 details: "Focus stat is low (\(Int(profile.focus))/100). Meditate for 10 minutes or complete a focused deep-work session.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: 70, statTarget: "focus", dateTag: date
+                xpReward: rc.int("xp_cognitive_training", default: 70), statTarget: "focus", dateTag: date
             ))
         }
 
@@ -541,21 +687,28 @@ final class DataManager: ObservableObject {
             trainingFocus = "Active Recovery"
             trainingDetails = "Light movement day — stretching, mobility, yoga, or a slow walk. Let your body recover and adapt."
         }
+        let trainingBaseXP = rc.int("xp_daily_training_base", default: 100)
         quests.append(Quest(
             title: "Daily Training: \(trainingFocus)",
             details: "\(tier.rank.displayName) Protocol — \(trainingDetails)\nComplete any logged workout to auto-check this quest.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: Int(100.0 * tier.xpMultiplier), statTarget: "strength", dateTag: date
+            xpReward: Int(Double(trainingBaseXP) * tier.xpMultiplier), statTarget: "strength", dateTag: date
         ))
 
         // ── Guaranteed: Nutrition Log — always present ─────────────────────────
+        let nutritionBaseXP = rc.int("xp_nutrition_log_base", default: 50)
         quests.append(Quest(
             title: "Nutrition Log",
             details: "Log all meals for today in the Diary tab. Hitting your calorie and protein goals awards full XP.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: Int(50.0 * tier.xpMultiplier), statTarget: "discipline", dateTag: date
+            xpReward: Int(Double(nutritionBaseXP) * tier.xpMultiplier), statTarget: "discipline", dateTag: date
         ))
 
+        // ── Cap to max_daily_quests if configured ─────────────────────────────
+        let maxQuests = rc.int("max_daily_quests", default: 0)
+        if maxQuests > 0 && quests.count > maxQuests {
+            return Array(quests.prefix(maxQuests))
+        }
         return quests
     }
     

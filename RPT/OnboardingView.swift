@@ -32,11 +32,12 @@ struct OnboardingView: View {
     @State private var selectedGoal: FitnessGoal       = .generalHealth
     @State private var selectedGym: GymEnvironment     = .fullGym
     @State private var ageText             = "25"
-    @State private var heightText          = "170"
-    @State private var weightText          = "70"
+    @State private var heightText          = "170"   // always stored in cm internally
+    @State private var weightText          = "70"    // always stored in kg internally
     @State private var activityLevelIndex  = 1
     @State private var selectedAvatarKey: String?      = nil
     @State private var selectedPlanID: String?         = nil   // nil = skip / custom
+    @State private var useMetric: Bool = (Locale.current.measurementSystem == .metric)
 
     // ── Services ──────────────────────────────────────────────────────────────
     @StateObject private var healthManager       = HealthManager()
@@ -53,6 +54,12 @@ struct OnboardingView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
+                // DEBUG: confirm OnboardingView is rendering
+                Text("Step \(currentStep)")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .padding(.top, 8)
+
                 // Progress bar (hidden on boot and ready screens)
                 if !noProgressBarSteps.contains(currentStep) {
                     progressBar
@@ -77,6 +84,7 @@ struct OnboardingView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(.dark)
     }
 
@@ -132,7 +140,9 @@ struct OnboardingView: View {
     @ViewBuilder
     private var stepContent: some View {
         switch currentStep {
-        case 0:  BootStepView()
+        case 0:  BootStepView(onBegin: {
+                     withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
+                 })
         case 1:  NameStepView(profileName: $profileName)
         case 2:  GenderStepView(selectedGender: $selectedGender)
         case 3:  GoalStepView(selectedGoal: $selectedGoal)
@@ -141,6 +151,7 @@ struct OnboardingView: View {
                     heightText: $heightText,
                     weightText: $weightText,
                     activityLevelIndex: $activityLevelIndex,
+                    useMetric: $useMetric,
                     selectedGender: selectedGender,
                     selectedGoal: selectedGoal
                  )
@@ -230,8 +241,9 @@ struct OnboardingView: View {
         profile.gender             = selectedGender
         profile.gymEnvironment     = selectedGym
         profile.age                = age
-        profile.height             = height
-        profile.weight             = weight
+        profile.height             = height   // stored in cm
+        profile.weight             = weight   // stored in kg
+        profile.useMetric          = useMetric
         profile.activityLevelIndex = activityLevelIndex
         if let planID = selectedPlanID, !planID.isEmpty {
             profile.activePlanID = planID
@@ -265,6 +277,8 @@ struct OnboardingView: View {
 // MARK: - Step 0: Boot / Welcome
 
 private struct BootStepView: View {
+    let onBegin: () -> Void
+
     @State private var pulse = false
     @State private var glowOpacity: Double = 0.3
 
@@ -284,50 +298,47 @@ private struct BootStepView: View {
                     )
             }
 
-            VStack(spacing: 48) {
+            VStack(spacing: 0) {
                 Spacer()
 
+                // Title block — always visible, no opacity gate
                 VStack(spacing: 16) {
                     Text("SYSTEM TRAINER")
-                        .font(.system(size: 32, weight: .black, design: .monospaced))
+                        .font(.system(size: 36, weight: .black, design: .monospaced))
                         .foregroundColor(.white)
-                        .shadow(color: .cyan.opacity(0.6), radius: 16)
+                        .shadow(color: .cyan.opacity(0.7), radius: 20)
+                        .multilineTextAlignment(.center)
 
                     Text("TRAIN. LEVEL UP. ASCEND.")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.cyan.opacity(0.7))
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.cyan.opacity(0.8))
                         .tracking(4)
                 }
 
                 Spacer()
-                Spacer()
 
-                // Begin button
-                VStack(spacing: 0) { }
-                    .frame(height: 80)
-            }
-            .padding(.horizontal, 24)
-
-            // Begin button pinned to bottom
-            VStack {
-                Spacer()
-                // Handled by parent's navigationButtons — but boot step has no nav bar.
-                // We inject it inline here for the special full-screen layout.
-                BootBeginButtonPlaceholder()
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 40)
+                // BEGIN button — always visible, no opacity gate
+                Button(action: onBegin) {
+                    Text("BEGIN")
+                        .font(.system(size: 18, weight: .black, design: .monospaced))
+                        .foregroundColor(.black)
+                        .tracking(6)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.cyan)
+                                .shadow(color: .cyan.opacity(0.6), radius: 16)
+                        )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 56)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { pulse = true; glowOpacity = 0.3 }
+        .onAppear { pulse = true }
     }
-}
-
-// We can't call parent's handleAdvance from a sub-view directly, so the boot
-// step's "Begin" button is handled in OnboardingView via the unified nav area.
-// This placeholder keeps the layout correct.
-private struct BootBeginButtonPlaceholder: View {
-    var body: some View { EmptyView() }
 }
 
 // MARK: - Step 1: Name
@@ -523,11 +534,17 @@ private struct GoalCard: View {
 
 private struct BodyStatsStepView: View {
     @Binding var ageText: String
-    @Binding var heightText: String
-    @Binding var weightText: String
+    @Binding var heightText: String   // always cm internally
+    @Binding var weightText: String   // always kg internally
     @Binding var activityLevelIndex: Int
+    @Binding var useMetric: Bool
     let selectedGender: PlayerGender
     let selectedGoal: FitnessGoal
+
+    // Imperial display fields — derived from/converted to the metric bindings
+    @State private var ftText: String = "5"
+    @State private var inText: String = "7"
+    @State private var lbsText: String = "154"
 
     private let activityOptions: [(label: String, icon: String, subtitle: String)] = [
         ("Sedentary",         "sofa.fill",          "Little to no exercise"),
@@ -557,6 +574,26 @@ private struct BodyStatsStepView: View {
         }
     }
 
+    // Sync imperial fields from metric bindings when switching to imperial
+    private func populateImperialFromMetric() {
+        let cm = Double(heightText) ?? 170.0
+        let totalInches = cm / 2.54
+        ftText = "\(Int(totalInches / 12))"
+        inText = "\(Int(totalInches.truncatingRemainder(dividingBy: 12)))"
+        let kg = Double(weightText) ?? 70.0
+        lbsText = String(format: "%.0f", kg * 2.20462)
+    }
+
+    // Write imperial fields back to metric bindings
+    private func commitImperialToMetric() {
+        let ft = Double(ftText) ?? 5
+        let inches = Double(inText) ?? 7
+        let totalCm = (ft * 12 + inches) * 2.54
+        heightText = String(format: "%.0f", totalCm)
+        let lbs = Double(lbsText) ?? 154
+        weightText = String(format: "%.1f", lbs / 2.20462)
+    }
+
     var body: some View {
         OnboardingStepShell(
             icon: "person.text.rectangle.fill",
@@ -565,11 +602,37 @@ private struct BodyStatsStepView: View {
             subtitle: "Used to calculate your calorie target and quest intensity."
         ) {
             VStack(spacing: 14) {
+                // Unit toggle
+                Picker("Units", selection: $useMetric) {
+                    Text("Imperial").tag(false)
+                    Text("Metric").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: useMetric) { _, isMetric in
+                    if !isMetric {
+                        populateImperialFromMetric()
+                    } else {
+                        commitImperialToMetric()
+                    }
+                }
+
                 // Age / Height / Weight
-                HStack(spacing: 12) {
-                    StatField(label: "AGE", placeholder: "25", unit: "yrs", text: $ageText)
-                    StatField(label: "HEIGHT", placeholder: "170", unit: "cm", text: $heightText)
-                    StatField(label: "WEIGHT", placeholder: "70", unit: "kg", text: $weightText)
+                if useMetric {
+                    HStack(spacing: 12) {
+                        StatField(label: "AGE", placeholder: "25", unit: "yrs", text: $ageText)
+                        StatField(label: "HEIGHT", placeholder: "170", unit: "cm", text: $heightText)
+                        StatField(label: "WEIGHT", placeholder: "70", unit: "kg", text: $weightText)
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        StatField(label: "AGE", placeholder: "25", unit: "yrs", text: $ageText)
+                        StatField(label: "FT", placeholder: "5", unit: "ft", text: $ftText)
+                            .onChange(of: ftText) { _, _ in commitImperialToMetric() }
+                        StatField(label: "IN", placeholder: "7", unit: "in", text: $inText)
+                            .onChange(of: inText) { _, _ in commitImperialToMetric() }
+                        StatField(label: "WEIGHT", placeholder: "154", unit: "lbs", text: $lbsText)
+                            .onChange(of: lbsText) { _, _ in commitImperialToMetric() }
+                    }
                 }
 
                 // Activity level cards
@@ -1121,7 +1184,7 @@ private struct GPExplainerStepView: View {
 
     var body: some View {
         OnboardingStepShell(
-            icon: "bitcoinsign.circle.fill",
+            icon: "dollarsign.circle.fill",
             iconColor: Color(red: 1.0, green: 0.8, blue: 0.0),
             title: "Gold Pieces",
             subtitle: "The in-game currency that powers your progression."

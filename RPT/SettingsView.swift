@@ -4,13 +4,19 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var profiles: [Profile]
-    @StateObject private var dataManager = DataManager.shared
+    @ObservedObject private var dataManager = DataManager.shared
     @State private var showingHealthSettings = false
     @State private var showingProfileEditor = false
     @State private var showingResetConfirmation = false
     @State private var showingBodyMetrics = false
     @State private var showingAchievements = false
+    @State private var showingStore = false
+    @State private var showingInventory = false
+    @State private var showingCreditHistory = false
+    @ObservedObject private var playerProfile = PlayerProfileService.shared
+    @ObservedObject private var storeService = StoreService.shared
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
+    @State private var copiedPlayerID = false
     
     var profile: Profile {
         if let p = profiles.first { return p }
@@ -24,10 +30,12 @@ struct SettingsView: View {
             List {
                 // Profile Section
                 Section("Player Profile") {
-                    ProfileSummaryRow(profile: profile)
-                        .onTapGesture {
-                            showingProfileEditor = true
-                        }
+                    Button {
+                        showingProfileEditor = true
+                    } label: {
+                        ProfileSummaryRow(profile: profile)
+                    }
+                    .buttonStyle(.plain)
                     
                     Button {
                         showingAchievements = true
@@ -66,8 +74,104 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundColor(.primary)
+
+                    // Store
+                    Button {
+                        showingStore = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "bag.fill")
+                                .foregroundColor(.orange)
+                            VStack(alignment: .leading) {
+                                Text("Item Shop")
+                                Text("Browse and buy items with XP")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+
+                    // Inventory
+                    Button {
+                        showingInventory = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "backpack.fill")
+                                .foregroundColor(.teal)
+                            VStack(alignment: .leading) {
+                                Text("Inventory")
+                                Text("Equipped items and consumables")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+
+                    // Player ID row — tap anywhere to copy
+                    Button {
+                        guard !playerProfile.playerId.isEmpty else { return }
+                        UIPasteboard.general.string = playerProfile.playerId
+                        withAnimation { copiedPlayerID = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation { copiedPlayerID = false }
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: "person.badge.key.fill")
+                                .foregroundColor(.purple)
+                            VStack(alignment: .leading) {
+                                Text("Player ID")
+                                Text(copiedPlayerID ? "Copied!" : "Tap to copy")
+                                    .font(.caption)
+                                    .foregroundColor(copiedPlayerID ? .green : .secondary)
+                                    .animation(.easeInOut(duration: 0.2), value: copiedPlayerID)
+                            }
+                            Spacer()
+                            let pid = playerProfile.playerId.isEmpty ? "Loading…" : playerProfile.playerId
+                            Text(pid)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            Image(systemName: copiedPlayerID ? "checkmark.circle.fill" : "doc.on.doc")
+                                .font(.caption)
+                                .foregroundColor(copiedPlayerID ? .green : .accentColor)
+                                .animation(.easeInOut(duration: 0.2), value: copiedPlayerID)
+                        }
+                    }
+                    .disabled(playerProfile.playerId.isEmpty)
+
+                    // Gold Pieces balance row
+                    Button {
+                        showingCreditHistory = true
+                    } label: {
+                        HStack {
+                            Image(systemName: storeService.currencyIcon)
+                                .foregroundColor(.orange)
+                            VStack(alignment: .leading) {
+                                Text("\(storeService.currencyName) Balance")
+                                Text("View transaction history")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text("\(playerProfile.systemCredits.formatted()) \(storeService.currencySymbol)")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.orange)
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundColor(.primary)
                 }
-                
+
                 // Health Integration Section
                 Section("Health Integration") {
                     HStack {
@@ -208,6 +312,15 @@ struct SettingsView: View {
             .sheet(isPresented: $showingAchievements) {
                 AchievementsView()
             }
+            .sheet(isPresented: $showingStore) {
+                StoreView()
+            }
+            .sheet(isPresented: $showingInventory) {
+                InventoryView()
+            }
+            .sheet(isPresented: $showingCreditHistory) {
+                CreditHistoryView()
+            }
             .confirmationDialog(
                 "Reset All Data",
                 isPresented: $showingResetConfirmation,
@@ -262,17 +375,15 @@ struct SettingsView: View {
 
 struct ProfileSummaryRow: View {
     let profile: Profile
-    
+    @ObservedObject private var avatarService = AvatarService.shared
+
     var body: some View {
         HStack(spacing: 12) {
             // Avatar
-            Circle()
-                .fill(LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 50, height: 50)
+            AvatarImageView(key: avatarService.current?.key ?? "avatar_default", size: 50)
                 .overlay(
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.white)
+                    Circle()
+                        .stroke(avatarService.current?.color ?? .cyan, lineWidth: 2)
                 )
             
             VStack(alignment: .leading, spacing: 2) {
@@ -294,6 +405,8 @@ struct ProfileSummaryRow: View {
             Image(systemName: "chevron.right")
                 .foregroundColor(.secondary)
         }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 }
 
@@ -369,6 +482,7 @@ struct AppearanceSettingsView: View {
             }
         }
         .navigationTitle("Appearance")
+        .id(colorScheme)
         .preferredColorScheme(colorScheme == "auto" ? nil : (colorScheme == "dark" ? .dark : .light))
     }
 }

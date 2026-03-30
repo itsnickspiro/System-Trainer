@@ -15,14 +15,7 @@ struct RPTApp: App {
     @State private var hasBootedUp = false
     @State private var notificationManager = NotificationManager()
 
-    // MARK: - Black-screen safety fallback
-    //
-    // After the boot screen fires onComplete(), we expect ContentView or OnboardingView
-    // to appear immediately. If somehow the view remains black for 2 seconds (e.g. due
-    // to a SwiftUI state race on certain OS versions), we break the stuck state by
-    // briefly resetting hasBootedUp and re-setting it on the next run loop tick.
-    @State private var bootCompletedAt: Date? = nil
-    @State private var safetyFallbackArmed = false
+
 
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
@@ -90,7 +83,7 @@ struct RPTApp: App {
 
     var body: some Scene {
         WindowGroup {
-            // RootContainer is a stable wrapper whose identity never changes.
+            // RootContainerView is a stable wrapper whose identity never changes.
             // The .task is attached here so it is never cancelled when the inner
             // view switches between BootScreenView → OnboardingView → ContentView.
             // Previously the .task was on the Group, which got cancelled and
@@ -153,32 +146,10 @@ struct RPTApp: App {
         .modelContainer(sharedModelContainer)
     }
 
-    // MARK: - Boot Completion + Safety Fallback
+    // MARK: - Boot Completion
 
     private func handleBootComplete() {
         hasBootedUp = true
-        bootCompletedAt = Date()
-
-        // Arm a 2-second safety fallback. If the view is still black at that point
-        // (detectable because bootCompletedAt is still set — meaning ContentView's
-        // onAppear has not cleared it), we cycle hasBootedUp to break any stuck state.
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            // If bootCompletedAt is still non-nil, ContentView never called onAppear
-            // and the screen is likely black. Reset the boot flag on the next tick.
-            if bootCompletedAt != nil {
-                print("[RPTApp] Safety fallback triggered — resetting boot state.")
-                hasBootedUp = false
-                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-                hasBootedUp = true
-            }
-        }
-    }
-
-    // Called by ContentView.onAppear to signal that the UI rendered successfully.
-    static func signalContentViewAppeared() {
-        // Posts a notification that RPTApp observes to disarm the fallback.
-        NotificationCenter.default.post(name: .rptContentViewAppeared, object: nil)
     }
 
     // MARK: - Deep Links
@@ -262,8 +233,7 @@ private struct RootContainerView: View {
     let modelContainer: ModelContainer
     let onBootComplete: () -> Void
 
-    // Disarm the safety fallback once ContentView appears.
-    @State private var contentViewHasAppeared = false
+    @State private var didSeedData = false
 
     var body: some View {
         Group {
@@ -273,11 +243,8 @@ private struct RootContainerView: View {
             } else if isOnboardingComplete {
                 ContentView()
                     .onAppear {
-                        guard !contentViewHasAppeared else { return }
-                        contentViewHasAppeared = true
-                        // Signal the safety fallback that the UI rendered — disarm it.
-                        NotificationCenter.default.post(name: .rptContentViewAppeared, object: nil)
-                        // Seed local data now that we have a model context
+                        guard !didSeedData else { return }
+                        didSeedData = true
                         let ctx = modelContainer.mainContext
                         SampleFoodData.createSampleFoods(context: ctx)
                         SystemDataSeeder.seedIfNeeded(context: ctx)
@@ -286,20 +253,5 @@ private struct RootContainerView: View {
                 OnboardingView(isOnboardingComplete: $isOnboardingComplete)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .rptContentViewAppeared)) { _ in
-            // Disarm the safety fallback by posting back to RPTApp via state.
-            // RPTApp observes this notification in handleBootComplete's Task.
-            // We signal by posting — RPTApp's Task checks bootCompletedAt.
-            // Setting contentViewHasAppeared here too for local guard above.
-            contentViewHasAppeared = true
-        }
     }
-}
-
-// MARK: - Notification names
-
-extension Notification.Name {
-    /// Posted by RootContainerView when ContentView's onAppear fires.
-    /// RPTApp uses this to disarm the black-screen safety fallback.
-    static let rptContentViewAppeared = Notification.Name("rptContentViewAppeared")
 }

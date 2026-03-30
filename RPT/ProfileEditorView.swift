@@ -20,6 +20,10 @@ struct ProfileEditorView: View {
     
     @State private var isEditingHeight = false
     @State private var isEditingWeight = false
+    @State private var showingAvatarPicker = false
+    @State private var showingPlanPicker = false
+    @ObservedObject private var avatarService = AvatarService.shared
+    @ObservedObject private var planService = AnimeWorkoutPlanService.shared
     
     @State private var weightUnit: WeightUnit = (Locale.current.measurementSystem == .metric) ? .metric : .imperial
     @State private var weightKilograms: Int = 75
@@ -84,6 +88,32 @@ struct ProfileEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Avatar picker section
+                Section {
+                    HStack {
+                        Spacer()
+                        Button {
+                            showingAvatarPicker = true
+                        } label: {
+                            VStack(spacing: 8) {
+                                AvatarImageView(key: avatarService.current?.key ?? "avatar_default", size: 72)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(avatarService.current?.color ?? .cyan, lineWidth: 3)
+                                    )
+                                Text("Change Avatar")
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                .sheet(isPresented: $showingAvatarPicker) {
+                    AvatarPickerView()
+                }
+
                 Section("Basic Information") {
                     HStack {
                         Text("Name")
@@ -249,6 +279,38 @@ struct ProfileEditorView: View {
                     StatRow(title: "Best Streak", value: "\(profile.bestStreak) days")
                 }
                 
+                Section("Training Program") {
+                    Button {
+                        showingPlanPicker = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            if let plan = planService.plan(id: profile.activePlanID) {
+                                Image(systemName: plan.iconSymbol)
+                                    .foregroundColor(plan.accentColor)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(plan.character)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(plan.anime)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            } else {
+                                Image(systemName: "figure.martial.arts")
+                                    .foregroundColor(.orange)
+                                    .frame(width: 24)
+                                Text("No program selected")
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text("Change")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
+
                 Section("RPG Attributes") {
                     StatRow(title: "Health", value: "\(Int(profile.health))/100")
                     StatRow(title: "Energy", value: "\(Int(profile.energy))/100")
@@ -276,6 +338,26 @@ struct ProfileEditorView: View {
             }
         }
         .preferredColorScheme(nil)
+        .sheet(isPresented: $showingPlanPicker) {
+            AnimePlanPickerView(
+                activePlanID: Binding(
+                    get: { profile.activePlanID },
+                    set: { newID in
+                        profile.activePlanID = newID
+                        try? modelContext.save()
+                    }
+                ),
+                playerGender: profile.gender,
+                onConfirmSwitch: { newID in
+                    profile.activePlanID = newID
+                    profile.xp = 0
+                    profile.level = 1
+                    profile.currentStreak = 0
+                    profile.bestStreak = 0
+                    try? modelContext.save()
+                }
+            )
+        }
     }
     
     private func saveProfile() {

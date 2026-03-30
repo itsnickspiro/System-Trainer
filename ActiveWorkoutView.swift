@@ -261,6 +261,28 @@ struct ActiveWorkoutView: View {
         // Clear autosave since the workout is finished
         WorkoutAutosaveManager.shared.clearSave()
 
+        // Sync workout to Supabase activity log
+        let completedSets = setStates.values.flatMap { $0 }.filter { $0.isComplete }
+        let exerciseCount = setStates.keys.count
+        let workoutsToday = UserDefaults.standard.integer(forKey: "rpt_workouts_today") + 1
+        UserDefaults.standard.set(workoutsToday, forKey: "rpt_workouts_today")
+        Task {
+            await ActivitySyncService.shared.logWorkout(
+                type: "strength",
+                durationMinutes: session.durationMinutes,
+                exercisesCount: exerciseCount,
+                setsCount: completedSets.count,
+                volumeKg: session.totalVolumeKg
+            )
+            await ActivitySyncService.shared.logStreakDay(
+                activityTypes: ["workout"],
+                questCount: UserDefaults.standard.integer(forKey: "rpt_quests_today"),
+                workoutCount: workoutsToday,
+                steps: DataManager.shared.currentProfile?.dailySteps ?? 0
+            )
+            await LeaderboardService.shared.upsertEntry()
+        }
+
         // End the Live Activity
         WorkoutActivityManager.shared.end(
             totalVolumeKg: session.totalVolumeKg,

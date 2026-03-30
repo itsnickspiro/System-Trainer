@@ -7,6 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0113FAD02F74134000FE951D /* CreditHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FACF2F74134000FE951D /* CreditHistoryView.swift */; };
+		0113FAD12F74134000FE951D /* CreditHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FACF2F74134000FE951D /* CreditHistoryView.swift */; };
+		0113FAD22F74134000FE951D /* CreditHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FACF2F74134000FE951D /* CreditHistoryView.swift */; };
+		0113FAD42F74149000FE951D /* LeaderboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FAD32F74149000FE951D /* LeaderboardService.swift */; };
+		0113FAD52F74149000FE951D /* LeaderboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FAD32F74149000FE951D /* LeaderboardService.swift */; };
+		0113FAD62F74149000FE951D /* LeaderboardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FAD32F74149000FE951D /* LeaderboardService.swift */; };
+		0113FAD82F74156F00FE951D /* ActivitySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FAD72F74156F00FE951D /* ActivitySyncService.swift */; };
+		0113FAD92F74156F00FE951D /* ActivitySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FAD72F74156F00FE951D /* ActivitySyncService.swift */; };
+		0113FADA2F74156F00FE951D /* ActivitySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FAD72F74156F00FE951D /* ActivitySyncService.swift */; };
+		0113FADC2F74185900FE951D /* AvatarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FADB2F74185900FE951D /* AvatarService.swift */; };
+		0113FADD2F74185900FE951D /* AvatarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FADB2F74185900FE951D /* AvatarService.swift */; };
+		0113FADE2F74185900FE951D /* AvatarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FADB2F74185900FE951D /* AvatarService.swift */; };
+		0113FAE02F7418AF00FE951D /* AvatarPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FADF2F7418AF00FE951D /* AvatarPickerView.swift */; };
+		0113FAE12F7418AF00FE951D /* AvatarPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FADF2F7418AF00FE951D /* AvatarPickerView.swift */; };
+		0113FAE22F7418AF00FE951D /* AvatarPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0113FADF2F7418AF00FE951D /* AvatarPickerView.swift */; };
 		013B98272F70787200F50F41 /* AnimeWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98262F70787200F50F41 /* AnimeWorkouts.swift */; };
 		013B98282F70787200F50F41 /* AnimeWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98262F70787200F50F41 /* AnimeWorkouts.swift */; };
 		013B98292F70787200F50F41 /* AnimeWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013B98262F70787200F50F41 /* AnimeWorkouts.swift */; };
@@ -18,15 +33,6 @@
 		017301D12F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */; };
 		0176B6D62EAC6D5400ADF2A8 /* WorkoutKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; };
 		0176B6D72EAC6D5400ADF2A8 /* WorkoutKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 0176B6D42EAC6D5000ADF2A8 /* WorkoutKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		01BC56A42ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
-		01BC56A52ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
-		01BC56A62ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */; };
-		01BC56A82ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */; };
-		01BC56A92ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */; };
-		01BC56AA2ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */ = {isa = PBXBuildFile; fileRef = 01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */; };
-		01CB9C772F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C762F5BA0CD000CF421 /* SystemDataSeeder.swift */; };
-		01CB9C782F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C762F5BA0CD000CF421 /* SystemDataSeeder.swift */; };
-		01CB9C792F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C762F5BA0CD000CF421 /* SystemDataSeeder.swift */; };
 		01CB9C7B2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C7A2F5BA11E000CF421 /* InventoryAndShopView.swift */; };
 		01CB9C7C2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C7A2F5BA11E000CF421 /* InventoryAndShopView.swift */; };
 		01CB9C7D2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C7A2F5BA11E000CF421 /* InventoryAndShopView.swift */; };
@@ -73,6 +79,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0113FACF2F74134000FE951D /* CreditHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditHistoryView.swift; sourceTree = "<group>"; };
+		0113FAD32F74149000FE951D /* LeaderboardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderboardService.swift; sourceTree = "<group>"; };
+		0113FAD72F74156F00FE951D /* ActivitySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivitySyncService.swift; sourceTree = "<group>"; };
+		0113FADB2F74185900FE951D /* AvatarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarService.swift; sourceTree = "<group>"; };
+		0113FADF2F7418AF00FE951D /* AvatarPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarPickerView.swift; sourceTree = "<group>"; };
 		011D8F8E2EA40A0100609E51 /* RPT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RPT.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		011D8F9D2EA40A0200609E51 /* RPTTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		011D8FA72EA40A0200609E51 /* RPTUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RPTUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -84,9 +95,7 @@
 		0176B6DE2EAC6D8600ADF2A8 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		0176B6E52EAC6DCC00ADF2A8 /* PhotosUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PhotosUI.framework; path = System/Library/Frameworks/PhotosUI.framework; sourceTree = SDKROOT; };
 		0176B6E62EAC6DCC00ADF2A8 /* Photos.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Photos.framework; path = System/Library/Frameworks/Photos.framework; sourceTree = SDKROOT; };
-		01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ARCHITECTURE_AND_DATA_FLOW.md; sourceTree = "<group>"; };
-		01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = IMMEDIATE_ACTION_PLAN.md; sourceTree = "<group>"; };
-		01CB9C762F5BA0CD000CF421 /* SystemDataSeeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemDataSeeder.swift; sourceTree = "<group>"; };
+		01A16F852F7335CD003503E8 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		01CB9C7A2F5BA11E000CF421 /* InventoryAndShopView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryAndShopView.swift; sourceTree = "<group>"; };
 		01CB9C7E2F5BA384000CF421 /* PatrolMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatrolMapView.swift; sourceTree = "<group>"; };
 		01CB9C822F5BA3D2000CF421 /* ActiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveWorkoutView.swift; sourceTree = "<group>"; };
@@ -98,6 +107,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				ProgressChartsView.swift,
+				SystemDataSeeder.swift,
 			);
 			target = 011D8F9C2EA40A0200609E51 /* RPTTests */;
 		};
@@ -105,6 +115,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				ProgressChartsView.swift,
+				SystemDataSeeder.swift,
 			);
 			target = 011D8FA62EA40A0200609E51 /* RPTUITests */;
 		};
@@ -126,16 +137,6 @@
 				013B983B2F70D20000F50F41 /* Exceptions for "RPT" folder in "RPTUITests" target */,
 			);
 			path = RPT;
-			sourceTree = "<group>";
-		};
-		011D8FA02EA40A0200609E51 /* RPTTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = RPTTests;
-			sourceTree = "<group>";
-		};
-		011D8FAA2EA40A0200609E51 /* RPTUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = RPTUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -170,14 +171,8 @@
 			isa = PBXGroup;
 			children = (
 				011D8F902EA40A0100609E51 /* RPT */,
-				011D8FA02EA40A0200609E51 /* RPTTests */,
-				011D8FAA2EA40A0200609E51 /* RPTUITests */,
 				0176B6D12EAC6D2900ADF2A8 /* Frameworks */,
 				011D8F8F2EA40A0100609E51 /* Products */,
-				01BC56A32ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md */,
-				01BC56A72ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md */,
-				012AF5AE2F59239A00023971 /* Recovered References */,
-				01CB9C762F5BA0CD000CF421 /* SystemDataSeeder.swift */,
 				01CB9C7A2F5BA11E000CF421 /* InventoryAndShopView.swift */,
 				01CB9C7E2F5BA384000CF421 /* PatrolMapView.swift */,
 				01CB9C822F5BA3D2000CF421 /* ActiveWorkoutView.swift */,
@@ -185,6 +180,12 @@
 				013B98262F70787200F50F41 /* AnimeWorkouts.swift */,
 				013B982E2F70C6F700F50F41 /* AchievementManager.swift */,
 				017301CE2F71D6F500696295 /* ImpossibleDayDetector.swift */,
+				01A16F852F7335CD003503E8 /* Secrets.xcconfig */,
+				0113FACF2F74134000FE951D /* CreditHistoryView.swift */,
+				0113FAD32F74149000FE951D /* LeaderboardService.swift */,
+				0113FAD72F74156F00FE951D /* ActivitySyncService.swift */,
+				0113FADB2F74185900FE951D /* AvatarService.swift */,
+				0113FADF2F7418AF00FE951D /* AvatarPickerView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -196,13 +197,6 @@
 				011D8FA72EA40A0200609E51 /* RPTUITests.xctest */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		012AF5AE2F59239A00023971 /* Recovered References */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 		0176B6D12EAC6D2900ADF2A8 /* Frameworks */ = {
@@ -256,9 +250,6 @@
 			dependencies = (
 				011D8F9F2EA40A0200609E51 /* PBXTargetDependency */,
 			);
-			fileSystemSynchronizedGroups = (
-				011D8FA02EA40A0200609E51 /* RPTTests */,
-			);
 			name = RPTTests;
 			packageProductDependencies = (
 			);
@@ -279,9 +270,6 @@
 			dependencies = (
 				011D8FA92EA40A0200609E51 /* PBXTargetDependency */,
 			);
-			fileSystemSynchronizedGroups = (
-				011D8FAA2EA40A0200609E51 /* RPTUITests */,
-			);
 			name = RPTUITests;
 			packageProductDependencies = (
 			);
@@ -297,7 +285,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2600;
-				LastUpgradeCheck = 2610;
+				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					011D8F8D2EA40A0100609E51 = {
 						CreatedOnToolsVersion = 26.0.1;
@@ -338,8 +326,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				01BC56A62ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */,
-				01BC56AA2ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -347,8 +333,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				01BC56A42ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */,
-				01BC56A82ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -356,8 +340,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				01BC56A52ED63D2C00BAE0CD /* ARCHITECTURE_AND_DATA_FLOW.md in Resources */,
-				01BC56A92ED63D6500BAE0CD /* IMMEDIATE_ACTION_PLAN.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -372,10 +354,14 @@
 				017301D02F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */,
 				013B98282F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
 				013B982F2F70C6F700F50F41 /* AchievementManager.swift in Sources */,
+				0113FAD22F74134000FE951D /* CreditHistoryView.swift in Sources */,
+				0113FAE12F7418AF00FE951D /* AvatarPickerView.swift in Sources */,
+				0113FAD42F74149000FE951D /* LeaderboardService.swift in Sources */,
+				0113FAD82F74156F00FE951D /* ActivitySyncService.swift in Sources */,
+				0113FADC2F74185900FE951D /* AvatarService.swift in Sources */,
 				01CB9C852F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
 				01CB9C7C2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
 				01CB9C802F5BA384000CF421 /* PatrolMapView.swift in Sources */,
-				01CB9C772F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -385,10 +371,14 @@
 			files = (
 				013B98292F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
 				01CB9C8B2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
+				0113FAD92F74156F00FE951D /* ActivitySyncService.swift in Sources */,
 				01CB9C832F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
-				01CB9C792F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
+				0113FAD12F74134000FE951D /* CreditHistoryView.swift in Sources */,
+				0113FAE02F7418AF00FE951D /* AvatarPickerView.swift in Sources */,
+				0113FAD52F74149000FE951D /* LeaderboardService.swift in Sources */,
 				017301CF2F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */,
 				01CB9C7F2F5BA384000CF421 /* PatrolMapView.swift in Sources */,
+				0113FADE2F74185900FE951D /* AvatarService.swift in Sources */,
 				01CB9C7D2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
 				013B98302F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 			);
@@ -400,10 +390,14 @@
 			files = (
 				013B98272F70787200F50F41 /* AnimeWorkouts.swift in Sources */,
 				01CB9C8D2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */,
+				0113FADA2F74156F00FE951D /* ActivitySyncService.swift in Sources */,
 				01CB9C842F5BA3D2000CF421 /* ActiveWorkoutView.swift in Sources */,
-				01CB9C782F5BA0CD000CF421 /* SystemDataSeeder.swift in Sources */,
+				0113FAD02F74134000FE951D /* CreditHistoryView.swift in Sources */,
+				0113FAE22F7418AF00FE951D /* AvatarPickerView.swift in Sources */,
+				0113FAD62F74149000FE951D /* LeaderboardService.swift in Sources */,
 				017301D12F71D6F500696295 /* ImpossibleDayDetector.swift in Sources */,
 				01CB9C812F5BA384000CF421 /* PatrolMapView.swift in Sources */,
+				0113FADD2F74185900FE951D /* AvatarService.swift in Sources */,
 				01CB9C7B2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
 				013B98312F70C6F700F50F41 /* AchievementManager.swift in Sources */,
 			);
@@ -427,9 +421,9 @@
 /* Begin XCBuildConfiguration section */
 		011D8FAF2EA40A0200609E51 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				APP_SECRET = REDACTED_OLD_APP_SECRET;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -487,7 +481,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPABASE_ANON_KEY = REDACTED_OLD_SUPABASE_ANON_KEY;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -495,9 +488,9 @@
 		};
 		011D8FB02EA40A0200609E51 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				APP_SECRET = REDACTED_OLD_APP_SECRET;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -548,7 +541,6 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPABASE_ANON_KEY = REDACTED_OLD_SUPABASE_ANON_KEY;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -556,27 +548,32 @@
 		};
 		011D8FB22EA40A0200609E51 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RPT/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "System Trainer";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSCameraUsageDescription = "The System requires camera access to scan and decrypt consumable items.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "RPT reads your steps, workouts, heart rate, sleep, and activity data to calculate your RPG stats and award XP for real-world fitness progress.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "RPT may write workout sessions to Apple Health so your activity is reflected across your health apps.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "RPT uses background location to continue tracking your patrol route when you switch apps, ensuring accurate distance and pace data.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "RPT tracks your outdoor patrol routes — runs, walks, and hikes — to calculate distance, pace, and award Endurance XP.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "System Trainer uses your camera to scan food barcodes so you can quickly log meals by scanning the package.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "System Trainer reads your steps, heart rate, sleep, active energy, and workouts to power your quests, stats, and coaching insights.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "System Trainer logs your workouts and water intake to HealthKit so your activity is tracked across Apple Health.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "System Trainer uses your location for patrol routes. Enabling 'Always' allows background distance tracking during active workouts.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "System Trainer uses your location during patrol routes to track outdoor workout distance and adapt your quest objectives.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to let users select, import, and use existing images or videos from their device. This enables functions such as editing, uploading, or sharing media within the app. Access is only used when you choose to pick files; no photos or videos are accessed automatically.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen.storyboard;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -584,7 +581,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5.3;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -603,27 +600,32 @@
 		};
 		011D8FB32EA40A0200609E51 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RPT/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "System Trainer";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSCameraUsageDescription = "The System requires camera access to scan and decrypt consumable items.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "RPT reads your steps, workouts, heart rate, sleep, and activity data to calculate your RPG stats and award XP for real-world fitness progress.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "RPT may write workout sessions to Apple Health so your activity is reflected across your health apps.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "RPT uses background location to continue tracking your patrol route when you switch apps, ensuring accurate distance and pace data.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "RPT tracks your outdoor patrol routes — runs, walks, and hikes — to calculate distance, pace, and award Endurance XP.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "System Trainer uses your camera to scan food barcodes so you can quickly log meals by scanning the package.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "System Trainer reads your steps, heart rate, sleep, active energy, and workouts to power your quests, stats, and coaching insights.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "System Trainer logs your workouts and water intake to HealthKit so your activity is tracked across Apple Health.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "System Trainer uses your location for patrol routes. Enabling 'Always' allows background distance tracking during active workouts.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "System Trainer uses your location during patrol routes to track outdoor workout distance and adapt your quest objectives.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to let users select, import, and use existing images or videos from their device. This enables functions such as editing, uploading, or sharing media within the app. Access is only used when you choose to pick files; no photos or videos are accessed automatically.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen.storyboard;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -631,7 +633,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5.3;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -650,6 +652,7 @@
 		};
 		011D8FB52EA40A0200609E51 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
@@ -676,6 +679,7 @@
 		};
 		011D8FB62EA40A0200609E51 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
@@ -702,6 +706,7 @@
 		};
 		011D8FB82EA40A0200609E51 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -726,6 +731,7 @@
 		};
 		011D8FB92EA40A0200609E51 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

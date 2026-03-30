@@ -4,22 +4,12 @@ import Combine
 
 // MARK: - Food Database Service
 //
-// Three-tier nutrition database:
-//   1. Supabase foods table (curated ~200 baseline foods, searched first via foods-proxy)
-//   2. USDA FoodData Central (300k+ verified foods, primary fallback)
-//   3. Open Food Facts (3M+ products, secondary fallback / barcode lookup)
+// Three-tier nutrition database — all external calls go through Edge Functions:
+//   1. foods-proxy  → Supabase curated foods table (searched first)
+//   2. usda-proxy   → USDA FoodData Central (300k+ verified foods)
+//   3. foods-proxy  → Open Food Facts via off_search / off_barcode keys
 //
-// USDA FoodData Central
-//   API docs: https://fdc.nal.usda.gov/api-guide.html
-//   Key stored in Info.plist as USDAFoodApiKey. Falls back to DEMO_KEY (30 req/hr).
-//
-// Open Food Facts — completely free, no key required
-//   API docs: https://openfoodfacts.github.io/openfoodfacts-server/api/
-//
-// Supabase foods-proxy Edge Function
-//   POST /functions/v1/foods-proxy  { query, barcode, category, limit, offset }
-//   Returns array of FoodItem-shaped JSON.
-//
+// No third-party API is called directly from the app.
 // Source tagging: FoodItem.dataSource = "rpt" | "USDA" | "OpenFoodFacts" | "User"
 // Results are deduplicated by name. Supabase results appear first.
 
@@ -34,27 +24,15 @@ class FoodDatabaseService: ObservableObject {
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
-        config.httpAdditionalHeaders = ["User-Agent": "RPT-FitnessApp/1.0 (iOS; contact@rpt.app)"]
+        config.httpAdditionalHeaders = ["User-Agent": "SystemTrainer/1.0 (iOS; contact@rpt.app)"]
         return URLSession(configuration: config)
     }()
 
     // MARK: Supabase foods-proxy
     private static let foodsProxyURL = "\(Secrets.supabaseURL)/functions/v1/foods-proxy"
 
-    // MARK: USDA FoodData Central
-    private static let usdaBaseURL = "https://api.nal.usda.gov/fdc/v1"
-    private var usdaApiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "USDAFoodApiKey") as? String ?? "DEMO_KEY"
-    }
-
-    // MARK: Open Food Facts
-    private static let offBaseURL = "https://world.openfoodfacts.org/api/v2"
-    private static let offSearchURL = "https://search.openfoodfacts.org/search"
-    private static let offFields = [
-        "code", "product_name", "brands", "categories_tags",
-        "serving_size", "serving_quantity", "nutriments",
-        "nova_group", "additives_tags"
-    ].joined(separator: ",")
+    // MARK: USDA FoodData Central (via usda-proxy Edge Function)
+    private static let usdaProxyURL = "\(Secrets.supabaseURL)/functions/v1/usda-proxy"
 
     private init() {}
 
@@ -71,19 +49,8 @@ class FoodDatabaseService: ObservableObject {
             return supabaseItem
         }
 
-        // 2. Fall back to Open Food Facts for barcode lookup
-        let urlString = "\(Self.offBaseURL)/product/\(barcode)?fields=\(Self.offFields)"
-        guard let url = URL(string: urlString) else { throw OFFFoodError.invalidURL }
-
-        let (data, response) = try await session.data(from: url)
-        try validate(response)
-
-        let decoded = try decode(OFFProductResponse.self, from: data)
-        guard decoded.status == 1, let product = decoded.product else { return nil }
-
-        let item = product.toFoodItem(barcode: barcode)
-        item?.dataSource = "OpenFoodFacts"
-        return item
+        // 2. Fall back to Open Food Facts via foods-proxy
+        return try await fetchOFFBarcode(barcode)
     }
 
     /// Search for foods by name.
@@ -165,44 +132,69 @@ class FoodDatabaseService: ObservableObject {
     // MARK: - USDA FoodData Central
 
     private func fetchUSDAFoods(query: String, limit: Int) async throws -> [FoodItem] {
-        var components = URLComponents(string: "\(Self.usdaBaseURL)/foods/search")!
-        components.queryItems = [
-            URLQueryItem(name: "query", value: query),
-            URLQueryItem(name: "pageSize", value: String(limit)),
-            // Prefer Foundation and SR Legacy data types — most complete nutrients
-            URLQueryItem(name: "dataType", value: "Foundation,SR Legacy,Branded"),
-            URLQueryItem(name: "api_key", value: usdaApiKey)
-        ]
-        guard let url = components.url else { throw OFFFoodError.invalidURL }
+        guard let url = URL(string: Self.usdaProxyURL) else { throw OFFFoodError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json",                  forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret,                   forHTTPHeaderField: "X-App-Secret")
+        req.timeoutInterval = 15
 
-        let (data, response) = try await session.data(from: url)
+        let body: [String: Any] = [
+            "query": query,
+            "limit": limit,
+            "dataType": "Foundation,SR Legacy,Branded"
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: req)
         try validate(response)
 
         let decoded = try decode(USDASearchResponse.self, from: data)
         return decoded.foods.compactMap { $0.toFoodItem() }
     }
 
-    // MARK: - Open Food Facts
+    // MARK: - Open Food Facts (via foods-proxy Edge Function)
 
     private func fetchOFFFoods(query: String, limit: Int) async throws -> [FoodItem] {
-        var components = URLComponents(string: Self.offSearchURL)!
-        components.queryItems = [
-            URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "fields", value: Self.offFields),
-            URLQueryItem(name: "page_size", value: String(limit)),
-            URLQueryItem(name: "json", value: "true")
-        ]
-        guard let url = components.url else { throw OFFFoodError.invalidURL }
+        guard let url = URL(string: Self.foodsProxyURL) else { throw OFFFoodError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json",                  forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret,                   forHTTPHeaderField: "X-App-Secret")
+        req.timeoutInterval = 15
 
-        let (data, response) = try await session.data(from: url)
+        let body: [String: Any] = ["off_search": query, "limit": limit]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: req)
         try validate(response)
 
-        let decoded = try decode(OFFSearchResponse.self, from: data)
-        return decoded.hits.compactMap {
-            let item = $0.toFoodItem(barcode: nil)
-            item?.dataSource = "OpenFoodFacts"
-            return item
+        let rows = try JSONDecoder().decode([SupabaseFoodRow].self, from: data)
+        return rows.compactMap { $0.toFoodItem() }
+    }
+
+    private func fetchOFFBarcode(_ barcode: String) async throws -> FoodItem? {
+        guard let url = URL(string: Self.foodsProxyURL) else { throw OFFFoodError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json",                  forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret,                   forHTTPHeaderField: "X-App-Secret")
+        req.timeoutInterval = 15
+
+        let body: [String: Any] = ["off_barcode": barcode]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: req)
+        try validate(response)
+
+        // Proxy returns a single FoodItem object or null
+        if let row = try? JSONDecoder().decode(SupabaseFoodRow.self, from: data) {
+            return row.toFoodItem()
         }
+        return nil
     }
 
     // MARK: - Helpers
@@ -323,187 +315,6 @@ private struct USDAFoodNutrient: Decodable {
     private enum CodingKeys: String, CodingKey {
         case nutrientId = "nutrientId"
         case value
-    }
-}
-
-// MARK: - Open Food Facts Wire Models
-
-/// Response for /api/v2/product/{barcode}
-private struct OFFProductResponse: Decodable {
-    let status: Int          // 1 = found, 0 = not found
-    let product: OFFProduct?
-}
-
-/// Response for search.openfoodfacts.org/search
-private struct OFFSearchResponse: Decodable {
-    let hits: [OFFProduct]
-}
-
-/// Full product record from either endpoint.
-private struct OFFProduct: Decodable {
-    let code: String?
-    let product_name: String?
-    let brands: String?
-    let serving_size: String?
-    let serving_quantity: Double?
-    let nutriments: OFFNutriments?
-    let categories_tags: [String]?
-    let nova_group: Int?
-    let additives_tags: [String]?
-
-    /// Map wire model → SwiftData FoodItem
-    func toFoodItem(barcode: String?) -> FoodItem? {
-        // Must have at least a name
-        guard let rawName = product_name, !rawName.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return nil
-        }
-
-        let n = nutriments ?? OFFNutriments()
-
-        // Open Food Facts stores macros per 100g natively
-        let cal100g = n.energy_kcal_100g
-            ?? n.energyKcal100g
-            ?? n.energy_100g.map { $0 / 4.184 }  // kJ → kcal fallback
-            ?? 0.0
-
-        let servingGrams: Double
-        if let sq = serving_quantity, sq > 0 {
-            servingGrams = sq
-        } else if let ss = serving_size, let parsed = parseServingGrams(ss) {
-            servingGrams = parsed
-        } else {
-            servingGrams = 100.0
-        }
-
-        let brand = brands?
-            .components(separatedBy: ",")
-            .first?
-            .trimmingCharacters(in: .whitespaces)
-
-        let category = detectCategory(from: categories_tags)
-
-        let item = FoodItem(
-            name: rawName.trimmingCharacters(in: .whitespaces),
-            brand: brand,
-            barcode: barcode ?? code,
-            caloriesPer100g: cal100g,
-            servingSize: servingGrams,
-            carbohydrates: n.carbohydrates_100g ?? 0,
-            protein: n.proteins_100g ?? 0,
-            fat: n.fat_100g ?? 0,
-            fiber: n.fiber_100g ?? 0,
-            sugar: n.sugars_100g ?? 0,
-            sodium: (n.sodium_100g ?? 0) * 1000, // g → mg
-            category: category,
-            isCustom: false
-        )
-        item.dataSource = "OpenFoodFacts"
-        item.novaGroup = nova_group ?? 0
-        item.additiveRiskLevel = computeAdditiveRisk(from: additives_tags)
-        return item
-    }
-
-    /// Compute additive risk level (0–3) from OFF additives_tags array.
-    /// 0 = none, 1 = low (1–2 additives), 2 = moderate (3–5), 3 = high (6+)
-    private func computeAdditiveRisk(from tags: [String]?) -> Int {
-        guard let tags, !tags.isEmpty else { return 0 }
-        let count = tags.count
-        switch count {
-        case 0: return 0
-        case 1...2: return 1
-        case 3...5: return 2
-        default: return 3
-        }
-    }
-
-    /// Parse a serving size string like "30g", "1 oz (28g)", "250 mL" → grams
-    private func parseServingGrams(_ raw: String) -> Double? {
-        // Look for a number directly followed by 'g' or 'gram'
-        let lower = raw.lowercased()
-        // Pattern: digits optionally with decimal, then optional space, then 'g'
-        let pattern = #"(\d+(?:\.\d+)?)\s*g(?:ram)?"#
-        if let range = lower.range(of: pattern, options: .regularExpression) {
-            let match = String(lower[range])
-            // Extract leading number
-            let digits = match.prefix(while: { $0.isNumber || $0 == "." })
-            return Double(digits)
-        }
-        // Fallback: first number in string
-        let numberPattern = #"(\d+(?:\.\d+)?)"#
-        if let range = lower.range(of: numberPattern, options: .regularExpression) {
-            return Double(lower[range])
-        }
-        return nil
-    }
-
-    /// Map OFF category tags to the app's FoodCategory enum
-    private func detectCategory(from tags: [String]?) -> FoodCategory {
-        guard let tags else { return .other }
-        for tag in tags {
-            let t = tag.lowercased()
-            if t.contains("protein") || t.contains("meat") || t.contains("fish") || t.contains("poultry") || t.contains("egg") { return .protein }
-            if t.contains("fruit") || t.contains("vegetable") { return .vegetables }
-            if t.contains("grain") || t.contains("bread") || t.contains("cereal") || t.contains("pasta") || t.contains("rice") { return .grains }
-            if t.contains("dairy") || t.contains("milk") || t.contains("cheese") || t.contains("yogurt") { return .dairy }
-            if t.contains("snack") || t.contains("sweet") || t.contains("chocolate") || t.contains("candy") { return .snacks }
-            if t.contains("beverage") || t.contains("drink") || t.contains("juice") { return .beverages }
-            if t.contains("fat") || t.contains("oil") || t.contains("butter") { return .fats }
-        }
-        return .other
-    }
-}
-
-/// Nutritional values from Open Food Facts `nutriments` object.
-/// OFF uses snake_case with `_100g` suffix for per-100g values.
-private struct OFFNutriments: Decodable {
-    // Calories — OFF may report as kcal or kJ; prefer kcal
-    let energy_kcal_100g: Double?
-    let energy_100g: Double?         // kJ when kcal key is absent
-
-    // Macros per 100g
-    let carbohydrates_100g: Double?
-    let proteins_100g: Double?
-    let fat_100g: Double?
-    let fiber_100g: Double?
-    let sugars_100g: Double?
-    let sodium_100g: Double?         // stored in grams by OFF
-
-    // Alternative key (some products use camelCase via search endpoint)
-    let energyKcal100g: Double?
-
-    init(
-        energy_kcal_100g: Double? = nil,
-        energy_100g: Double? = nil,
-        carbohydrates_100g: Double? = nil,
-        proteins_100g: Double? = nil,
-        fat_100g: Double? = nil,
-        fiber_100g: Double? = nil,
-        sugars_100g: Double? = nil,
-        sodium_100g: Double? = nil,
-        energyKcal100g: Double? = nil
-    ) {
-        self.energy_kcal_100g = energy_kcal_100g
-        self.energy_100g = energy_100g
-        self.carbohydrates_100g = carbohydrates_100g
-        self.proteins_100g = proteins_100g
-        self.fat_100g = fat_100g
-        self.fiber_100g = fiber_100g
-        self.sugars_100g = sugars_100g
-        self.sodium_100g = sodium_100g
-        self.energyKcal100g = energyKcal100g
-    }
-
-    // Custom keys to handle OFF's snake_case field names with hyphens/underscores
-    enum CodingKeys: String, CodingKey {
-        case energy_kcal_100g = "energy-kcal_100g"
-        case energy_100g = "energy_100g"
-        case carbohydrates_100g = "carbohydrates_100g"
-        case proteins_100g = "proteins_100g"
-        case fat_100g = "fat_100g"
-        case fiber_100g = "fiber_100g"
-        case sugars_100g = "sugars_100g"
-        case sodium_100g = "sodium_100g"
-        case energyKcal100g = "energy_kcal_100g"
     }
 }
 

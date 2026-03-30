@@ -4,13 +4,8 @@ import HealthKit
 #endif
 import Combine
 
-/// Production-ready HealthKit manager that gracefully falls back to mock data
-/// Simply change `useMockData` to false when ready for App Store
 @MainActor
 class HealthManager: ObservableObject {
-    // MARK: - Configuration
-    private let useMockData = false // Change to false for production
-    
     // MARK: - HealthKit Setup
     let healthStore = HKHealthStore()
     
@@ -64,13 +59,6 @@ class HealthManager: ObservableObject {
             return
         }
         
-        if useMockData {
-            // Mock authorization success
-            print("Using mock health data")
-            isAuthorized = true
-            return
-        }
-        
         do {
             // Write types we log from the app
             let writeTypes: Set<HKSampleType> = [
@@ -90,33 +78,7 @@ class HealthManager: ObservableObject {
     
     // MARK: - Data Fetching
     func fetchTodaysHealthData(for profile: Profile) async {
-        if useMockData {
-            await fetchMockHealthData(for: profile)
-        } else {
-            await fetchRealHealthData(for: profile)
-        }
-    }
-    
-    private func fetchMockHealthData(for profile: Profile) async {
-        // Simulate realistic daily health data
-        let baseSteps = Int.random(in: 6000...15000)
-        let baseCalories = Int.random(in: 250...600)
-        let sleepHours = Double.random(in: 5.5...9.0)
-        let restingHR = Int.random(in: 55...75)
-        let weight = 70.0 + Double.random(in: -5...5)
-        
-        // Update profile with mock data
-        profile.dailySteps = baseSteps
-        profile.dailyActiveCalories = baseCalories
-        profile.sleepHours = sleepHours
-        profile.restingHeartRate = restingHR
-        profile.weight = weight
-        profile.vo2Max = Double.random(in: 30...50)
-        profile.heartRateVariability = Double.random(in: 20...60)
-        
-        // BMI is automatically calculated from weight and height
-        
-        print("Updated profile with mock health data")
+        await fetchRealHealthData(for: profile)
     }
     
     private func fetchRealHealthData(for profile: Profile) async {
@@ -312,7 +274,7 @@ class HealthManager: ObservableObject {
     
     // MARK: - Real-time Monitoring
     func startHealthMonitoring(for profile: Profile) {
-        guard !useMockData && isAuthorized else { return }
+        guard isAuthorized else { return }
         
         // Set up real-time health data observers
         // This would include HKObserverQuery for live updates
@@ -320,7 +282,6 @@ class HealthManager: ObservableObject {
     }
     
     func stopHealthMonitoring() {
-        guard !useMockData else { return }
         
         // Clean up observers
         print("Stopping health monitoring")
@@ -332,7 +293,7 @@ extension HealthManager {
 
     /// Save a completed workout to Apple Health using HKWorkoutBuilder.
     func saveWorkout(type workoutType: WorkoutType, start: Date, durationMinutes: Int) async {
-        guard isAuthorized, !useMockData, HKHealthStore.isHealthDataAvailable() else { return }
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
         let end = start.addingTimeInterval(Double(durationMinutes) * 60)
         let config = HKWorkoutConfiguration()
         config.activityType = hkActivityType(for: workoutType)
@@ -349,7 +310,7 @@ extension HealthManager {
 
     /// Save a body weight reading to Apple Health.
     func saveBodyWeight(_ kg: Double, date: Date = Date()) async {
-        guard isAuthorized, !useMockData, HKHealthStore.isHealthDataAvailable() else { return }
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
         let type = HKQuantityType(.bodyMass)
         let qty = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg)
         let sample = HKQuantitySample(type: type, quantity: qty, start: date, end: date)
@@ -358,7 +319,7 @@ extension HealthManager {
 
     /// Save logged food calories to Apple Health.
     func saveCalories(_ kcal: Double, date: Date = Date()) async {
-        guard isAuthorized, !useMockData, HKHealthStore.isHealthDataAvailable() else { return }
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
         let type = HKQuantityType(.dietaryEnergyConsumed)
         let qty = HKQuantity(unit: .kilocalorie(), doubleValue: kcal)
         let sample = HKQuantitySample(type: type, quantity: qty, start: date, end: date)
@@ -378,13 +339,11 @@ extension HealthManager {
 // MARK: - Health Permissions Helper
 extension HealthManager {
     var needsHealthPermissions: Bool {
-        !useMockData && (!healthDataAvailable || !isAuthorized)
+        !healthDataAvailable || !isAuthorized
     }
     
     var permissionStatusMessage: String {
-        if useMockData {
-            return "Using simulated health data for development"
-        } else if !healthDataAvailable {
+        if !healthDataAvailable {
             return "HealthKit not available on this device"
         } else if !isAuthorized {
             return "Health access required for full experience"

@@ -45,6 +45,7 @@ struct CurvedXPBar: View {
     let level: Int
     let threshold: Int
     let profileName: String
+    var avatarKey: String? = nil
     var onSettingsTapped: (() -> Void)? = nil
     @State private var animatedProgress: Double = 0
     @State private var rotationAngle: Double = 0
@@ -96,15 +97,7 @@ struct CurvedXPBar: View {
                         .frame(width: 160, height: 160)
                         .shadow(color: .cyan, radius: 4, x: 0, y: 0)
                     
-                    // Progress indicator dot
-                    if animatedProgress > 0 {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 12, height: 12)
-                            .shadow(color: .cyan, radius: 6, x: 0, y: 0)
-                            .offset(y: -80) // Radius of the progress ring
-                            .rotationEffect(.degrees(135 + (animatedProgress * 270))) // Follow the progress
-                    }
+                    // Progress indicator dot removed
                 }
                 
                 // Central user avatar area
@@ -123,12 +116,10 @@ struct CurvedXPBar: View {
                         )
                         .shadow(color: .cyan.opacity(0.8), radius: 15, x: 0, y: 0)
                     
-                    // User avatar (placeholder - can be replaced with actual image)
+                    // User avatar
                     VStack(spacing: 4) {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 36, weight: .medium))
-                            .foregroundColor(.white)
-                        
+                        AvatarImageView(key: avatarKey ?? "avatar_default", size: 70)
+
                         Text(profileName)
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.9))
@@ -472,6 +463,7 @@ struct StatCard: View {
 
 struct StatDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     let stat: RPGStatsBar.StatType
     let profile: Profile
 
@@ -566,15 +558,13 @@ struct StatDetailView: View {
         HStack(spacing: 8) {
             switch stat {
             case .health:
-                QuickActionButton(title: "Log Meal", icon: "fork.knife", color: .green) {
+                QuickActionButton(title: "Log Meal / Water", icon: "fork.knife", color: .green) {
+                    dismiss()
                     NotificationCenter.default.post(
                         name: .rptNavigateToTab,
                         object: nil,
                         userInfo: ["tab": "diet"]
                     )
-                }
-                QuickActionButton(title: "Drink Water", icon: "drop.fill", color: .blue) {
-                    profile.recordWaterIntake()
                 }
             case .energy:
                 QuickActionButton(title: "Log Sleep", icon: "bed.double.fill", color: .purple) {
@@ -582,6 +572,7 @@ struct StatDetailView: View {
                 }
             case .strength:
                 QuickActionButton(title: "Strength Training", icon: "dumbbell", color: .orange) {
+                    dismiss()
                     NotificationCenter.default.post(
                         name: .rptNavigateToTab,
                         object: nil,
@@ -590,6 +581,7 @@ struct StatDetailView: View {
                 }
             case .endurance:
                 QuickActionButton(title: "Cardio", icon: "heart.fill", color: .red) {
+                    dismiss()
                     NotificationCenter.default.post(
                         name: .rptNavigateToTab,
                         object: nil,
@@ -602,6 +594,7 @@ struct StatDetailView: View {
                 }
             case .discipline:
                 QuickActionButton(title: "View Quests", icon: "target", color: .green) {
+                    dismiss()
                     NotificationCenter.default.post(
                         name: .rptNavigateToTab,
                         object: nil,
@@ -775,13 +768,38 @@ struct QuestRow: View {
                     
                     Spacer()
                     
-                    HStack(spacing: 4) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 10))
-                        Text("+\(quest.xpReward)")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    if quest.isUserCreated {
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 10))
+                            Text("Custom Quest")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundColor(.secondary)
+                    } else {
+                        HStack(spacing: 6) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "bolt.fill")
+                                    .font(.system(size: 10))
+                                Text("+\(quest.xpReward) XP")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.cyan)
+
+                            if quest.creditReward > 0 {
+                                Text("•")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                HStack(spacing: 4) {
+                                    Image(systemName: "centsign.circle.fill")
+                                        .font(.system(size: 11))
+                                    Text("+\(quest.creditReward) \(RemoteConfigService.shared.string("currency_symbol", default: "GP"))")
+                                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(Color(red: 1.0, green: 0.8, blue: 0.0))
+                            }
+                        }
                     }
-                    .foregroundColor(.cyan)
                 }
             }
             
@@ -809,19 +827,11 @@ struct QuestRow: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(16)
+        .padding()
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(
-                            quest.isCompleted ? 
-                                .green.opacity(0.5) : 
-                                quest.type.color.opacity(0.3),
-                            lineWidth: 1
-                        )
-                )
+                .stroke(.separator, lineWidth: 0.5)
         )
         .scaleEffect(quest.isCompleted ? 0.98 : 1.0)
         .opacity(quest.isCompleted ? 0.7 : 1.0)
@@ -903,7 +913,16 @@ struct QuestDetailSheet: View {
 
                         // Stats grid
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                            QuestStatCell(label: "XP REWARD", value: "+\(quest.xpReward)", icon: "bolt.fill", color: .cyan)
+                            QuestStatCell(label: "XP REWARD", value: "+\(quest.xpReward) XP", icon: "bolt.fill", color: .cyan)
+
+                            if quest.creditReward > 0 {
+                                QuestStatCell(
+                                    label: "\(RemoteConfigService.shared.string("currency_symbol", default: "GP")) REWARD",
+                                    value: "+\(quest.creditReward) \(RemoteConfigService.shared.string("currency_symbol", default: "GP"))",
+                                    icon: "centsign.circle.fill",
+                                    color: Color(red: 1.0, green: 0.8, blue: 0.0)
+                                )
+                            }
 
                             if let stat = quest.statTarget, !stat.isEmpty {
                                 QuestStatCell(label: "STAT BOOST", value: stat.capitalized, icon: "chart.bar.fill", color: quest.type.color)
@@ -948,7 +967,6 @@ struct QuestDetailSheet: View {
                     .padding(.bottom, 30)
                 }
             }
-            .ignoresSafeArea(edges: .top)
             .navigationTitle(quest.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -972,9 +990,10 @@ struct QuestDetailSheet: View {
 
     private func questTypeIcon(_ type: QuestType) -> String {
         switch type {
-        case .daily:  return "sun.max.fill"
-        case .weekly: return "calendar.badge.clock"
-        case .custom: return "star.fill"
+        case .oneTime: return "1.circle.fill"
+        case .daily:   return "sun.max.fill"
+        case .weekly:  return "calendar.badge.clock"
+        case .custom:  return "star.fill"
         }
     }
 }
