@@ -138,9 +138,9 @@ struct QuestsView: View {
                                     
                                     List {
                                         ForEach(activeQuests) { quest in
-                                            QuestRow(quest: quest) {
+                                            QuestRow(quest: quest, onToggle: {
                                                 toggleQuestCompletion(quest)
-                                            }
+                                            }, isLocked: isDayLocked)
                                             .listRowBackground(Color.clear)
                                             .listRowSeparator(.hidden)
                                             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
@@ -160,7 +160,7 @@ struct QuestsView: View {
                                     .frame(height: CGFloat(activeQuests.count) * 140)
                                 }
                             }
-                            
+
                             // Completed missions section
                             if !completedQuests.isEmpty {
                                 VStack(alignment: .leading, spacing: 10) {
@@ -174,12 +174,12 @@ struct QuestsView: View {
                                             .foregroundColor(.green)
                                     }
                                     .padding(.horizontal)
-                                    
+
                                     List {
                                         ForEach(completedQuests) { quest in
-                                            QuestRow(quest: quest) {
+                                            QuestRow(quest: quest, onToggle: {
                                                 toggleQuestCompletion(quest)
-                                            }
+                                            }, isLocked: isDayLocked)
                                             .listRowBackground(Color.clear)
                                             .listRowSeparator(.hidden)
                                             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
