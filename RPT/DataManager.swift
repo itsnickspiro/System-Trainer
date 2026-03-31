@@ -470,13 +470,23 @@ final class DataManager: ObservableObject {
 
         guard let context = modelContext, let profile = currentProfile else { return }
 
-        // Clear any stale auto-generated quests from yesterday
+        // Keep incomplete quests from previous days visible (read-only)
+        // so the player can see what they missed. QuestsView locks
+        // interaction for any day that isn't today.
+
+        // ── Check if yesterday's quests were all completed ────────────────────
+        // If any were left incomplete, set the hardcore reset deadline to now
+        // so applyHardcoreResetIfNeeded() can trigger the penalty.
         let yesterday = today.addingTimeInterval(-86400)
-        let staleDescriptor = FetchDescriptor<Quest>(
+        let yesterdayDescriptor = FetchDescriptor<Quest>(
             predicate: #Predicate<Quest> { q in q.dateTag >= yesterday && q.dateTag < today }
         )
-        if let staleQuests = try? context.fetch(staleDescriptor) {
-            staleQuests.filter { !$0.isCompleted }.forEach { context.delete($0) }
+        if let yesterdayQuests = try? context.fetch(yesterdayDescriptor), !yesterdayQuests.isEmpty {
+            let allComplete = yesterdayQuests.allSatisfy { $0.isCompleted }
+            if !allComplete && profile.hardcoreResetDeadline == nil {
+                // Missed quests — arm the reset deadline for right now
+                profile.hardcoreResetDeadline = Date()
+            }
         }
 
         // Active plan override: use plan quests instead of generic health-driven ones
@@ -556,7 +566,8 @@ final class DataManager: ObservableObject {
             title: "Rehabilitation Training",
             details: "Complete any 15-minute workout — stretching, mobility, or light cardio counts. No heavy lifting required.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: 40, statTarget: "health", dateTag: date
+            xpReward: 40, statTarget: "health",
+            completionCondition: "workout:any", dateTag: date
         ))
 
         // ── Hydration ─────────────────────────────────────────────────────────
@@ -592,14 +603,16 @@ final class DataManager: ObservableObject {
                 title: "Step Count Protocol",
                 details: "Reach \(stepGoal.formatted()) steps today. Current: \(profile.dailySteps.formatted()). Endurance stat will increase.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_steps_urgent", default: 75), statTarget: "endurance", dateTag: date
+                xpReward: rc.int("xp_steps_urgent", default: 75), statTarget: "endurance",
+                completionCondition: "steps:\(stepGoal)", dateTag: date
             ))
         } else {
             quests.append(Quest(
                 title: "Maintain Pace",
                 details: "Hit \(stepGoal.formatted()) steps. You're on track — keep moving.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_steps_normal", default: 50), statTarget: "endurance", dateTag: date
+                xpReward: rc.int("xp_steps_normal", default: 50), statTarget: "endurance",
+                completionCondition: "steps:\(stepGoal)", dateTag: date
             ))
         }
 
@@ -609,14 +622,16 @@ final class DataManager: ObservableObject {
                 title: "Sleep Debt Recovery",
                 details: "Last night: \(String(format: "%.1f", profile.sleepHours))h. Sleep deficit detected. Achieve 8h tonight to restore Energy and Focus stats.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_sleep_debt", default: 100), statTarget: "energy", dateTag: date
+                xpReward: rc.int("xp_sleep_debt", default: 100), statTarget: "energy",
+                completionCondition: "sleep:8", dateTag: date
             ))
         } else if profile.sleepHours < 7.5 {
             quests.append(Quest(
                 title: "Rest Optimization",
                 details: "Sleep logged: \(String(format: "%.1f", profile.sleepHours))h. Target 8h for maximum stat recovery.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_sleep_normal", default: 60), statTarget: "energy", dateTag: date
+                xpReward: rc.int("xp_sleep_normal", default: 60), statTarget: "energy",
+                completionCondition: "sleep:8", dateTag: date
             ))
         }
 
@@ -627,14 +642,16 @@ final class DataManager: ObservableObject {
                 title: "Burn Protocol — URGENT",
                 details: "Active calories today: \(profile.dailyActiveCalories) kcal. Target: \(calGoal) kcal. Complete any 30-min workout.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_calories_urgent", default: 120), statTarget: "strength", dateTag: date
+                xpReward: rc.int("xp_calories_urgent", default: 120), statTarget: "strength",
+                completionCondition: "calories:\(calGoal)", dateTag: date
             ))
         } else if profile.dailyActiveCalories < calGoal {
             quests.append(Quest(
                 title: "Burn Target",
                 details: "Active calories: \(profile.dailyActiveCalories)/\(calGoal) kcal. Close the gap with a workout session.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_calories_normal", default: 80), statTarget: "strength", dateTag: date
+                xpReward: rc.int("xp_calories_normal", default: 80), statTarget: "strength",
+                completionCondition: "calories:\(calGoal)", dateTag: date
             ))
         }
 
@@ -645,7 +662,8 @@ final class DataManager: ObservableObject {
                 title: "Cardiovascular Conditioning",
                 details: "Resting HR: \(profile.restingHeartRate) bpm — above optimal (>\(hrThreshold) bpm). 20 minutes of zone-2 cardio will improve Health stat.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_cardio_conditioning", default: 90), statTarget: "health", dateTag: date
+                xpReward: rc.int("xp_cardio_conditioning", default: 90), statTarget: "health",
+                completionCondition: "workout:cardio", dateTag: date
             ))
         }
 
@@ -692,7 +710,8 @@ final class DataManager: ObservableObject {
             title: "Daily Training: \(trainingFocus)",
             details: "\(tier.rank.displayName) Protocol — \(trainingDetails)\nComplete any logged workout to auto-check this quest.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: Int(Double(trainingBaseXP) * tier.xpMultiplier), statTarget: "strength", dateTag: date
+            xpReward: Int(Double(trainingBaseXP) * tier.xpMultiplier), statTarget: "strength",
+            completionCondition: "workout:any", dateTag: date
         ))
 
         // ── Guaranteed: Nutrition Log — always present ─────────────────────────

@@ -709,6 +709,7 @@ struct WeekScroller: View {
 struct QuestRow: View {
     var quest: Quest
     var onToggle: (() -> Void)?
+    var isLocked: Bool = false
     @State private var showingDetail = false
 
     var body: some View {
@@ -804,20 +805,24 @@ struct QuestRow: View {
             }
             
             // Action button
-            Button(action: { onToggle?() }) {
+            Button(action: { if !isLocked { onToggle?() } }) {
                 ZStack {
                     Circle()
-                        .fill(quest.isCompleted ? .green.opacity(0.2) : .gray.opacity(0.1))
+                        .fill(quest.isCompleted ? .green.opacity(0.2) : isLocked ? .gray.opacity(0.05) : .gray.opacity(0.1))
                         .frame(width: 44, height: 44)
                         .overlay(
                             Circle()
-                                .stroke(quest.isCompleted ? .green : .gray.opacity(0.5), lineWidth: 2)
+                                .stroke(quest.isCompleted ? .green : .gray.opacity(isLocked ? 0.3 : 0.5), lineWidth: 2)
                         )
-                    
+
                     if quest.isCompleted {
                         Image(systemName: "checkmark")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.green)
+                    } else if isLocked {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.gray.opacity(0.5))
                     } else {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 14, weight: .semibold))
@@ -826,6 +831,7 @@ struct QuestRow: View {
                 }
             }
             .buttonStyle(.plain)
+            .allowsHitTesting(!isLocked)
         }
         .padding()
         .background(
@@ -839,7 +845,7 @@ struct QuestRow: View {
         .contentShape(Rectangle())
         .onTapGesture { showingDetail = true }
         .sheet(isPresented: $showingDetail) {
-            QuestDetailSheet(quest: quest, onToggle: onToggle)
+            QuestDetailSheet(quest: quest, onToggle: onToggle, isLocked: isLocked)
         }
     }
 }
@@ -849,6 +855,7 @@ struct QuestRow: View {
 struct QuestDetailSheet: View {
     let quest: Quest
     var onToggle: (() -> Void)?
+    var isLocked: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -943,25 +950,41 @@ struct QuestDetailSheet: View {
                         }
 
                         // Complete / Uncomplete button
-                        Button(action: {
-                            onToggle?()
-                            dismiss()
-                        }) {
+                        if isLocked {
                             HStack(spacing: 10) {
-                                Image(systemName: quest.isCompleted ? "arrow.uturn.left.circle.fill" : "checkmark.circle.fill")
+                                Image(systemName: "lock.fill")
                                     .font(.system(size: 20))
-                                Text(quest.isCompleted ? "Mark Incomplete" : "Complete Quest")
+                                Text("Locked — past day")
                                     .font(.system(size: 16, weight: .bold))
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
                             .background(
                                 RoundedRectangle(cornerRadius: 14)
-                                    .fill(quest.isCompleted ? Color.orange : Color.green)
+                                    .fill(Color.gray.opacity(0.3))
                             )
-                            .foregroundColor(.white)
+                            .foregroundColor(.secondary)
+                        } else {
+                            Button(action: {
+                                onToggle?()
+                                dismiss()
+                            }) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: quest.isCompleted ? "arrow.uturn.left.circle.fill" : "checkmark.circle.fill")
+                                        .font(.system(size: 20))
+                                    Text(quest.isCompleted ? "Mark Incomplete" : "Complete Quest")
+                                        .font(.system(size: 16, weight: .bold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(quest.isCompleted ? Color.orange : Color.green)
+                                )
+                                .foregroundColor(.white)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 30)
