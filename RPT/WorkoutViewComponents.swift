@@ -1,6 +1,108 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Exercise Card
+
+struct ExerciseCard: View {
+    let exercise: Exercise
+    let typeColor: Color
+    var onAdd: ((Exercise) -> Void)? = nil
+    @State private var showingDetail = false
+    @State private var justAdded = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Add button on the left
+            if let onAdd {
+                Button(action: {
+                    onAdd(exercise)
+                    withAnimation(.spring(response: 0.3)) { justAdded = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        withAnimation { justAdded = false }
+                    }
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(justAdded ? Color.green.opacity(0.18) : typeColor.opacity(0.12))
+                            .frame(width: 48, height: 48)
+                        Image(systemName: justAdded ? "checkmark" : "plus")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(justAdded ? .green : typeColor)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 12)
+                .padding(.trailing, 4)
+            }
+
+            // Main tappable area -> detail sheet
+            Button(action: { showingDetail = true }) {
+                HStack(spacing: 14) {
+                    // Only show icon when no add button
+                    if onAdd == nil {
+                        ZStack {
+                            Circle()
+                                .fill(typeColor.opacity(0.12))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: exercise.muscleIcon)
+                                .font(.system(size: 20))
+                                .foregroundColor(typeColor)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(exercise.name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+
+                        HStack(spacing: 6) {
+                            if let muscle = exercise.muscle {
+                                Tag(text: muscle.capitalized, color: .blue)
+                            }
+                            if let difficulty = exercise.difficulty {
+                                Tag(text: difficulty.capitalized, color: exercise.difficultyColor)
+                            }
+                            if let eq = exercise.equipment {
+                                Tag(text: eq.capitalized, color: .gray)
+                            }
+                        }
+
+                        if let instructions = exercise.instructions, !instructions.isEmpty {
+                            Text(instructions)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .padding(.leading, onAdd != nil ? 0 : 0)
+            }
+            .buttonStyle(.plain)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(justAdded ? Color.green.opacity(0.4) : typeColor.opacity(0.15), lineWidth: 1)
+                )
+        )
+        .sheet(isPresented: $showingDetail) {
+            ExerciseDetailView(exercise: exercise, accentColor: typeColor, onAdd: onAdd)
+        }
+    }
+}
+
 // MARK: - Exercise Detail View
 
 struct ExerciseDetailView: View {

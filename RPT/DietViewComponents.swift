@@ -1291,83 +1291,18 @@ struct FoodItemRow: View {
     }
 }
 
-// MARK: - Custom Meal Row
-
-struct CustomMealRow: View {
-    let meal: CustomMeal
-    let onAdd: () -> Void
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(meal.name)
-                        .font(.headline.weight(.semibold))
-                        .foregroundColor(.primary)
-                    
-                    if let description = meal.details {
-                        Text(description)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                    }
-                    
-                    HStack(spacing: 12) {
-                        Text("\(Int(meal.totalCalories)) cal")
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(.secondary)
-                        
-                        Text("\(meal.foodItems?.count ?? 0) items")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        if meal.isFavorite {
-                            Image(systemName: "heart.fill")
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                Button {
-                    onAdd()
-                } label: {
-                    Text("Add")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(.green)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.ultraThinMaterial)
-                .stroke(.separator, lineWidth: 0.5)
-        )
-    }
-}
-
-// MARK: - Additional Views (Enhanced Stubs)
+// MARK: - Food Creator View
 
 struct FoodCreatorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
-    
+
     @State private var name = ""
     @State private var brand = ""
     @State private var calories = ""
     @State private var servingSize = "100"
     @State private var selectedCategory: FoodCategory = .other
-    
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1380,7 +1315,7 @@ struct FoodCreatorView: View {
                         }
                     }
                 }
-                
+
                 Section("Nutrition (per serving)") {
                     TextField("Calories", text: $calories)
                         .keyboardType(.numberPad)
@@ -1396,7 +1331,7 @@ struct FoodCreatorView: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
                         saveFoodItem()
@@ -1406,11 +1341,11 @@ struct FoodCreatorView: View {
             }
         }
     }
-    
+
     private func saveFoodItem() {
         let caloriesValue = Double(calories) ?? 0
         let servingSizeValue = Double(servingSize) ?? 100
-        
+
         let foodItem = FoodItem(
             name: name,
             brand: brand.isEmpty ? nil : brand,
@@ -1418,45 +1353,47 @@ struct FoodCreatorView: View {
             servingSize: servingSizeValue,
             category: selectedCategory
         )
-        
+
         context.insert(foodItem)
         context.safeSave()
         dismiss()
     }
 }
 
+// MARK: - Quick Add View
+
 struct QuickAddView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
-    
+
     let selectedMeal: MealType
     let selectedDate: Date
-    
+
     @State private var calories = ""
     @State private var description = ""
-    
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
                 Text("Quick Add Calories")
                     .font(.largeTitle.weight(.bold))
-                
+
                 Text("Quickly log calories when you don't have detailed food information")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                
+
                 VStack(spacing: 16) {
                     TextField("Calories", text: $calories)
                         .font(.title)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
-                    
+
                     TextField("Description (Optional)", text: $description)
                         .textFieldStyle(.roundedBorder)
                 }
                 .padding()
-                
+
                 Button {
                     saveQuickAdd()
                 } label: {
@@ -1472,7 +1409,7 @@ struct QuickAddView: View {
                 }
                 .disabled(calories.isEmpty)
                 .padding()
-                
+
                 Spacer()
             }
             .padding()
@@ -1487,11 +1424,11 @@ struct QuickAddView: View {
             }
         }
     }
-    
+
     private func saveQuickAdd() {
         let caloriesValue = Double(calories) ?? 0
         let foodName = description.isEmpty ? "Quick Add (\(Int(caloriesValue)) cal)" : description
-        
+
         // Create a quick add food item — servingSize must be 100 so that
         // caloriesPerServing = caloriesPer100g (the user's entered value).
         let foodItem = FoodItem(
@@ -1500,9 +1437,9 @@ struct QuickAddView: View {
             servingSize: 100,
             category: .other
         )
-        
+
         context.insert(foodItem)
-        
+
         // Create the food entry
         let entry = FoodEntry(
             foodItem: foodItem,
@@ -1511,60 +1448,86 @@ struct QuickAddView: View {
             meal: selectedMeal,
             dateConsumed: selectedDate
         )
-        
+
         context.insert(entry)
         context.safeSave()
         dismiss()
     }
 }
 
-struct MealCreatorView: View {
+// MARK: - Food Details View
+
+struct FoodDetailsView: View {
+    let food: FoodItem
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Text("🍳")
-                    .font(.system(size: 60))
-                
-                Text("Meal Creator")
-                    .font(.largeTitle.weight(.bold))
-                
-                Text("Create custom meals with AI assistance")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                
-                Text("Coming Soon!")
-                    .font(.headline)
-                    .foregroundColor(.orange)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(food.name)
+                            .font(.largeTitle.weight(.bold))
+
+                        if let brand = food.brand {
+                            Text(brand)
+                                .font(.title2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    // Nutrition Facts
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Nutrition Facts")
+                            .font(.title2.weight(.semibold))
+
+                        VStack(spacing: 8) {
+                            nutritionRow("Calories", "\(Int(food.caloriesPerServing))")
+                            nutritionRow("Carbohydrates", "\(String(format: "%.1f", food.carbohydrates))g")
+                            nutritionRow("Protein", "\(String(format: "%.1f", food.protein))g")
+                            nutritionRow("Fat", "\(String(format: "%.1f", food.fat))g")
+                            nutritionRow("Fiber", "\(String(format: "%.1f", food.fiber))g")
+                            nutritionRow("Sugar", "\(String(format: "%.1f", food.sugar))g")
+                            nutritionRow("Sodium", "\(String(format: "%.0f", food.sodium))mg")
+                        }
+                    }
                     .padding()
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.orange.opacity(0.1))
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.ultraThinMaterial)
                     )
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Planned Features:")
-                        .font(.headline.weight(.semibold))
-                    
-                    Text("• AI-powered recipe suggestions")
-                    Text("• Automatic nutrition calculation")
-                    Text("• Ingredient substitutions")
-                    Text("• Meal planning assistance")
-                    Text("• Save favorite combinations")
+
+                    // Additional Info
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Additional Information")
+                            .font(.headline.weight(.semibold))
+
+                        HStack {
+                            Text("Category:")
+                            Text(food.category.displayName)
+                                .foregroundColor(.secondary)
+                        }
+
+                        HStack {
+                            Text("Source:")
+                            Text(food.isCustom ? "Custom" : "Database")
+                                .foregroundColor(.secondary)
+                        }
+
+                        if let barcode = food.barcode {
+                            HStack {
+                                Text("Barcode:")
+                                Text(barcode)
+                                    .foregroundColor(.secondary)
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.ultraThinMaterial)
-                )
-                
-                Spacer()
             }
-            .padding()
-            .navigationTitle("Meals")
+            .navigationTitle("Food Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1575,58 +1538,13 @@ struct MealCreatorView: View {
             }
         }
     }
-}
 
-extension FoodUnit: Hashable {
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(rawValue)
-    }
-}
-
-extension MealType: Hashable {
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(rawValue)
-    }
-}
-
-// MARK: - Barcode Scanner Wrapper
-
-struct BarcodeScannerWrapper: UIViewControllerRepresentable {
-    let onBarcodeScanned: (String) -> Void
-    let onDismiss: () -> Void
-    
-    func makeUIViewController(context: Context) -> BarcodeScannerViewController {
-        let scanner = BarcodeScannerViewController()
-        scanner.delegate = context.coordinator
-        return scanner
-    }
-    
-    func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {
-        // No updates needed
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-    
-    class Coordinator: NSObject, BarcodeScannerDelegate {
-        let parent: BarcodeScannerWrapper
-        
-        init(_ parent: BarcodeScannerWrapper) {
-            self.parent = parent
-        }
-        
-        func didCancel() {
-            parent.onDismiss()
-        }
-        
-        func didEncounterError(_ error: Error) {
-            print("Barcode scanner error: \(error)")
-            parent.onDismiss()
-        }
-        
-        func didScanBarcode(_ code: String) {
-            parent.onBarcodeScanned(code)
+    private func nutritionRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
         }
     }
 }

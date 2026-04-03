@@ -16,26 +16,26 @@ struct DietView: View {
     private var profile: Profile {
         profiles.first ?? Profile(name: "Default User")
     }
-    
+
     private var todaysFoodEntries: [FoodEntry] {
         let calendar = Calendar.current
         return foodEntries.filter { entry in
             calendar.isDate(entry.dateConsumed, inSameDayAs: selectedDate)
         }
     }
-    
+
     private var actualConsumedCalories: Int {
         Int(todaysFoodEntries.reduce(0) { $0 + $1.totalCalories })
     }
-    
+
     private var todaysCarbs: Double {
         todaysFoodEntries.reduce(0) { $0 + $1.totalCarbs }
     }
-    
+
     private var todaysProtein: Double {
         todaysFoodEntries.reduce(0) { $0 + $1.totalProtein }
     }
-    
+
     private var todaysFat: Double {
         todaysFoodEntries.reduce(0) { $0 + $1.totalFat }
     }
@@ -124,7 +124,7 @@ struct DietView: View {
     private var fatGoal: Int {
         activePlan?.nutrition.fatGrams ?? profile.effectiveFatGoal
     }
-    
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -230,7 +230,7 @@ struct DietView: View {
 
                     // Daily Calorie Summary
                     dailyCalorieSummaryView
-                    
+
                     // Macro Breakdown
                     macroBreakdownView
 
@@ -239,7 +239,7 @@ struct DietView: View {
 
                     // Meals Section
                     mealsSection
-                    
+
                     Spacer(minLength: 100)
                 }
                     .padding(.horizontal)
@@ -276,7 +276,7 @@ struct DietView: View {
             }
         }
     }
-    
+
     // MARK: - Date Selector
     private var dateSelectorView: some View {
         HStack {
@@ -321,7 +321,7 @@ struct DietView: View {
                 .stroke(.separator, lineWidth: 0.5)
         )
     }
-    
+
     // MARK: - Plan Nutrition Banner
 
     private func planNutritionBanner(plan: AnimeWorkoutPlan) -> some View {
@@ -577,7 +577,7 @@ struct DietView: View {
             context.safeSave()
         }
     }
-    
+
     // MARK: - Macro Breakdown
     private var macroBreakdownView: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -653,23 +653,23 @@ struct DietView: View {
                 .stroke(.separator, lineWidth: 0.5)
         )
     }
-    
+
     private func macroRow(name: String, consumed: Int, goal: Int, color: Color) -> some View {
         HStack {
             Text(name)
                 .font(.subheadline.weight(.medium))
                 .frame(width: 60, alignment: .leading)
-            
+
             ProgressView(value: Double(consumed) / Double(max(1, goal)))
                 .progressViewStyle(LinearProgressViewStyle(tint: color))
-            
+
             Text("\(consumed)g / \(goal)g")
                 .font(.caption.weight(.medium))
                 .foregroundColor(.secondary)
                 .frame(width: 80, alignment: .trailing)
         }
     }
-    
+
     // MARK: - Micronutrient Breakdown
 
     // Computed daily micronutrient totals from today's food entries
@@ -831,26 +831,26 @@ struct DietView: View {
             mealSection(title: "Snacks", mealType: .snacks, color: .green)
         }
     }
-    
+
     private func mealSection(title: String, mealType: MealType, color: Color) -> some View {
         let mealEntries = todaysFoodEntries.filter { $0.meal == mealType }
         let calories = Int(mealEntries.reduce(0) { $0 + $1.totalCalories })
-        
+
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(title.uppercased())
                     .font(.caption.weight(.bold))
                     .foregroundColor(color)
-                
+
                 Spacer()
-                
+
                 if calories > 0 {
                     Text("\(calories) cal")
                         .font(.caption.weight(.medium))
                         .foregroundColor(.secondary)
                 }
             }
-            
+
             if !mealEntries.isEmpty {
                 // List is required for .swipeActions to work
                 List {
@@ -922,7 +922,7 @@ struct DietView: View {
                 .stroke(.separator, lineWidth: 0.5)
         )
     }
-    
+
     private func foodEntryRow(entry: FoodEntry) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "fork.knife")
@@ -978,7 +978,7 @@ struct DietView: View {
                 .foregroundColor(.secondary)
         }
     }
-    
+
 
 
     // MARK: - Copy Yesterday's Meals
@@ -1009,3 +1009,192 @@ struct DietView: View {
     }
 }
 
+// FoodEntryEditSheet, ReplaceEntryPicker, FoodNutritionSheet, NutritionCell,
+// NutritionGoalsView, AddFoodView, FoodSourceBadge, NutritionGradeBadge,
+// IngredientSafetyFlags, FoodItemRow, FoodCreatorView, QuickAddView, and
+// FoodDetailsView have been extracted to DietViewComponents.swift.
+
+#Preview {
+    DietView()
+        .modelContainer(for: [Profile.self, FoodItem.self, FoodEntry.self, CustomMeal.self], inMemory: true)
+}
+
+// MARK: - Custom Meal Row
+
+struct CustomMealRow: View {
+    let meal: CustomMeal
+    let onAdd: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(meal.name)
+                        .font(.headline.weight(.semibold))
+                        .foregroundColor(.primary)
+
+                    if let description = meal.details {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    HStack(spacing: 12) {
+                        Text("\(Int(meal.totalCalories)) cal")
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.secondary)
+
+                        Text("\(meal.foodItems?.count ?? 0) items")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if meal.isFavorite {
+                            Image(systemName: "heart.fill")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    onAdd()
+                } label: {
+                    Text("Add")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(.green)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+                .stroke(.separator, lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Meal Creator View
+
+struct MealCreatorView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Text("🍳")
+                    .font(.system(size: 60))
+
+                Text("Meal Creator")
+                    .font(.largeTitle.weight(.bold))
+
+                Text("Create custom meals with AI assistance")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Text("Coming Soon!")
+                    .font(.headline)
+                    .foregroundColor(.orange)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.orange.opacity(0.1))
+                    )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Planned Features:")
+                        .font(.headline.weight(.semibold))
+
+                    Text("• AI-powered recipe suggestions")
+                    Text("• Automatic nutrition calculation")
+                    Text("• Ingredient substitutions")
+                    Text("• Meal planning assistance")
+                    Text("• Save favorite combinations")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(.ultraThinMaterial)
+                )
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Meals")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension FoodUnit: Hashable {
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(rawValue)
+    }
+}
+
+extension MealType: Hashable {
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(rawValue)
+    }
+}
+
+// MARK: - Barcode Scanner Wrapper
+
+struct BarcodeScannerWrapper: UIViewControllerRepresentable {
+    let onBarcodeScanned: (String) -> Void
+    let onDismiss: () -> Void
+
+    func makeUIViewController(context: Context) -> BarcodeScannerViewController {
+        let scanner = BarcodeScannerViewController()
+        scanner.delegate = context.coordinator
+        return scanner
+    }
+
+    func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {
+        // No updates needed
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, BarcodeScannerDelegate {
+        let parent: BarcodeScannerWrapper
+
+        init(_ parent: BarcodeScannerWrapper) {
+            self.parent = parent
+        }
+
+        func didCancel() {
+            parent.onDismiss()
+        }
+
+        func didEncounterError(_ error: Error) {
+            print("Barcode scanner error: \(error)")
+            parent.onDismiss()
+        }
+
+        func didScanBarcode(_ code: String) {
+            parent.onBarcodeScanned(code)
+        }
+    }
+}
