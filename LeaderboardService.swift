@@ -197,7 +197,7 @@ final class LeaderboardService: ObservableObject {
         ]
         do {
             try await postToProxy(body: body)
-            friendEntries.removeAll { $0.playerId == playerID || $0.playerId == nil }
+            friendEntries.removeAll { $0.playerId == playerID }
         } catch {
             print("[LeaderboardService] removeFriend failed: \(error.localizedDescription)")
         }

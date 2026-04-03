@@ -90,6 +90,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 dataManager.refreshHealthOnForeground()
+            } else if newPhase == .background {
+                dataManager.saveLocalChanges()
+                Task { await PlayerProfileService.shared.syncProfile() }
             }
         }
         // Notification deep-link routing

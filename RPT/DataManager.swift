@@ -244,10 +244,10 @@ final class DataManager: ObservableObject {
         quest.isCompleted = true
         quest.completedAt = Date()
 
-        // Award XP and register completion
+        // Award XP (through multipliers) and register completion
         if let profile = currentProfile {
             let prevPassCount = profile.exemptionPassCount
-            profile.addXP(quest.xpReward)
+            addXPToProfile(quest.xpReward, source: "Quest")
             profile.registerCompletion()
 
             // If registerCompletion awarded a streak pass, mirror it to InventoryItem
