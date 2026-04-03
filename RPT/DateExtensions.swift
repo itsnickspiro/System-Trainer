@@ -1,4 +1,18 @@
 import Foundation
+import SwiftData
+
+// MARK: - SwiftData Helpers
+
+extension ModelContext {
+    /// Save with error logging instead of silent try? suppression.
+    func safeSave(file: String = #file, line: Int = #line) {
+        do {
+            try save()
+        } catch {
+            print("[SwiftData] Save failed at \((file as NSString).lastPathComponent):\(line): \(error)")
+        }
+    }
+}
 
 extension Date {
     /// Returns the start of the day for this date

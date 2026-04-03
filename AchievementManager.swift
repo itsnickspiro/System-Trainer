@@ -71,7 +71,7 @@ final class AchievementManager: ObservableObject {
         }
 
         if !newlyUnlocked.isEmpty {
-            try? context.save()
+            context.safeSave()
             // Broadcast the most recently unlocked (last in list = most recent)
             recentlyUnlocked = newlyUnlocked.last
             // Clear after a brief delay so the UI resets

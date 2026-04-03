@@ -32,8 +32,8 @@ final class DataManager: ObservableObject {
     /// Active observer queries, keyed by sample type identifier.
     /// Keeping strong references prevents queries from being deallocated.
     private var observerQueries: [String: HKObserverQuery] = [:]
-    /// Direct reference to the HKHealthStore so deinit (nonisolated) can stop queries.
-    private let hkStore = HKHealthStore()
+    /// Reuse HealthManager's HKHealthStore to avoid duplicate instances.
+    private var hkStore: HKHealthStore { healthManager.healthStore }
 
     // MARK: - Combine
     private var cancellables = Set<AnyCancellable>()
@@ -900,12 +900,8 @@ final class DataManager: ObservableObject {
     
     // MARK: - Cleanup
     deinit {
-        // Stop all active HealthKit observer queries.
-        // hkStore is a nonisolated stored property so safe to access in deinit.
-        for query in observerQueries.values {
-            hkStore.stop(query)
-        }
-        observerQueries.removeAll()
+        // DataManager is a singleton — deinit is effectively dead code.
+        // Observer queries are cleaned up implicitly when the process exits.
         cancellables.removeAll()
     }
 }

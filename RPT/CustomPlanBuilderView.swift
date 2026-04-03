@@ -408,7 +408,7 @@ struct GuidedPlanWizard: View {
                 let plan = buildPlan(from: suggestion, answers: answers)
                 await MainActor.run {
                     context.insert(plan)
-                    try? context.save()
+                    context.safeSave()
                     isGenerating = false
                     onPlanCreated(plan)
                 }
@@ -622,7 +622,7 @@ struct ManualPlanBuilderView: View {
         plan.weeklySchedule = schedule
         plan.nutrition = nutrition
         context.insert(plan)
-        try? context.save()
+        context.safeSave()
         onPlanCreated(plan)
         dismiss()
     }

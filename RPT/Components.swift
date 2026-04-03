@@ -693,11 +693,15 @@ struct WeekScroller: View {
                     }
                 )
                 .contentShape(Rectangle())
-                .onTapGesture { 
+                .onTapGesture {
                     withAnimation(.easeInOut(duration: 0.3)) {
-                        selectedDay = day 
+                        selectedDay = day
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAddTraits(.isButton)
                 .scaleEffect(isSelected ? 1.05 : 1.0)
                 .animation(.easeInOut(duration: 0.2), value: isSelected)
             }

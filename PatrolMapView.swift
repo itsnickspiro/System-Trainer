@@ -214,7 +214,7 @@ struct PatrolMapView: View {
 
         // Persist the finished route
         context.insert(sealed)
-        try? context.save()
+        context.safeSave()
 
         // Award XP to profile
         // (Profile XP update is handled by DataManager / QuestManager on next sync)

@@ -405,7 +405,7 @@ private struct ConsumeConfirmationSheet: View {
         applyEffect()
 
         item.quantity -= 1
-        try? context.save()
+        context.safeSave()
 
         withAnimation {
             resultMessage = effectMessage()
@@ -585,7 +585,7 @@ private struct PurchaseConfirmationSheet: View {
 
         profile.subtractXP(item.itemType.shopXPCost)
         item.quantity += 1
-        try? context.save()
+        context.safeSave()
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
 

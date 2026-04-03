@@ -254,7 +254,7 @@ struct ActiveWorkoutView: View {
             profile.lastWorkoutTime = Date()
         }
 
-        try? context.save()
+        context.safeSave()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
 
         // Clear autosave since the workout is finished

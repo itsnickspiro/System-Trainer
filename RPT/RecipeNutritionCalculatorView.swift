@@ -186,7 +186,7 @@ struct RecipeNutritionCalculatorView: View {
         context.insert(foodItem)
         let entry = FoodEntry(foodItem: foodItem, quantity: 100, unit: .grams, meal: .lunch)
         context.insert(entry)
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 

@@ -681,7 +681,7 @@ struct ItemResultSheet: View {
             notes: nil
         )
         context.insert(entry)
-        try? context.save()
+        context.safeSave()
 
         // Write to HealthKit
         writeToHealthKit(servingGrams: servingSize)

@@ -120,7 +120,7 @@ struct WorkoutView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 4)
 
-                    // Date selector — same style as My Diary
+                    // Date selector — same style as Ration Log
                     HStack {
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -260,7 +260,7 @@ struct WorkoutView: View {
                         get: { profile?.activePlanID ?? "" },
                         set: { newID in
                             profile?.activePlanID = newID
-                            try? context.save()
+                            context.safeSave()
                         }
                     ),
                     playerGender: profile?.gender ?? .male,
@@ -273,7 +273,7 @@ struct WorkoutView: View {
                         // bestStreak is intentionally preserved — it's a historical record
                         p.lastCompletionDate = nil
                         p.activePlanID = newID
-                        try? context.save()
+                        context.safeSave()
                     }
                 )
             }
@@ -790,7 +790,7 @@ struct WorkoutView: View {
 
     private func deleteSession(_ session: WorkoutSession) {
         context.delete(session)
-        try? context.save()
+        context.safeSave()
     }
 
     // MARK: - Day Plan from Active Program
@@ -1892,7 +1892,7 @@ struct WorkoutLoggerView: View {
               let jsonString = String(data: json, encoding: .utf8) else { return }
         let routine = ActiveRoutine(name: name, notes: jsonString, gymEnvironment: .fullGym)
         context.insert(routine)
-        try? context.save()
+        context.safeSave()
     }
 
     private func startRestTimer(seconds: Int) {
@@ -2011,7 +2011,7 @@ struct WorkoutLoggerView: View {
         session.totalVolumeKg = totalVol
         session.xpAwarded = min(500, Int(totalVol / 10))
 
-        try? context.save()
+        context.safeSave()
 
         // Haptic feedback for completing a workout
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -2829,7 +2829,7 @@ struct WorkoutTemplatePicker: View {
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button(role: .destructive) {
                                     context.delete(routine)
-                                    try? context.save()
+                                    context.safeSave()
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -2851,7 +2851,7 @@ struct WorkoutTemplatePicker: View {
     private func loadTemplate(_ routine: ActiveRoutine) {
         let entries = decodeExercises(from: routine.notes)
         routine.lastUsedAt = Date()
-        try? context.save()
+        context.safeSave()
         onLoad(entries)
         dismiss()
     }
@@ -3353,7 +3353,7 @@ struct WorkoutSessionEditView: View {
         session.routineName = routineName
         session.notes = notes
         session.durationMinutes = durationMinutes
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }

@@ -208,7 +208,7 @@ struct SettingsView: View {
                         Spacer()
                         Picker("Units", selection: Binding(
                             get: { profile.useMetric },
-                            set: { profile.useMetric = $0; try? context.save() }
+                            set: { profile.useMetric = $0; context.safeSave() }
                         )) {
                             Text("Metric (kg)").tag(true)
                             Text("Imperial (lbs)").tag(false)

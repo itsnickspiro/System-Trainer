@@ -32,6 +32,6 @@ struct SystemDataSeeder {
             context.insert(catalogueEntry)
         }
 
-        try? context.save()
+        context.safeSave()
     }
 }
