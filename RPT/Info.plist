@@ -34,7 +34,6 @@
 		<string>location</string>
 		<string>fetch</string>
 		<string>remote-notification</string>
-		<string>health-update</string>
 	</array>
 </dict>
 </plist>
