@@ -311,8 +311,8 @@ final class Profile {
                 }
                 hasActiveExemption = false
                 exemptionExpiresAt = nil
-                // Defer deadline by 24 hours — they consumed a pass
-                hardcoreResetDeadline = Calendar.current.date(byAdding: .day, value: 1, to: now)
+                // Defer deadline by 24 hours from the original deadline (not from now)
+                hardcoreResetDeadline = Calendar.current.date(byAdding: .day, value: 1, to: deadline)
                 return
             }
             // Expired exemption flag — clear and fall through to reset
@@ -1382,8 +1382,9 @@ final class WorkoutSession {
     }
 
     func finish() {
-        finishedAt = Date()
-        durationMinutes = Int(finishedAt!.timeIntervalSince(startedAt) / 60)
+        let now = Date()
+        finishedAt = now
+        durationMinutes = Int(now.timeIntervalSince(startedAt) / 60)
         totalVolumeKg = (sets ?? []).reduce(0) { $0 + ($1.weightKg * Double($1.reps)) }
         // XP = 1 pt per 10 kg of volume, capped to encourage quality over spam
         xpAwarded = min(500, Int(totalVolumeKg / 10))

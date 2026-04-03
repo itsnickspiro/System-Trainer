@@ -8,7 +8,7 @@ extension Date {
     
     /// Returns the end of the day for this date
     func endOfDay() -> Date {
-        return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay())!
+        return Calendar.current.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay()) ?? self
     }
 }
 

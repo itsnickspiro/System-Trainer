@@ -627,12 +627,13 @@ struct DietView: View {
 
                     // Fiber row — no goal line, informational
                     HStack {
+                        let fiberGoal: Double = profile.gender == .male ? 38.0 : 25.0
                         Text("Fiber")
                             .font(.subheadline.weight(.medium))
                             .frame(width: 60, alignment: .leading)
-                        ProgressView(value: min(1.0, todaysFiber / 25.0))
+                        ProgressView(value: min(1.0, todaysFiber / fiberGoal))
                             .progressViewStyle(LinearProgressViewStyle(tint: .purple))
-                        Text("\(Int(todaysFiber))g / 25g")
+                        Text("\(Int(todaysFiber))g / \(Int(fiberGoal))g")
                             .font(.caption.weight(.medium))
                             .foregroundColor(.secondary)
                             .frame(width: 80, alignment: .trailing)
@@ -1944,10 +1945,16 @@ struct AddFoodView: View {
     private func handleBarcodeScanned(_ barcode: String) {
         isLoadingBarcode = true
         barcodeError = nil
-        
+
+        // AVCapture pads 12-digit UPC-A to 13-digit EAN-13 with a leading "0".
+        // Strip it so Supabase lookups match stored 12-digit UPC-A codes.
+        let lookupBarcode = barcode.count == 13 && barcode.hasPrefix("0")
+            ? String(barcode.dropFirst())
+            : barcode
+
         Task {
             do {
-                let food = try await foodDatabase.searchFoodByBarcode(barcode)
+                let food = try await foodDatabase.searchFoodByBarcode(lookupBarcode)
                 
                 await MainActor.run {
                     isLoadingBarcode = false

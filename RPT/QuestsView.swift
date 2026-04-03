@@ -330,7 +330,7 @@ struct ImpossibleDayBanner: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(warning.questTitle)
                             .font(.caption.weight(.semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                         Text(warning.reason)
                             .font(.caption2)
                             .foregroundColor(.secondary)

@@ -188,13 +188,15 @@ struct PatrolMapView: View {
         // Fit camera to all coordinates with padding
         let lats = displayCoords.map(\.latitude)
         let lngs = displayCoords.map(\.longitude)
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLng = lngs.min(), let maxLng = lngs.max() else { return }
         let center = CLLocationCoordinate2D(
-            latitude:  (lats.min()! + lats.max()!) / 2,
-            longitude: (lngs.min()! + lngs.max()!) / 2
+            latitude:  (minLat + maxLat) / 2,
+            longitude: (minLng + maxLng) / 2
         )
         let span = MKCoordinateSpan(
-            latitudeDelta:  (lats.max()! - lats.min()!) * 1.4 + 0.003,
-            longitudeDelta: (lngs.max()! - lngs.min()!) * 1.4 + 0.003
+            latitudeDelta:  (maxLat - minLat) * 1.4 + 0.003,
+            longitudeDelta: (maxLng - minLng) * 1.4 + 0.003
         )
         cameraPosition = .region(MKCoordinateRegion(center: center, span: span))
     }
