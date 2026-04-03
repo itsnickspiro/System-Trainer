@@ -879,7 +879,7 @@ final class DataManager: ObservableObject {
     }
     
     // MARK: - Local Storage
-    private func saveLocalChanges() {
+    func saveLocalChanges() {
         guard let context = modelContext else { return }
         
         do {
