@@ -305,7 +305,8 @@ final class Profile {
                 ? (exemptionExpiresAt.map { now < $0 } ?? false)
                 : true // pass count ≥ 1 is always valid
             if exemptionValid {
-                if exemptionPassCount > 0 {
+                // Only consume a pass if one wasn't already consumed by activateExemption()
+                if !hasActiveExemption && exemptionPassCount > 0 {
                     exemptionPassCount -= 1
                 }
                 hasActiveExemption = false
@@ -362,6 +363,8 @@ final class Profile {
     /// Returns true if the item was available and consumed.
     @discardableResult
     func activateExemption(durationHours: Int = 24) -> Bool {
+        guard exemptionPassCount > 0 else { return false }
+        exemptionPassCount -= 1
         hasActiveExemption = true
         exemptionExpiresAt = Calendar.current.date(byAdding: .hour, value: durationHours, to: Date())
         return true

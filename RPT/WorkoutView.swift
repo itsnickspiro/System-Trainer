@@ -266,11 +266,11 @@ struct WorkoutView: View {
                     playerGender: profile?.gender ?? .male,
                     onConfirmSwitch: { newID in
                         guard let p = profile else { return }
-                        // Lock-in penalty: full reset when switching or abandoning a plan
+                        // Lock-in penalty: reset progress but preserve all-time best streak
                         p.xp = 0
                         p.level = 1
                         p.currentStreak = 0
-                        p.bestStreak = 0
+                        // bestStreak is intentionally preserved — it's a historical record
                         p.lastCompletionDate = nil
                         p.activePlanID = newID
                         try? context.save()

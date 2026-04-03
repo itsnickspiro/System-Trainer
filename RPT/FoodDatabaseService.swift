@@ -274,34 +274,37 @@ private struct USDAFood: Decodable {
         let name = description.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return nil }
 
-        let cal100g = nutrientValue(.calories)
         let serving = servingGrams
+        // USDA Branded foods report nutrients per serving, not per 100g.
+        // Foundation/SR Legacy report per 100g. Convert branded to per-100g.
+        let isBranded = dataType == "Branded"
+        let scale = isBranded && serving > 0 ? 100.0 / serving : 1.0
 
         let item = FoodItem(
             name: name,
             brand: brandName ?? brandOwner,
             barcode: nil,
-            caloriesPer100g: cal100g,
+            caloriesPer100g: nutrientValue(.calories) * scale,
             servingSize: serving,
-            carbohydrates: nutrientValue(.carbs),
-            protein: nutrientValue(.protein),
-            fat: nutrientValue(.fat),
-            fiber: nutrientValue(.fiber),
-            sugar: nutrientValue(.sugar),
-            sodium: nutrientValue(.sodium),    // USDA reports in mg
+            carbohydrates: nutrientValue(.carbs) * scale,
+            protein: nutrientValue(.protein) * scale,
+            fat: nutrientValue(.fat) * scale,
+            fiber: nutrientValue(.fiber) * scale,
+            sugar: nutrientValue(.sugar) * scale,
+            sodium: nutrientValue(.sodium) * scale,
             category: .other,
             isCustom: false
         )
-        item.potassiumMg    = nutrientValue(.potassium)
-        item.calciumMg      = nutrientValue(.calcium)
-        item.ironMg         = nutrientValue(.iron)
-        item.vitaminCMg     = nutrientValue(.vitC)
-        item.vitaminDMcg    = nutrientValue(.vitD)
-        item.vitaminB12Mcg  = nutrientValue(.vitB12)
-        item.magnesiumMg    = nutrientValue(.magnesium)
-        item.zincMg         = nutrientValue(.zinc)
-        item.saturatedFatG  = nutrientValue(.saturatedFat)
-        item.cholesterolMg  = nutrientValue(.cholesterol)
+        item.potassiumMg    = nutrientValue(.potassium) * scale
+        item.calciumMg      = nutrientValue(.calcium) * scale
+        item.ironMg         = nutrientValue(.iron) * scale
+        item.vitaminCMg     = nutrientValue(.vitC) * scale
+        item.vitaminDMcg    = nutrientValue(.vitD) * scale
+        item.vitaminB12Mcg  = nutrientValue(.vitB12) * scale
+        item.magnesiumMg    = nutrientValue(.magnesium) * scale
+        item.zincMg         = nutrientValue(.zinc) * scale
+        item.saturatedFatG  = nutrientValue(.saturatedFat) * scale
+        item.cholesterolMg  = nutrientValue(.cholesterol) * scale
         item.dataSource     = "USDA"
         item.isVerified     = true
         return item

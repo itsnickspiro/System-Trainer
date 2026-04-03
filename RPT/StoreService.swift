@@ -238,7 +238,7 @@ final class StoreService: ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            return Data()
+            throw URLError(.badServerResponse)
         }
         return data
     }

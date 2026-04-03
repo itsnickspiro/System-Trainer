@@ -586,7 +586,7 @@ private struct PurchaseConfirmationSheet: View {
 
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
 
-        profile.xp -= item.itemType.shopXPCost
+        profile.subtractXP(item.itemType.shopXPCost)
         item.quantity += 1
         try? context.save()
 

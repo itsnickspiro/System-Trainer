@@ -100,7 +100,7 @@ final class DataManager: ObservableObject {
         guard let context = modelContext else { return }
         
         let today = Calendar.current.startOfDay(for: Date())
-        let tomorrow = today.addingTimeInterval(86400) // Calculate outside the predicate
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86400)
         let questDescriptor = FetchDescriptor<Quest>(
             predicate: #Predicate<Quest> { quest in
                 quest.dateTag >= today && quest.dateTag < tomorrow
@@ -236,6 +236,11 @@ final class DataManager: ObservableObject {
     }
     
     func completeQuest(_ quest: Quest) {
+        // Idempotency: prevent double-completion from concurrent code paths
+        guard !quest.isCompleted else { return }
+        // Date guard: only allow completing quests dated today
+        guard Calendar.current.isDateInToday(quest.dateTag) else { return }
+
         quest.isCompleted = true
         quest.completedAt = Date()
 
@@ -467,6 +472,10 @@ final class DataManager: ObservableObject {
 
         // Already generated today — skip
         guard !Calendar.current.isDate(lastGenerated, inSameDayAs: today) else { return }
+
+        // Reset daily activity counters for the new day
+        UserDefaults.standard.set(0, forKey: "rpt_quests_today")
+        UserDefaults.standard.set(0, forKey: "rpt_workouts_today")
 
         guard let context = modelContext, let profile = currentProfile else { return }
 
