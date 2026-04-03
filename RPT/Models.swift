@@ -13,6 +13,9 @@ final class Profile {
     var level: Int = 1
     var currentStreak: Int = 0
     var bestStreak: Int = 0
+    /// Monotonically increasing total XP earned (never decremented).
+    /// Used for CloudKit conflict resolution — highest totalXPEarned wins.
+    var totalXPEarned: Int = 0
     var lastCompletionDate: Date?
     var hardcoreResetDeadline: Date?
 
@@ -235,6 +238,7 @@ final class Profile {
 
     func addXP(_ amount: Int) {
         xp += amount
+        if amount > 0 { totalXPEarned += amount }
         // Level up every 100 XP plus 50 XP per level increment
         while xp >= levelXPThreshold(level: level) {
             xp -= levelXPThreshold(level: level)
