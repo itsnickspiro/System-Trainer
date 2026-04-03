@@ -739,7 +739,7 @@ struct DietView: View {
                         Text("\(food.novaGroup)")
                             .font(.system(size: 18, weight: .black, design: .rounded))
                             .foregroundColor(food.novaGroup == 4 ? .red : food.novaGroup == 3 ? .orange : .green)
-                        Text(["", "Unprocessed", "Culinary", "Processed", "Ultra"][food.novaGroup])
+                        Text(["", "Unprocessed", "Culinary", "Processed", "Ultra"][min(max(food.novaGroup, 0), 4)])
                             .font(.system(size: 7, weight: .semibold))
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -1381,7 +1381,7 @@ struct FoodNutritionSheet: View {
                         Text("\(food.novaGroup)")
                             .font(.system(size: 18, weight: .black, design: .rounded))
                             .foregroundColor(food.novaGroup == 4 ? .red : food.novaGroup == 3 ? .orange : .green)
-                        Text(["", "Unprocessed", "Culinary", "Processed", "Ultra"][food.novaGroup])
+                        Text(["", "Unprocessed", "Culinary", "Processed", "Ultra"][min(max(food.novaGroup, 0), 4)])
                             .font(.system(size: 7, weight: .semibold))
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -2488,11 +2488,12 @@ struct QuickAddView: View {
         let caloriesValue = Double(calories) ?? 0
         let foodName = description.isEmpty ? "Quick Add (\(Int(caloriesValue)) cal)" : description
         
-        // Create a quick add food item
+        // Create a quick add food item — servingSize must be 100 so that
+        // caloriesPerServing = caloriesPer100g (the user's entered value).
         let foodItem = FoodItem(
             name: foodName,
             caloriesPer100g: caloriesValue,
-            servingSize: 1,
+            servingSize: 100,
             category: .other
         )
         

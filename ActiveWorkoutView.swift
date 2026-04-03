@@ -250,8 +250,8 @@ struct ActiveWorkoutView: View {
         context.insert(session)
 
         if let profile {
-            let multiplier = profile.hasDoubleXP ? 2 : 1
-            profile.xp += session.xpAwarded * multiplier
+            let doubleXPMultiplier = profile.hasDoubleXP ? 2 : 1
+            DataManager.shared.addXPToProfile(session.xpAwarded * doubleXPMultiplier, source: "Workout")
             profile.lastWorkoutTime = Date()
         }
 

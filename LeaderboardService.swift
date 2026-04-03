@@ -249,7 +249,9 @@ final class LeaderboardService: ObservableObject {
                 try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 throw CancellationError()
             }
-            let result = try await group.next()!
+            guard let result = try await group.next() else {
+                throw CancellationError()
+            }
             group.cancelAll()
             return result
         }

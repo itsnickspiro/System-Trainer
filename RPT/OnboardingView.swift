@@ -54,12 +54,6 @@ struct OnboardingView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // DEBUG: confirm OnboardingView is rendering
-                Text("Step \(currentStep)")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .padding(.top, 8)
-
                 // Progress bar (hidden on boot and ready screens)
                 if !noProgressBarSteps.contains(currentStep) {
                     progressBar
