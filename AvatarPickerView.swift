@@ -307,5 +307,6 @@ struct AvatarImageView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .accessibilityLabel("Player avatar")
     }
 }

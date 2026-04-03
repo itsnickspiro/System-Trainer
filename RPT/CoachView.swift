@@ -231,7 +231,7 @@ struct CoachView: View {
     private func logWater() {
         guard let profile = dataManager.currentProfile else { return }
         profile.waterIntake += 1
-        try? context.save()
+        context.safeSave()
         let glasses = profile.waterIntake
         let systemMsg = glasses >= 8
             ? "Directive: \(glasses) glasses logged. Hydration threshold achieved. Endurance XP unlocked."
@@ -244,7 +244,7 @@ struct CoachView: View {
     private func logSleep(hours: Double) {
         guard let profile = dataManager.currentProfile else { return }
         profile.sleepHours = hours
-        try? context.save()
+        context.safeSave()
         let formatted = String(format: "%.1f", hours)
         let systemMsg: String
         if hours >= 8 {

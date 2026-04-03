@@ -15,7 +15,7 @@ class SampleFoodData {
                 context.insert(food)
             }
             createSampleMeals(context: context, foods: foods)
-            try? context.save()
+            context.safeSave()
             print("✅ Created \(foods.count) sample foods and meals")
         }
     }

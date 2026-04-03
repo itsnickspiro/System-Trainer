@@ -37,10 +37,10 @@ struct BodyMetricsView: View {
                             Image(systemName: "scalemass.fill")
                                 .font(.system(size: 44))
                                 .foregroundColor(.secondary)
-                            Text("No measurements yet")
+                            Text("NO BIOMETRIC DATA ON FILE")
                                 .font(.headline)
                                 .foregroundColor(.secondary)
-                            Text("Tap + to log your weight and measurements.")
+                            Text("Log your physical parameters to begin tracking.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -76,7 +76,7 @@ struct BodyMetricsView: View {
         for idx in offsets {
             context.delete(measurements[idx])
         }
-        try? context.save()
+        context.safeSave()
     }
 }
 
@@ -299,7 +299,7 @@ struct AddBodyMeasurementView: View {
             note: note.trimmingCharacters(in: .whitespaces)
         )
         context.insert(m)
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }

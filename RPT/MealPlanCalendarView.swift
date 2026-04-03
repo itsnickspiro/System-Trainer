@@ -392,7 +392,7 @@ struct AddPlannedMealSheet: View {
                             estimatedCalories: estimatedCalories
                         )
                         context.insert(meal)
-                        try? context.save()
+                        context.safeSave()
                         dismiss()
                     }
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -461,14 +461,14 @@ struct EditPlannedMealSheet: View {
                 Section {
                     Toggle("Mark as Completed", isOn: Binding(
                         get: { meal.isCompleted },
-                        set: { meal.isCompleted = $0; try? context.save() }
+                        set: { meal.isCompleted = $0; context.safeSave() }
                     ))
                 }
 
                 Section {
                     Button("Delete Meal", role: .destructive) {
                         context.delete(meal)
-                        try? context.save()
+                        context.safeSave()
                         dismiss()
                     }
                 }
@@ -486,7 +486,7 @@ struct EditPlannedMealSheet: View {
                         meal.estimatedCalories = estimatedCalories
                         meal.plannedDate = selectedDate
                         meal.mealSlot = selectedSlot
-                        try? context.save()
+                        context.safeSave()
                         dismiss()
                     }
                 }

@@ -60,7 +60,7 @@ struct ProgressChartsView: View {
 
     private var levelProgressCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Level Progress", systemImage: "chart.line.uptrend.xyaxis")
+            Label("RANK PROGRESSION", systemImage: "chart.line.uptrend.xyaxis")
                 .font(.headline)
                 .foregroundColor(.cyan)
 
@@ -150,7 +150,7 @@ struct ProgressChartsView: View {
 
     private var weeklyWorkoutChart: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Workouts Per Week", systemImage: "chart.bar.fill")
+            Label("TRAINING FREQUENCY", systemImage: "chart.bar.fill")
                 .font(.headline)
                 .foregroundColor(.orange)
 
@@ -191,7 +191,7 @@ struct ProgressChartsView: View {
 
     private var streakCalendar: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Activity Heatmap", systemImage: "calendar")
+            Label("DISCIPLINE LOG", systemImage: "calendar")
                 .font(.headline)
                 .foregroundColor(.green)
 

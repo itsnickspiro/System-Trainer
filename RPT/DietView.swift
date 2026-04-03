@@ -130,7 +130,7 @@ struct DietView: View {
             VStack(spacing: 0) {
                 // Pinned header
                 HStack {
-                    Text("My Diary")
+                    Text("RATION LOG")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(.primary)
                     Spacer()
@@ -436,7 +436,7 @@ struct DietView: View {
                 Button {
                     guard waterGlasses > 0 else { return }
                     profile.waterIntake = waterGlasses - 1
-                    try? context.save()
+                    context.safeSave()
                 } label: {
                     Image(systemName: "minus.circle.fill")
                         .font(.system(size: 30))
@@ -445,6 +445,8 @@ struct DietView: View {
                 .buttonStyle(.plain)
                 .disabled(waterGlasses == 0)
                 .frame(maxWidth: .infinity)
+                .accessibilityLabel("Remove water glass")
+                .accessibilityValue("\(waterGlasses) glasses")
 
                 // Calorie ring
                 ZStack {
@@ -475,13 +477,15 @@ struct DietView: View {
                 // Water plus
                 Button {
                     profile.recordWaterIntake()
-                    try? context.save()
+                    context.safeSave()
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 30))
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Add water glass")
+                .accessibilityValue("\(waterGlasses) glasses")
                 .frame(maxWidth: .infinity)
             }
 
@@ -570,7 +574,7 @@ struct DietView: View {
         }
         .onChange(of: todaysFoodEntries.count) { _, _ in
             profile.updateNutritionFromFoodEntries(todaysFoodEntries)
-            try? context.save()
+            context.safeSave()
         }
     }
     
@@ -881,7 +885,7 @@ struct DietView: View {
                 .frame(height: CGFloat(mealEntries.count) * 62)
 
                 if !isDateLocked {
-                    Button("Add Food") {
+                    Button("Log Rations") {
                         selectedMealForAdding = mealType
                         showingAddFood = true
                     }
@@ -890,7 +894,7 @@ struct DietView: View {
                     .padding(.top, 4)
                 }
             } else if !isDateLocked {
-                Button("Add Food") {
+                Button("Log Rations") {
                     selectedMealForAdding = mealType
                     showingAddFood = true
                 }
@@ -980,7 +984,7 @@ struct DietView: View {
     // MARK: - Copy Yesterday's Meals
     private func deleteFoodEntry(_ entry: FoodEntry) {
         context.delete(entry)
-        try? context.save()
+        context.safeSave()
     }
 
     private func copyYesterdaysMeals() {
@@ -1001,7 +1005,7 @@ struct DietView: View {
             )
             context.insert(copy)
         }
-        try? context.save()
+        context.safeSave()
     }
 }
 
@@ -1080,7 +1084,7 @@ struct FoodEntryEditSheet: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Delete", role: .destructive) {
                         context.delete(entry)
-                        try? context.save()
+                        context.safeSave()
                         dismiss()
                     }
                     .foregroundColor(.red)
@@ -1100,7 +1104,7 @@ struct FoodEntryEditSheet: View {
         let newQty = Double(quantity) ?? entry.quantity
         entry.quantity = newQty
         entry.unit = selectedUnit
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }
@@ -1128,7 +1132,7 @@ struct ReplaceEntryPicker: View {
                 ForEach(filtered, id: \.id) { food in
                     Button {
                         entry.foodItem = food
-                        try? context.save()
+                        context.safeSave()
                         onReplaced()
                         dismiss()
                     } label: {
@@ -1623,7 +1627,7 @@ struct NutritionGoalsView: View {
         p.customProteinGoal = Int(proteinOverride) ?? 0
         p.customCarbGoal = Int(carbOverride) ?? 0
         p.customFatGoal = Int(fatOverride) ?? 0
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }
@@ -1815,7 +1819,7 @@ struct AddFoodView: View {
                                     FoodItemRow(food: food, showSourceBadge: true) { quantity, unit in
                                         // Save to local DB on first use
                                         context.insert(food)
-                                        try? context.save()
+                                        context.safeSave()
                                         addFoodEntry(food: food, quantity: quantity, unit: unit)
                                     }
                                 }
@@ -1962,7 +1966,7 @@ struct AddFoodView: View {
                     if let food = food {
                         // Add the food to the database
                         context.insert(food)
-                        try? context.save()
+                        context.safeSave()
                         
                         // Show the food in a selection view
                         showFoodForSelection(food)
@@ -1999,7 +2003,7 @@ struct AddFoodView: View {
         )
         
         context.insert(entry)
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
     
@@ -2017,7 +2021,7 @@ struct AddFoodView: View {
         }
         
         meal.lastUsed = Date()
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }
@@ -2209,7 +2213,7 @@ struct FoodItemRow: View {
                 // Favorite toggle
                 Button {
                     food.isFavorite.toggle()
-                    try? context.save()
+                    context.safeSave()
                 } label: {
                     Image(systemName: food.isFavorite ? "heart.fill" : "heart")
                         .foregroundColor(food.isFavorite ? .red : .secondary)
@@ -2423,7 +2427,7 @@ struct FoodCreatorView: View {
         )
         
         context.insert(foodItem)
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }
@@ -2516,7 +2520,7 @@ struct QuickAddView: View {
         )
         
         context.insert(entry)
-        try? context.save()
+        context.safeSave()
         dismiss()
     }
 }
