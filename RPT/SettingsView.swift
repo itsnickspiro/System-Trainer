@@ -389,7 +389,7 @@ struct ProfileSummaryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(.primary)
                 
                 Text("Level \(profile.level) • \(profile.xp) XP")
                     .font(.caption)

@@ -248,6 +248,8 @@ struct HomeView: View {
                                     lineWidth: 3,
                                     action: { selectedStatForDetails = .health }
                                 )
+                                .accessibilityLabel("Health: \(Int(RPGStatsBar.StatType.health.getValue(from: currentProfile)))%")
+                                .accessibilityHint("Double-tap to view details")
                                 CurvedStatRing(
                                     progress: min(1.0, RPGStatsBar.StatType.energy.getValue(from: currentProfile) / 100.0),
                                     color: RPGStatsBar.StatType.energy.color,
@@ -256,6 +258,8 @@ struct HomeView: View {
                                     lineWidth: 3,
                                     action: { selectedStatForDetails = .energy }
                                 )
+                                .accessibilityLabel("Energy: \(Int(RPGStatsBar.StatType.energy.getValue(from: currentProfile)))%")
+                                .accessibilityHint("Double-tap to view details")
                                 CurvedStatRing(
                                     progress: min(1.0, RPGStatsBar.StatType.strength.getValue(from: currentProfile) / 100.0),
                                     color: RPGStatsBar.StatType.strength.color,
@@ -264,6 +268,8 @@ struct HomeView: View {
                                     lineWidth: 3,
                                     action: { selectedStatForDetails = .strength }
                                 )
+                                .accessibilityLabel("Strength: \(Int(RPGStatsBar.StatType.strength.getValue(from: currentProfile)))%")
+                                .accessibilityHint("Double-tap to view details")
                                 CurvedStatRing(
                                     progress: min(1.0, RPGStatsBar.StatType.endurance.getValue(from: currentProfile) / 100.0),
                                     color: RPGStatsBar.StatType.endurance.color,
@@ -272,6 +278,8 @@ struct HomeView: View {
                                     lineWidth: 3,
                                     action: { selectedStatForDetails = .endurance }
                                 )
+                                .accessibilityLabel("Endurance: \(Int(RPGStatsBar.StatType.endurance.getValue(from: currentProfile)))%")
+                                .accessibilityHint("Double-tap to view details")
                                 CurvedStatRing(
                                     progress: min(1.0, RPGStatsBar.StatType.focus.getValue(from: currentProfile) / 100.0),
                                     color: RPGStatsBar.StatType.focus.color,
@@ -280,6 +288,8 @@ struct HomeView: View {
                                     lineWidth: 3,
                                     action: { selectedStatForDetails = .focus }
                                 )
+                                .accessibilityLabel("Focus: \(Int(RPGStatsBar.StatType.focus.getValue(from: currentProfile)))%")
+                                .accessibilityHint("Double-tap to view details")
                                 CurvedStatRing(
                                     progress: min(1.0, RPGStatsBar.StatType.discipline.getValue(from: currentProfile) / 100.0),
                                     color: RPGStatsBar.StatType.discipline.color,
@@ -288,6 +298,8 @@ struct HomeView: View {
                                     lineWidth: 3,
                                     action: { selectedStatForDetails = .discipline }
                                 )
+                                .accessibilityLabel("Discipline: \(Int(RPGStatsBar.StatType.discipline.getValue(from: currentProfile)))%")
+                                .accessibilityHint("Double-tap to view details")
                             }
                             .padding(.leading, 0)
                         }

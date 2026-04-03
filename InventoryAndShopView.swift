@@ -51,13 +51,10 @@ struct InventoryAndShopView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .background(Color.black.ignoresSafeArea())
+            .background(Color(.systemBackground).ignoresSafeArea())
             .navigationTitle("INVENTORY")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
     }
 
     // Items the player actually owns (quantity > 0)

@@ -524,7 +524,6 @@ struct HealthSettingsView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
         .alert("Revoke Health Access", isPresented: $showingPermissions) {
             Button("Open Settings") {
                 if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {

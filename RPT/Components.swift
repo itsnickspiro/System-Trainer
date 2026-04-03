@@ -483,7 +483,7 @@ struct StatDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stat.displayName)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
 
                     Text("Current: \(Int(value))/100")
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -658,7 +658,7 @@ struct WeekScroller: View {
                     
                     Text(day.formatted(.dateTime.day()))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(isSelected ? .black : .white)
+                        .foregroundColor(isSelected ? .black : .primary)
                     
                     // Today indicator
                     if isToday && !isSelected {
@@ -731,7 +731,7 @@ struct QuestRow: View {
                 HStack {
                     Text(quest.title)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(.primary)
                     Spacer()
                     Text(quest.type.displayName.uppercased())
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
@@ -832,6 +832,8 @@ struct QuestRow: View {
             }
             .buttonStyle(.plain)
             .allowsHitTesting(!isLocked)
+            .accessibilityLabel(quest.isCompleted ? "Mark \(quest.title) incomplete" : "Complete \(quest.title)")
+            .accessibilityHint(isLocked ? "Locked — past day" : "Double-tap to toggle")
         }
         .padding()
         .background(
