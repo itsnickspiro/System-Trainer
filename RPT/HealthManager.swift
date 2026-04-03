@@ -69,7 +69,10 @@ class HealthManager: ObservableObject {
                 HKQuantityType(.dietaryProtein)
             ]
             try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
-            isAuthorized = true
+            // requestAuthorization succeeds even when user denies all types.
+            // Check at least one read type to determine if we have meaningful access.
+            let stepStatus = healthStore.authorizationStatus(for: HKQuantityType(.stepCount))
+            isAuthorized = stepStatus != .notDetermined
         } catch {
             print("HealthKit authorization failed: \(error)")
             isAuthorized = false
