@@ -320,11 +320,10 @@ final class Profile {
             exemptionExpiresAt = nil
         }
 
-        // Penalty: full Level 1 reset
+        // Penalty: full Level 1 reset (bestStreak preserved — it's a historical record)
         xp = 0
         level = 1
         currentStreak = 0
-        bestStreak = 0
         lastCompletionDate = nil
         hardcoreResetDeadline = nil
         health = max(20.0, health - 30.0)

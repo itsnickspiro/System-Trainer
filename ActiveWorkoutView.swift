@@ -116,7 +116,6 @@ struct ActiveWorkoutView: View {
                     .foregroundStyle(.red)
                 }
             }
-            .preferredColorScheme(.dark)
         }
         .onAppear(perform: buildInitialSets)
         .alert("Resume Workout?", isPresented: $showResumeAlert, presenting: pendingAutosave) { save in

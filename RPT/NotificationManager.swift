@@ -193,11 +193,24 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Handle custom action buttons (e.g., "Mark Complete" from notification)
+        switch response.actionIdentifier {
+        case "COMPLETE_QUEST":
+            NotificationCenter.default.post(name: .navigateToQuests, object: nil)
+            completionHandler()
+            return
+        case "SNOOZE_QUEST":
+            scheduleStreakWarning()
+            completionHandler()
+            return
+        default:
+            break
+        }
+
+        // Handle notification taps (default action)
         let identifier = response.notification.request.identifier
-        
-        // Handle notification taps
         handleNotificationResponse(identifier: identifier)
-        
+
         completionHandler()
     }
     
