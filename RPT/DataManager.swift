@@ -477,15 +477,17 @@ final class DataManager: ObservableObject {
         // ── Check if yesterday's quests were all completed ────────────────────
         // If any were left incomplete, set the hardcore reset deadline to now
         // so applyHardcoreResetIfNeeded() can trigger the penalty.
-        let yesterday = today.addingTimeInterval(-86400)
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today.addingTimeInterval(-86400)
         let yesterdayDescriptor = FetchDescriptor<Quest>(
             predicate: #Predicate<Quest> { q in q.dateTag >= yesterday && q.dateTag < today }
         )
         if let yesterdayQuests = try? context.fetch(yesterdayDescriptor), !yesterdayQuests.isEmpty {
             let allComplete = yesterdayQuests.allSatisfy { $0.isCompleted }
             if !allComplete && profile.hardcoreResetDeadline == nil {
-                // Missed quests — arm the reset deadline for right now
-                profile.hardcoreResetDeadline = Date()
+                // Missed quests — arm the reset deadline for end of today,
+                // giving the player time to use an Exemption Pass before the penalty fires.
+                let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86400)
+                profile.hardcoreResetDeadline = endOfToday
             }
         }
 
