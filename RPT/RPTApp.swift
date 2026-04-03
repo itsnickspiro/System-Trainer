@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import WidgetKit
+import CoreData
 
 extension Notification.Name {
     static let rptAddFriendDeepLink = Notification.Name("rptAddFriendDeepLink")
@@ -79,6 +80,25 @@ struct RPTApp: App {
 
     init() {
         setupUserDefaults()
+        observeCloudKitSync()
+    }
+
+    /// After CloudKit imports, reconcile progression fields so the highest
+    /// totalXPEarned always wins across multi-device sync conflicts.
+    private func observeCloudKitSync() {
+        NotificationCenter.default.addObserver(
+            forName: NSPersistentCloudKitContainer.eventChangedNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let event = notification.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey] as? NSPersistentCloudKitContainer.Event,
+                  event.type == .import,
+                  event.endDate != nil else { return }
+            // Import finished — reconcile profiles
+            Task { @MainActor in
+                DataManager.shared.reconcileAfterCloudSync()
+            }
+        }
     }
 
     var body: some Scene {

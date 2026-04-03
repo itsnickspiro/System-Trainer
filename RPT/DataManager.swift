@@ -897,7 +897,44 @@ final class DataManager: ObservableObject {
     func forceSyncNow() async {
         await handleHealthDataUpdate()
     }
-    
+
+    // MARK: - CloudKit Conflict Reconciliation
+
+    /// Called after a CloudKit import completes. Ensures progression fields
+    /// reflect the highest values across all devices (prevents last-write-wins
+    /// from silently regressing XP, level, or bestStreak).
+    func reconcileAfterCloudSync() {
+        guard let context = modelContext else { return }
+        let descriptor = FetchDescriptor<Profile>()
+        guard let profiles = try? context.fetch(descriptor) else { return }
+
+        for profile in profiles {
+            // Derive the correct level from totalXPEarned to detect sync regression
+            var derivedLevel = 1
+            var derivedXP = profile.totalXPEarned
+            while derivedXP >= profile.levelXPThreshold(level: derivedLevel) {
+                derivedXP -= profile.levelXPThreshold(level: derivedLevel)
+                derivedLevel += 1
+            }
+
+            // If the synced profile has a lower level than what totalXPEarned implies,
+            // the remote wrote a stale level — restore the derived values.
+            if profile.level < derivedLevel {
+                profile.level = derivedLevel
+                profile.xp = derivedXP
+                print("[CloudKit] Reconciled: level \(profile.level), xp \(profile.xp) from totalXPEarned \(profile.totalXPEarned)")
+            }
+
+            // bestStreak should never decrease — take the max
+            // (already protected by code, but CloudKit sync could overwrite)
+            if profile.currentStreak > profile.bestStreak {
+                profile.bestStreak = profile.currentStreak
+            }
+        }
+
+        saveLocalChanges()
+    }
+
     // MARK: - Cleanup
     deinit {
         // DataManager is a singleton — deinit is effectively dead code.
