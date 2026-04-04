@@ -107,24 +107,22 @@ class HealthManager: ObservableObject {
     private func fetchSteps(for profile: Profile, from startDate: Date, to endDate: Date) async {
         let stepsType = HKQuantityType(.stepCount)
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-        
+
         do {
-            let samples = try await queryHealthData(type: stepsType, predicate: predicate)
-            let totalSteps = samples.reduce(0) { $0 + Int($1.quantity.doubleValue(for: .count())) }
-            profile.dailySteps = totalSteps
+            let totalSteps = try await queryStatistics(type: stepsType, predicate: predicate, unit: .count())
+            profile.dailySteps = Int(totalSteps)
         } catch {
             print("Failed to fetch steps: \(error)")
         }
     }
-    
+
     private func fetchActiveCalories(for profile: Profile, from startDate: Date, to endDate: Date) async {
         let caloriesType = HKQuantityType(.activeEnergyBurned)
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
-        
+
         do {
-            let samples = try await queryHealthData(type: caloriesType, predicate: predicate)
-            let totalCalories = samples.reduce(0) { $0 + Int($1.quantity.doubleValue(for: .kilocalorie())) }
-            profile.dailyActiveCalories = totalCalories
+            let totalCalories = try await queryStatistics(type: caloriesType, predicate: predicate, unit: .kilocalorie())
+            profile.dailyActiveCalories = Int(totalCalories)
         } catch {
             print("Failed to fetch active calories: \(error)")
         }
@@ -229,6 +227,27 @@ class HealthManager: ObservableObject {
                 }
             }
             self.healthStore.execute(query)
+        }
+    }
+
+    /// Uses HKStatisticsQuery to get a de-duplicated cumulative sum.
+    /// HealthKit merges overlapping samples from multiple sources (iPhone + Apple Watch)
+    /// so the result is never double-counted.
+    private func queryStatistics(type: HKQuantityType, predicate: NSPredicate, unit: HKUnit) async throws -> Double {
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, statistics, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    let value = statistics?.sumQuantity()?.doubleValue(for: unit) ?? 0
+                    continuation.resume(returning: value)
+                }
+            }
+            healthStore.execute(query)
         }
     }
 
