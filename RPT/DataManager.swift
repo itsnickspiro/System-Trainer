@@ -232,7 +232,22 @@ final class DataManager: ObservableObject {
     // MARK: - Quest Management
     func addQuest(_ quest: Quest) {
         guard let context = modelContext else { return }
-        
+
+        // Prevent duplicate quests: skip if a quest with the same title
+        // already exists for the same day (guards against clock manipulation)
+        let questDate = quest.dateTag
+        let questTitle = quest.title
+        let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: questDate)) ?? questDate.addingTimeInterval(86400)
+        let startOfDay = Calendar.current.startOfDay(for: questDate)
+        let descriptor = FetchDescriptor<Quest>(
+            predicate: #Predicate<Quest> { q in
+                q.title == questTitle && q.dateTag >= startOfDay && q.dateTag < nextDay
+            }
+        )
+        if let existing = try? context.fetch(descriptor), !existing.isEmpty {
+            return // duplicate — skip
+        }
+
         context.insert(quest)
         saveLocalChanges()
         refreshTodaysQuests()
