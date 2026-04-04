@@ -86,6 +86,9 @@ final class DataManager: ObservableObject {
             print("Failed to load profile: \(error)")
         }
         
+        // One-time cleanup: remove duplicate quests created by date manipulation
+        deduplicateQuests()
+
         // Load today's quests
         refreshTodaysQuests()
 
@@ -98,7 +101,46 @@ final class DataManager: ObservableObject {
         // Award daily login GP bonus (once per day)
         Task { await checkDailyLoginBonus() }
     }
-    
+
+    /// Remove duplicate quests: for each calendar day, keep only one quest per title.
+    /// Prefers keeping completed quests over incomplete ones.
+    private func deduplicateQuests() {
+        guard let context = modelContext else { return }
+        let descriptor = FetchDescriptor<Quest>(
+            sortBy: [SortDescriptor(\.dateTag, order: .forward)]
+        )
+        guard let allQuests = try? context.fetch(descriptor) else { return }
+
+        // Group by (startOfDay, title)
+        var seen: [String: Quest] = [:]
+        var toDelete: [Quest] = []
+
+        for quest in allQuests {
+            let dayKey = Calendar.current.startOfDay(for: quest.dateTag)
+            let key = "\(dayKey.timeIntervalSince1970)|\(quest.title)"
+
+            if let existing = seen[key] {
+                // Keep the completed one; if both same status, keep the earlier one
+                if quest.isCompleted && !existing.isCompleted {
+                    toDelete.append(existing)
+                    seen[key] = quest
+                } else {
+                    toDelete.append(quest)
+                }
+            } else {
+                seen[key] = quest
+            }
+        }
+
+        guard !toDelete.isEmpty else { return }
+        print("[DataManager] Removing \(toDelete.count) duplicate quest(s)")
+        for quest in toDelete {
+            context.delete(quest)
+        }
+        saveLocalChanges()
+    }
+
+
     private func refreshTodaysQuests() {
         guard let context = modelContext else { return }
         
