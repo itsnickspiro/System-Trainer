@@ -613,7 +613,11 @@ struct WorkoutView: View {
             entry.reps = Int(ex.reps.components(separatedBy: CharacterSet(charactersIn: "-–")).first ?? "10") ?? 10
             return entry
         }
-        showingPlanWorkoutLogger = true
+        // Delay sheet presentation by one run-loop tick so SwiftUI propagates
+        // the updated planLoggerExercises before creating the sheet view.
+        DispatchQueue.main.async {
+            showingPlanWorkoutLogger = true
+        }
     }
 
     private func workoutTypeChip(_ type: WorkoutType) -> some View {
