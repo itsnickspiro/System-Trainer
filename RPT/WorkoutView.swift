@@ -34,6 +34,14 @@ extension WorkoutType {
     }
 }
 
+/// Data bundle passed to the plan workout sheet via `.sheet(item:)`.
+/// Using an Identifiable item forces SwiftUI to create a fresh view each presentation.
+struct PlanSessionData: Identifiable {
+    let id = UUID()
+    let routineName: String
+    let exercises: [LoggedExerciseEntry]
+}
+
 struct WorkoutView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var context
@@ -53,10 +61,8 @@ struct WorkoutView: View {
     @State private var selectedDay = Date()
     @State private var sessionToEdit: WorkoutSession? = nil
     @State private var selectedPlannedExercise: PlannedExerciseDetail? = nil
-    @State private var showingPlanWorkoutLogger = false
+    @State private var planSession: PlanSessionData? = nil
     @State private var planLoggerDuration = 45
-    @State private var planLoggerExercises: [LoggedExerciseEntry] = []
-    @State private var planLoggerRoutineName: String = ""
     /// Exercises queued from the database to add to a new workout
     @State private var pendingExercises: [LoggedExerciseEntry] = []
     @State private var showingDatabaseLogger = false
@@ -307,12 +313,12 @@ struct WorkoutView: View {
                     routineName: ""
                 )
             }
-            .sheet(isPresented: $showingPlanWorkoutLogger, onDismiss: { planLoggerExercises = [] }) {
+            .sheet(item: $planSession) { session in
                 WorkoutLoggerView(
                     workoutType: .strength,
                     duration: $planLoggerDuration,
-                    preloadedExercises: planLoggerExercises,
-                    routineName: planLoggerRoutineName
+                    preloadedExercises: session.exercises,
+                    routineName: session.routineName
                 )
             }
         }
@@ -603,9 +609,8 @@ struct WorkoutView: View {
     }
 
     private func startSessionForDay(plan: AnimeWorkoutPlan, dayPlan: AnimeWorkoutPlan.DayPlan) {
-        planLoggerRoutineName = dayPlan.focus
         planLoggerDuration = 45
-        planLoggerExercises = dayPlan.exercises.map { ex in
+        let exercises = dayPlan.exercises.map { ex in
             var entry = LoggedExerciseEntry()
             entry.name = ex.name
             entry.sets = ex.sets
@@ -613,11 +618,7 @@ struct WorkoutView: View {
             entry.reps = Int(ex.reps.components(separatedBy: CharacterSet(charactersIn: "-–")).first ?? "10") ?? 10
             return entry
         }
-        // Delay sheet presentation by one run-loop tick so SwiftUI propagates
-        // the updated planLoggerExercises before creating the sheet view.
-        DispatchQueue.main.async {
-            showingPlanWorkoutLogger = true
-        }
+        planSession = PlanSessionData(routineName: dayPlan.focus, exercises: exercises)
     }
 
     private func workoutTypeChip(_ type: WorkoutType) -> some View {
