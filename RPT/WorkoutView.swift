@@ -409,15 +409,38 @@ struct WorkoutView: View {
                     }
 
                     Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
+            // Start Session button on collapsed card (non-rest, today only)
+            if !dayPlan.isRest && !isDayLocked {
+                Button(action: { startSessionForDay(plan: plan, dayPlan: dayPlan) }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 10))
+                        Text("Start")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(plan.accentColor))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Expand chevron
+            Button {
+                withAnimation(.spring(duration: 0.3)) { isProgramExpanded = true }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 8)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

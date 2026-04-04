@@ -92,6 +92,9 @@ final class DataManager: ObservableObject {
         // Generate default daily quests if they don't exist
         generateDefaultDailyQuests()
 
+        // Check for hardcore reset penalty (missed quests) at launch
+        currentProfile?.applyHardcoreResetIfNeeded()
+
         // Award daily login GP bonus (once per day)
         Task { await checkDailyLoginBonus() }
     }
@@ -857,6 +860,9 @@ final class DataManager: ObservableObject {
         // Re-run daily quest generation in case the day rolled over while the app was open
         generateDefaultDailyQuests()
         refreshTodaysQuests()
+        // Check for hardcore reset penalty (missed quests) on every foreground,
+        // not just from the HomeView timer
+        currentProfile?.applyHardcoreResetIfNeeded()
     }
     
     func recordHealthAction(_ action: HealthAction) {
