@@ -3,7 +3,7 @@ import SwiftData
 
 // MARK: - OnboardingView
 //
-// Unified 12-step onboarding flow. All collected state lives here; sub-views
+// Unified 11-step onboarding flow. All collected state lives here; sub-views
 // receive only the bindings they need.
 //
 // Steps:
@@ -12,13 +12,12 @@ import SwiftData
 //  2  — Biological Sex
 //  3  — Fitness Goal
 //  4  — Body Stats
-//  5  — Gym Environment
-//  6  — Avatar Selection   (skippable)
-//  7  — Workout Plan       (skippable)
-//  8  — Gold Pieces Explainer
-//  9  — HealthKit          (skippable)
-//  10 — Notifications      (skippable)
-//  11 — Ready Screen       (no progress bar)
+//  5  — Avatar Selection   (skippable)
+//  6  — Workout Plan       (skippable)
+//  7  — Gold Pieces Explainer
+//  8  — HealthKit          (skippable)
+//  9  — Notifications      (skippable)
+//  10 — Ready Screen       (no progress bar)
 
 struct OnboardingView: View {
     @Binding var isOnboardingComplete: Bool
@@ -30,7 +29,6 @@ struct OnboardingView: View {
     @State private var profileName         = ""
     @State private var selectedGender: PlayerGender    = .male
     @State private var selectedGoal: FitnessGoal       = .generalHealth
-    @State private var selectedGym: GymEnvironment     = .fullGym
     @State private var ageText             = "25"
     @State private var heightText          = "170"   // always stored in cm internally
     @State private var weightText          = "70"    // always stored in kg internally
@@ -45,9 +43,9 @@ struct OnboardingView: View {
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 10   // steps 1–10 show the progress bar
-    private let skippableSteps: Set<Int> = [6, 7, 9, 10]
-    private let noProgressBarSteps: Set<Int> = [0, 11]
+    private let totalProgressSteps = 9   // steps 1–9 show the progress bar
+    private let skippableSteps: Set<Int> = [5, 6, 8, 9]
+    private let noProgressBarSteps: Set<Int> = [0, 10]
 
     var body: some View {
         ZStack {
@@ -149,13 +147,12 @@ struct OnboardingView: View {
                     selectedGender: selectedGender,
                     selectedGoal: selectedGoal
                  )
-        case 5:  GymStepView(selectedGym: $selectedGym)
-        case 6:  AvatarStepView(selectedAvatarKey: $selectedAvatarKey)
-        case 7:  WorkoutPlanStepView(selectedPlanID: $selectedPlanID)
-        case 8:  GPExplainerStepView()
-        case 9:  HealthStepView(healthManager: healthManager)
-        case 10: NotificationsStepView(notificationManager: notificationManager)
-        case 11: ReadyStepView(
+        case 5:  AvatarStepView(selectedAvatarKey: $selectedAvatarKey)
+        case 6:  WorkoutPlanStepView(selectedPlanID: $selectedPlanID, playerGender: selectedGender)
+        case 7:  GPExplainerStepView()
+        case 8:  HealthStepView(healthManager: healthManager)
+        case 9:  NotificationsStepView(notificationManager: notificationManager)
+        case 10: ReadyStepView(
                     name: profileName,
                     goal: selectedGoal,
                     avatarKey: selectedAvatarKey ?? "avatar_default"
@@ -169,7 +166,7 @@ struct OnboardingView: View {
     private var navigationButtons: some View {
         VStack(spacing: 12) {
             // Continue / advance button
-            Button(currentStep == 10 ? "Complete Setup" : "Continue") {
+            Button(currentStep == 9 ? "Complete Setup" : "Continue") {
                 handleAdvance()
             }
             .buttonStyle(OnboardingPrimaryButtonStyle())
@@ -203,7 +200,7 @@ struct OnboardingView: View {
             withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
             return
         }
-        if currentStep == 10 {
+        if currentStep == 9 {
             // Final setup step → complete
             completeOnboarding()
             return
@@ -233,7 +230,6 @@ struct OnboardingView: View {
         if !trimmedName.isEmpty { profile.name = trimmedName }
         profile.fitnessGoal        = selectedGoal
         profile.gender             = selectedGender
-        profile.gymEnvironment     = selectedGym
         profile.age                = age
         profile.height             = height   // stored in cm
         profile.weight             = weight   // stored in kg
@@ -733,71 +729,7 @@ private struct StatField: View {
     }
 }
 
-// MARK: - Step 5: Gym Environment
-
-private struct GymStepView: View {
-    @Binding var selectedGym: GymEnvironment
-
-    var body: some View {
-        OnboardingStepShell(
-            icon: "building.2.fill",
-            iconColor: .purple,
-            title: "Where Do You Train?",
-            subtitle: "Determines which exercises and programs are generated for you."
-        ) {
-            VStack(spacing: 10) {
-                ForEach(GymEnvironment.allCases, id: \.self) { env in
-                    GymCard(env: env, isSelected: selectedGym == env) {
-                        selectedGym = env
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct GymCard: View {
-    let env: GymEnvironment
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: env.icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(isSelected ? .purple : .white.opacity(0.45))
-                    .frame(width: 32)
-
-                Text(env.displayName)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.white)
-
-                Spacer()
-
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.purple)
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 15)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isSelected ? Color.purple.opacity(0.13) : Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(isSelected ? Color.purple : Color.white.opacity(0.1), lineWidth: isSelected ? 1.5 : 1)
-                    )
-            )
-            .scaleEffect(isSelected ? 1.01 : 1.0)
-            .animation(.easeInOut(duration: 0.15), value: isSelected)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Step 6: Avatar Selection
+// MARK: - Step 5: Avatar Selection
 
 private struct AvatarStepView: View {
     @Binding var selectedAvatarKey: String?
@@ -893,10 +825,12 @@ private struct AvatarCell: View {
     }
 }
 
-// MARK: - Step 7: Workout Plan
+// MARK: - Step 6: Workout Plan
 
 private struct WorkoutPlanStepView: View {
     @Binding var selectedPlanID: String?
+    /// Player's biological sex — used to filter anime programs to gender-appropriate ones.
+    let playerGender: PlayerGender
     @ObservedObject private var planService = AnimeWorkoutPlanService.shared
 
     @State private var showingAnimePicker = false
@@ -904,8 +838,15 @@ private struct WorkoutPlanStepView: View {
 
     private enum PickMode { case none, anime, custom }
 
+    /// Plans whose target gender matches the player (or that are gender-neutral).
+    private var visiblePlans: [AnimeWorkoutPlan] {
+        planService.all.filter { plan in
+            plan.targetGender == nil || plan.targetGender == playerGender
+        }
+    }
+
     private var previewPlans: [AnimeWorkoutPlan] {
-        Array(planService.all.prefix(4))
+        Array(visiblePlans.prefix(4))
     }
 
     var body: some View {
@@ -992,7 +933,7 @@ private struct WorkoutPlanStepView: View {
         }
         .sheet(isPresented: $showingAnimePicker) {
             AnimePlanPickerSheet(
-                plans: planService.all,
+                plans: visiblePlans,
                 selectedPlanID: $selectedPlanID
             )
         }
@@ -1159,7 +1100,7 @@ private struct AnimePlanPickerSheet: View {
     }
 }
 
-// MARK: - Step 8: Gold Pieces Explainer
+// MARK: - Step 7: Gold Pieces Explainer
 
 private struct GPExplainerStepView: View {
     @State private var coinPulse = false
@@ -1238,7 +1179,7 @@ private struct GPExplainerStepView: View {
     }
 }
 
-// MARK: - Step 9: HealthKit
+// MARK: - Step 8: HealthKit
 
 private struct HealthStepView: View {
     @ObservedObject var healthManager: HealthManager
@@ -1309,7 +1250,7 @@ private struct HealthStepView: View {
     }
 }
 
-// MARK: - Step 10: Notifications
+// MARK: - Step 9: Notifications
 
 private struct NotificationsStepView: View {
     @ObservedObject var notificationManager: NotificationManager
@@ -1384,7 +1325,7 @@ private struct NotificationsStepView: View {
     }
 }
 
-// MARK: - Step 11: Ready Screen
+// MARK: - Step 10: Ready Screen
 
 private struct ReadyStepView: View {
     let name: String

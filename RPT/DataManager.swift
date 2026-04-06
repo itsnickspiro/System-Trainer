@@ -100,6 +100,11 @@ final class DataManager: ObservableObject {
 
         // Award daily login GP bonus (once per day)
         Task { await checkDailyLoginBonus() }
+
+        // Now that the SwiftData profile is loaded, push real values to the
+        // leaderboard. The launch-time refresh in RPTApp runs before this and
+        // would otherwise persist "Warrior / Level 1 / 0 XP" placeholders.
+        Task { await LeaderboardService.shared.refresh() }
     }
 
     /// Remove duplicate quests: for each calendar day, keep only one quest per title.
@@ -637,22 +642,35 @@ final class DataManager: ObservableObject {
         let activePlanID = profile.activePlanID
         if !activePlanID.isEmpty {
             let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)
-            let animePlan = AnimeWorkoutPlanService.shared.plan(id: activePlanID)
-            let resolvedPlan: AnimeWorkoutPlan?
-            if let p = animePlan {
-                resolvedPlan = p
-            } else {
-                // Try fetching from SwiftData as a custom plan
-                let descriptor = FetchDescriptor<CustomWorkoutPlan>(
-                    predicate: #Predicate { $0.id == activePlanID }
-                )
-                resolvedPlan = (try? context.fetch(descriptor))?.first?.asAnimeWorkoutPlan()
-            }
-            if let plan = resolvedPlan {
+            // Anime plan branch — structured workout data, build full plan quests
+            if let plan = AnimeWorkoutPlanService.shared.plan(id: activePlanID) {
                 let planQuests = QuestManager.shared.buildPlanQuests(
                     plan: plan, profile: profile, date: today, dueDate: tomorrow
                 )
                 planQuests.forEach { addQuest($0) }
+                UserDefaults.standard.set(today, forKey: key)
+                return
+            }
+            // Custom plan branch — until the goal survey exists, only emit the
+            // discipline check + nutrition log, plus an informational banner.
+            let descriptor = FetchDescriptor<CustomWorkoutPlan>(
+                predicate: #Predicate { $0.id == activePlanID }
+            )
+            if let _ = (try? context.fetch(descriptor))?.first {
+                var quests: [Quest] = []
+                // Informational banner — non-functional completionCondition so
+                // auto-completion logic ignores it. Placeholder until the survey ships.
+                quests.append(Quest(
+                    title: "[CUSTOM PLAN] Goal Survey Required",
+                    details: "Custom plan active — complete the goal survey in Settings to unlock training quests.",
+                    type: .daily, createdAt: Date(), dueDate: tomorrow,
+                    xpReward: 0, statTarget: "discipline",
+                    completionCondition: "", dateTag: today
+                ))
+                quests.append(makeDisciplineCheckQuest(for: profile, on: today, dueDate: tomorrow))
+                quests.append(makeNutritionLogQuest(for: profile, on: today, dueDate: tomorrow))
+                applyRandomGPBonuses(to: &quests)
+                quests.forEach { addQuest($0) }
                 UserDefaults.standard.set(today, forKey: key)
                 return
             }
@@ -752,6 +770,34 @@ final class DataManager: ObservableObject {
         }
     }
 
+    /// Builds the standard "Daily Discipline Check" quest. Shared between the
+    /// health-driven and custom-plan branches.
+    private func makeDisciplineCheckQuest(for profile: Profile, on date: Date, dueDate: Date?) -> Quest {
+        let rc = RemoteConfigService.shared
+        return Quest(
+            title: "Daily Discipline Check",
+            details: "Current streak: \(profile.currentStreak) days. Log at least one meal and complete one quest before midnight.",
+            type: .daily, createdAt: Date(), dueDate: dueDate,
+            xpReward: rc.int("xp_discipline_check", default: 50), statTarget: "discipline",
+            completionCondition: "discipline_check", dateTag: date
+        )
+    }
+
+    /// Builds the standard "Nutrition Log" quest. Shared between the
+    /// health-driven and custom-plan branches.
+    private func makeNutritionLogQuest(for profile: Profile, on date: Date, dueDate: Date?, tier: QuestManager.PlayerTier? = nil) -> Quest {
+        let rc = RemoteConfigService.shared
+        let resolvedTier = tier ?? QuestManager.tier(for: profile.level)
+        let nutritionBaseXP = rc.int("xp_nutrition_log_base", default: 50)
+        return Quest(
+            title: "Nutrition Log",
+            details: "Log all meals for today in the Diary tab. Hitting your calorie and protein goals awards full XP.",
+            type: .daily, createdAt: Date(), dueDate: dueDate,
+            xpReward: Int(Double(nutritionBaseXP) * resolvedTier.xpMultiplier), statTarget: "discipline",
+            completionCondition: "meals:1", dateTag: date
+        )
+    }
+
     /// Analyses the player's current health stats and returns a tailored set of quests.
     private func buildHealthDrivenQuests(for profile: Profile, on date: Date) -> [Quest] {
         var quests: [Quest] = []
@@ -831,13 +877,7 @@ final class DataManager: ObservableObject {
         }
 
         // ── Discipline (streak guard) ─────────────────────────────────────────
-        quests.append(Quest(
-            title: "Daily Discipline Check",
-            details: "Current streak: \(profile.currentStreak) days. Log at least one meal and complete one quest before midnight.",
-            type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: rc.int("xp_discipline_check", default: 50), statTarget: "discipline",
-            completionCondition: "discipline_check", dateTag: date
-        ))
+        quests.append(makeDisciplineCheckQuest(for: profile, on: date, dueDate: tomorrow))
 
         // ── Low stat — Focus ──────────────────────────────────────────────────
         let focusThreshold = rc.int("focus_low_threshold", default: 40)
@@ -880,14 +920,7 @@ final class DataManager: ObservableObject {
         ))
 
         // ── Guaranteed: Nutrition Log — always present ─────────────────────────
-        let nutritionBaseXP = rc.int("xp_nutrition_log_base", default: 50)
-        quests.append(Quest(
-            title: "Nutrition Log",
-            details: "Log all meals for today in the Diary tab. Hitting your calorie and protein goals awards full XP.",
-            type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: Int(Double(nutritionBaseXP) * tier.xpMultiplier), statTarget: "discipline",
-            completionCondition: "meals:1", dateTag: date
-        ))
+        quests.append(makeNutritionLogQuest(for: profile, on: date, dueDate: tomorrow, tier: tier))
 
         applyRandomGPBonuses(to: &quests)
 
