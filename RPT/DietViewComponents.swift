@@ -657,6 +657,9 @@ struct AddFoodView: View {
     @State private var remoteSearchTask: Task<Void, Never>? = nil
     @State private var showingRemoteSection = false
 
+    // Community submissions matching the current search query
+    @State private var pendingResults: [PendingFood] = []
+
     @StateObject private var foodDatabase = FoodDatabaseService.shared
     
     private var filteredFoods: [FoodItem] {
@@ -672,6 +675,7 @@ struct AddFoodView: View {
         remoteSearchTask?.cancel()
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
             remoteSearchResults = []
+            pendingResults = []
             showingRemoteSection = false
             return
         }
@@ -679,11 +683,16 @@ struct AddFoodView: View {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s debounce
             guard !Task.isCancelled else { return }
             isSearchingRemote = true
-            let results = (try? await foodDatabase.searchFood(query: query, limit: 20)) ?? []
+            // Run the curated remote search and the community pending search in parallel.
+            async let remote   = foodDatabase.searchFood(query: query, limit: 20)
+            async let pending  = foodDatabase.searchPendingFoods(query: query, limit: 10)
+            let results        = (try? await remote)  ?? []
+            let pendingFoods   = (try? await pending) ?? []
             guard !Task.isCancelled else { return }
-            // Deduplicate against local
+            // Deduplicate remote results against local
             let localNames = Set(allFoods.map { $0.name.lowercased() })
             remoteSearchResults = results.filter { !localNames.contains($0.name.lowercased()) }
+            pendingResults = pendingFoods
             isSearchingRemote = false
             showingRemoteSection = !remoteSearchResults.isEmpty
         }
@@ -817,8 +826,27 @@ struct AddFoodView: View {
                                     }
                                 }
                             }
-                            
-                            if filteredFoods.isEmpty && remoteSearchResults.isEmpty && !isSearchingRemote && !searchText.isEmpty {
+
+                            // Community-submitted pending foods
+                            if !pendingResults.isEmpty {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.2.fill")
+                                        .font(.caption2)
+                                        .foregroundColor(.purple)
+                                    Text("COMMUNITY SUBMISSIONS")
+                                }
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.purple)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                                .padding(.top, 8)
+
+                                ForEach(pendingResults) { pending in
+                                    PendingFoodSearchRow(pending: pending)
+                                }
+                            }
+
+                            if filteredFoods.isEmpty && remoteSearchResults.isEmpty && pendingResults.isEmpty && !isSearchingRemote && !searchText.isEmpty {
                                 VStack(spacing: 12) {
                                     Image(systemName: "magnifyingglass")
                                         .font(.largeTitle)
@@ -1048,12 +1076,28 @@ struct FoodSourceBadge: View {
         switch source {
         case "USDA":          return "USDA"
         case "OpenFoodFacts": return "OFF"
+        case "community":     return "👥 COMMUNITY"
+        case "system", "rpt": return "VERIFIED"
         default:              return source.prefix(4).uppercased()
         }
     }
 
     private var badgeColor: Color {
-        source == "USDA" ? .blue : .secondary
+        switch source {
+        case "USDA":          return .blue
+        case "community":     return .purple
+        case "system", "rpt": return .green
+        default:              return .secondary
+        }
+    }
+
+    private var helpText: String {
+        switch source {
+        case "USDA":          return "USDA FoodData Central — verified data"
+        case "community":     return "Community-submitted food, promoted after 3 confirmations"
+        case "system", "rpt": return "System Trainer verified food"
+        default:              return "Open Food Facts — community data"
+        }
     }
 
     var body: some View {
@@ -1064,7 +1108,90 @@ struct FoodSourceBadge: View {
             .padding(.vertical, 2)
             .background(badgeColor.opacity(0.85))
             .clipShape(RoundedRectangle(cornerRadius: 3))
-            .help(source == "USDA" ? "USDA FoodData Central — verified data" : "Open Food Facts — community data")
+            .help(helpText)
+    }
+}
+
+// MARK: - Pending Food Search Row
+//
+// Inline row for community submissions in the food search results.
+// Shows the product, vote count, and a Confirm button. Tapping the row
+// opens the same vote sheet used by the barcode scanner so the user can
+// also dispute or see full nutrition.
+
+struct PendingFoodSearchRow: View {
+    let pending: PendingFood
+
+    @State private var showSheet = false
+    @State private var localConfirms: Int = 0
+    @State private var hasVoted = false
+
+    var body: some View {
+        Button { showSheet = true } label: {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(pending.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                        FoodSourceBadge(source: "community")
+                    }
+                    if let brand = pending.brand, !brand.isEmpty {
+                        Text(brand)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    HStack(spacing: 8) {
+                        if let kcal = pending.calories_per_100g, kcal > 0 {
+                            Text("\(Int(kcal)) kcal/100g")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Text("• \(localConfirms) confirms")
+                            .font(.caption)
+                            .foregroundColor(.purple)
+                    }
+                }
+                Spacer()
+                Button {
+                    confirm()
+                } label: {
+                    Image(systemName: hasVoted ? "checkmark.circle.fill" : "checkmark.circle")
+                        .font(.title3)
+                        .foregroundColor(hasVoted ? .green : .purple)
+                }
+                .buttonStyle(.plain)
+                .disabled(hasVoted)
+            }
+            .padding(12)
+            .background(.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(.purple.opacity(0.25), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onAppear {
+            if localConfirms == 0 { localConfirms = pending.displayConfirms }
+        }
+        .sheet(isPresented: $showSheet) {
+            PendingFoodVoteSheet(pending: pending, barcode: pending.barcode ?? "")
+        }
+    }
+
+    private func confirm() {
+        Task {
+            do {
+                try await FoodDatabaseService.shared.castVote(pendingFoodID: pending.id, voteType: .confirm)
+                await MainActor.run {
+                    hasVoted = true
+                    localConfirms += 1
+                }
+            } catch {
+                // Silent failure on inline tap; user can open the sheet for the full flow.
+            }
+        }
     }
 }
 
