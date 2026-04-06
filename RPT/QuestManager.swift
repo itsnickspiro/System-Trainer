@@ -228,6 +228,7 @@ final class QuestManager {
                 dueDate: dueDate,
                 xpReward: 50,
                 statTarget: "energy",
+                completionCondition: "sleep:8",
                 dateTag: date
             ))
         } else {
@@ -547,6 +548,7 @@ final class QuestManager {
             dueDate: dueDate,
             xpReward: Int(50.0 * tier.xpMultiplier),
             statTarget: "discipline",
+            completionCondition: "discipline_check",
             dateTag: date
         )
     }

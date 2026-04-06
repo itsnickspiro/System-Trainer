@@ -13,9 +13,13 @@ struct InventoryView: View {
     /// Group inventory entries by item type
     private var grouped: [(String, String, [InventoryEntry])] {
         let types: [(String, String)] = [
-            ("equipment",  "Equipment"),
-            ("consumable", "Consumables"),
-            ("cosmetic",   "Cosmetics")
+            ("equipment",    "Equipment"),
+            ("consumable",   "Consumables"),
+            ("boost",        "Boosts"),
+            ("cosmetic",     "Cosmetics"),
+            ("avatar_frame", "Avatar Frames"),
+            ("title",        "Titles"),
+            ("badge",        "Badges")
         ]
         return types.compactMap { key, label in
             let entries = store.inventory.filter { entry in
@@ -81,8 +85,8 @@ struct InventoryView: View {
         switch item.itemType {
         case "equipment":
             Task { await store.equip(itemKey: item.key, equip: !entry.isEquipped) }
-        case "consumable":
-            Task { await store.equip(itemKey: item.key, equip: !entry.isEquipped) }
+        case "consumable", "boost":
+            Task { await store.equip(itemKey: item.key, equip: !entry.isActive) }
         default:
             break
         }
@@ -98,8 +102,8 @@ private struct InventoryItemRow: View {
 
     var actionLabel: String {
         switch item.itemType {
-        case "equipment":  return entry.isEquipped ? "Unequip" : "Equip"
-        case "consumable": return entry.isActive   ? "Active"  : "Use"
+        case "equipment":        return entry.isEquipped ? "Unequip" : "Equip"
+        case "consumable", "boost": return entry.isActive   ? "Active"  : "Use"
         default: return ""
         }
     }

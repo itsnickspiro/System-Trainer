@@ -478,6 +478,7 @@ struct DietView: View {
                 Button {
                     profile.recordWaterIntake()
                     context.safeSave()
+                    DataManager.shared.autoCompleteHealthQuests()
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 30))
