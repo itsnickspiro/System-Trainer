@@ -78,17 +78,34 @@ final class LeaderboardService: ObservableObject {
     }
 
     /// Pushes the current player's stats to the leaderboard.
+    ///
+    /// IMPORTANT: bails if the profile hasn't loaded yet. This used to send
+    /// "Warrior" / level 1 / 0 XP placeholders before SwiftData populated the
+    /// profile, and those placeholders would persist on the row until the user
+    /// gained a level (since level-up was the only other trigger). Result:
+    /// every leaderboard row looked identical and testers couldn't tell each
+    /// other apart. Now we wait for real data.
     func upsertEntry() async {
         guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
+        guard let profile = DataManager.shared.currentProfile,
+              !profile.name.trimmingCharacters(in: .whitespaces).isEmpty else {
+            print("[LeaderboardService] upsertEntry skipped — profile not yet loaded")
+            return
+        }
 
-        let profile = DataManager.shared.currentProfile
+        // Send both the canonical column names (total_xp, current_streak) and
+        // the legacy short names the proxy may also still accept. The DB
+        // columns are `total_xp` and `current_streak`; sending `xp` / `streak`
+        // alone resulted in zero values being persisted.
         let body: [String: Any] = [
             "action":           "upsert_entry",
             "cloudkit_user_id": cloudKitID,
-            "display_name":     profile?.name ?? "Warrior",
-            "level":            profile?.level ?? 1,
-            "xp":               profile?.xp ?? 0,
-            "streak":           profile?.currentStreak ?? 0,
+            "display_name":     profile.name,
+            "level":            profile.level,
+            "xp":               profile.xp,
+            "total_xp":         profile.totalXPEarned,
+            "streak":           profile.currentStreak,
+            "current_streak":   profile.currentStreak,
             "player_id":        PlayerProfileService.shared.playerId
         ]
 

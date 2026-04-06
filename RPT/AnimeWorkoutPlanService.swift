@@ -32,6 +32,14 @@ final class AnimeWorkoutPlanService: ObservableObject {
         return dir.appendingPathComponent("anime_workout_plans_cache.json")
     }()
 
+    /// Per-plan cache directory — `Library/Caches/anime_plans/{planID}.json`.
+    /// Used so the active plan still loads at the gym with no internet, even
+    /// independent of the full-list cache.
+    private static let perPlanCacheDir: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("anime_plans", isDirectory: true)
+    }()
+
     private init() {
         // Load disk cache so plans are available synchronously before network fetch
         if let cached = loadDiskCache() {
@@ -47,8 +55,17 @@ final class AnimeWorkoutPlanService: ObservableObject {
     }
 
     /// Look up a plan by its stable string key.
+    /// Falls back to the per-plan disk cache when offline / before the network
+    /// fetch has populated `remotePlans`, so the active plan keeps working at
+    /// the gym with no internet.
     func plan(id: String) -> AnimeWorkoutPlan? {
-        all.first { $0.id == id }
+        if let hit = all.first(where: { $0.id == id }) {
+            // Refresh the per-plan cache opportunistically so the active plan
+            // is always on disk after the user has loaded it once.
+            savePerPlanCache(hit)
+            return hit
+        }
+        return loadPerPlanCache(id: id)
     }
 
     /// Fetch fresh plans from Supabase. Safe to call on every app launch.
@@ -62,6 +79,9 @@ final class AnimeWorkoutPlanService: ObservableObject {
             if !fetched.isEmpty {
                 remotePlans = fetched
                 saveDiskCache(fetched)
+                // Also write each plan to its own file so the active plan can
+                // be recovered even if the list cache is wiped or corrupted.
+                for plan in fetched { savePerPlanCache(plan) }
             }
         } catch {
             lastError = error.localizedDescription
@@ -104,6 +124,26 @@ final class AnimeWorkoutPlanService: ObservableObject {
         // Re-encode as AnimePlanRows for the cache
         guard let rows = try? JSONEncoder().encode(plans.map { AnimePlanRow(from: $0) }),
               let _ = try? rows.write(to: Self.cacheURL, options: .atomic) else { return }
+    }
+
+    // MARK: Per-plan cache (for offline active-plan playback)
+
+    private func savePerPlanCache(_ plan: AnimeWorkoutPlan) {
+        let dir = Self.perPlanCacheDir
+        // Ensure the directory exists; ignore failures (cache is best-effort).
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(plan.id).json")
+        guard let data = try? JSONEncoder().encode(AnimePlanRow(from: plan)) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func loadPerPlanCache(id: String) -> AnimeWorkoutPlan? {
+        let url = Self.perPlanCacheDir.appendingPathComponent("\(id).json")
+        guard let data = try? Data(contentsOf: url),
+              let row  = try? JSONDecoder().decode(AnimePlanRow.self, from: data) else {
+            return nil
+        }
+        return row.toAnimeWorkoutPlan()
     }
 }
 
