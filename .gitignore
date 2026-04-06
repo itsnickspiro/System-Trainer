@@ -17,3 +17,4 @@ RPT/RPT/BUILD_FIX_GUIDE.md
 DerivedData/
 xcuserdata/
 .DS_Store
+build/
