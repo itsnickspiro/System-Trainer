@@ -402,6 +402,216 @@ private struct SupabaseFoodRow: Decodable {
     }
 }
 
+// MARK: - Community Food Submissions (foods_pending)
+//
+// All four community endpoints hit Supabase PostgREST directly using the
+// anon key. RLS protects writes (INSERTs require a valid cloudkit_user_id)
+// and the database trigger auto-promotes to the main `foods` table once
+// `vote_count` reaches the threshold — iOS does nothing extra for that.
+
+extension FoodDatabaseService {
+
+    // Endpoints
+    private static var pendingTableURL:    String { "\(Secrets.supabaseURL)/rest/v1/foods_pending" }
+    private static var pendingSummaryURL:  String { "\(Secrets.supabaseURL)/rest/v1/foods_pending_summary" }
+    private static var votesTableURL:      String { "\(Secrets.supabaseURL)/rest/v1/food_votes" }
+
+    /// Strip the leading zero from a 13-digit EAN-13 to produce a 12-digit UPC-A
+    /// when possible — the foods table stores UPC-A. Returns the original code
+    /// for any other length so non-UPC formats still pass through.
+    static func normalizeBarcode(_ raw: String) -> String {
+        let digits = raw.filter(\.isNumber)
+        if digits.count == 13, digits.first == "0" { return String(digits.dropFirst()) }
+        return digits.isEmpty ? raw : digits
+    }
+
+    // MARK: PostgREST request helper
+
+    private func postgrestRequest(_ url: URL, method: String, body: Data? = nil, prefer: String? = nil) -> URLRequest {
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("application/json",                  forHTTPHeaderField: "Content-Type")
+        req.setValue(Secrets.supabaseAnonKey,             forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        if let prefer { req.setValue(prefer, forHTTPHeaderField: "Prefer") }
+        req.httpBody = body
+        return req
+    }
+
+    // MARK: Public community API
+
+    /// Look up a pending submission by barcode. Returns nil if there is no
+    /// pending entry for that code.
+    func lookupPendingFood(barcode: String) async throws -> PendingFood? {
+        let normalized = Self.normalizeBarcode(barcode)
+        guard let escaped = normalized.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(Self.pendingSummaryURL)?barcode=eq.\(escaped)&status=eq.pending&select=*&limit=1")
+        else { throw OFFFoodError.invalidURL }
+
+        let req = postgrestRequest(url, method: "GET")
+        let (data, response) = try await session.data(for: req)
+        try validate(response)
+        let rows = try JSONDecoder().decode([PendingFood].self, from: data)
+        return rows.first
+    }
+
+    /// Full-text search across pending submissions for the supplied query.
+    /// Uses the `fts` tsvector column populated by the database trigger.
+    func searchPendingFoods(query: String, limit: Int = 10) async throws -> [PendingFood] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        // PostgREST `plfts` operator → plainto_tsquery. Encode the search term.
+        guard let q = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(Self.pendingSummaryURL)?status=eq.pending&fts=plfts.\(q)&select=*&order=vote_count.desc&limit=\(limit)")
+        else { throw OFFFoodError.invalidURL }
+
+        let req = postgrestRequest(url, method: "GET")
+        let (data, response) = try await session.data(for: req)
+        try validate(response)
+        return (try? JSONDecoder().decode([PendingFood].self, from: data)) ?? []
+    }
+
+    /// Submit a new pending food. The submitter is auto-counted as the first
+    /// `confirm` vote on the server side, so we don't need to insert a vote here.
+    @discardableResult
+    func submitPendingFood(_ submission: PendingFoodSubmission) async throws -> PendingFood? {
+        guard let url = URL(string: Self.pendingTableURL) else { throw OFFFoodError.invalidURL }
+        let body = try JSONEncoder().encode([submission])
+        let req = postgrestRequest(url, method: "POST", body: body, prefer: "return=representation")
+        let (data, response) = try await session.data(for: req)
+        try validate(response)
+        let rows = (try? JSONDecoder().decode([PendingFood].self, from: data)) ?? []
+        return rows.first
+    }
+
+    /// Cast (or update) the current user's vote on a pending food. The DB
+    /// trigger updates `vote_count` automatically. The unique constraint on
+    /// (pending_food_id, cloudkit_user_id) is handled via merge-duplicates.
+    func castVote(pendingFoodID: String, voteType: PendingFoodVoteType, notes: String? = nil) async throws {
+        guard let userID = Self.currentCloudKitUserID() else {
+            throw OFFFoodError.invalidResponse // can't vote anonymously without a user id
+        }
+        guard let url = URL(string: Self.votesTableURL) else { throw OFFFoodError.invalidURL }
+
+        let payload = PendingFoodVotePayload(
+            pending_food_id: pendingFoodID,
+            cloudkit_user_id: userID,
+            vote_type: voteType.rawValue,
+            notes: notes
+        )
+        let body = try JSONEncoder().encode([payload])
+        let req = postgrestRequest(
+            url,
+            method: "POST",
+            body: body,
+            prefer: "resolution=merge-duplicates,return=minimal"
+        )
+        let (_, response) = try await session.data(for: req)
+        try validate(response)
+    }
+
+    // MARK: Identity helpers
+
+    /// Best-effort CloudKit user id pulled from LeaderboardService. Nil only
+    /// if the device has no resolved id at all (extremely rare — even no-iCloud
+    /// devices get an anonymous UUID fallback).
+    static func currentCloudKitUserID() -> String? {
+        LeaderboardService.shared.currentUserID
+    }
+
+    static func currentDisplayName() -> String {
+        DataManager.shared.currentProfile?.name ?? "Anonymous"
+    }
+}
+
+// MARK: - Community Wire Models
+
+/// Mirrors a row in the `foods_pending_summary` view. Numeric vote counters
+/// come from the view's grouped joins.
+struct PendingFood: Identifiable, Codable, Equatable {
+    let id: String
+    let name: String
+    let brand: String?
+    let barcode: String?
+    let calories_per_100g: Double?
+    let serving_size: Double?
+    let carbohydrates: Double?
+    let protein: Double?
+    let fat: Double?
+    let fiber: Double?
+    let sugar: Double?
+    let sodium: Double?
+    let category: String?
+    let status: String?
+    let vote_count: Int?
+    let confirm_votes: Int?
+    let dispute_votes: Int?
+    let source_type: String?
+    let submitted_by: String?
+    let submitted_by_display_name: String?
+
+    var displayConfirms: Int { confirm_votes ?? vote_count ?? 0 }
+    var displayDisputes: Int { dispute_votes ?? 0 }
+
+    /// Build a transient FoodItem (NOT inserted into SwiftData) so existing
+    /// row/sheet UI can render this submission. dataSource is "community".
+    func toFoodItem() -> FoodItem {
+        let cat: FoodCategory = FoodCategory(rawValue: (category ?? "other").lowercased()) ?? .other
+        let item = FoodItem(
+            name:            name,
+            brand:           brand,
+            barcode:         barcode,
+            caloriesPer100g: calories_per_100g ?? 0,
+            servingSize:     serving_size ?? 100,
+            carbohydrates:   carbohydrates ?? 0,
+            protein:         protein ?? 0,
+            fat:             fat ?? 0,
+            fiber:           fiber ?? 0,
+            sugar:           sugar ?? 0,
+            sodium:          sodium ?? 0,
+            category:        cat,
+            isCustom:        false
+        )
+        item.isVerified = false
+        item.dataSource = "community"
+        return item
+    }
+}
+
+/// Payload posted to `foods_pending` when a user submits a new product.
+/// Field names use snake_case to match the table columns directly.
+struct PendingFoodSubmission: Codable {
+    let name: String
+    let brand: String?
+    let barcode: String?
+    let calories_per_100g: Double
+    let serving_size: Double
+    let carbohydrates: Double
+    let protein: Double
+    let fat: Double
+    let fiber: Double
+    let sugar: Double
+    let sodium: Double
+    let category: String
+    let status: String                  // always "pending" from the client
+    let source_type: String             // "barcode_scan" or "manual_entry"
+    let submitted_by: String?
+    let submitted_by_display_name: String?
+    let vote_count: Int                 // 1 — submitter counts as first confirm
+}
+
+enum PendingFoodVoteType: String {
+    case confirm
+    case dispute
+}
+
+private struct PendingFoodVotePayload: Codable {
+    let pending_food_id: String
+    let cloudkit_user_id: String
+    let vote_type: String
+    let notes: String?
+}
+
 // MARK: - Error Types
 
 enum OFFFoodError: LocalizedError {
