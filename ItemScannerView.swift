@@ -683,8 +683,11 @@ struct ItemResultSheet: View {
         context.insert(entry)
         context.safeSave()
 
-        // Update RPG stats for the logged meal (small health/energy bump).
-        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
+        // Grade-driven RPG stat update: A foods help, F foods hurt.
+        DataManager.shared.updateProfile { profile in
+            let goal = profile.fitnessGoal
+            profile.recordMeal(healthiness: persistedItem.mealHealthiness(for: goal))
+        }
         DataManager.shared.autoCompleteNutritionQuests()
 
         // Write to HealthKit

@@ -580,22 +580,40 @@ final class Profile {
     
     func recordMeal(healthiness: MealHealthiness) {
         lastMealTime = Date()
-        
+
+        // Each meal nudges multiple stats. Magnitudes are deliberately small so
+        // that logging many items in a day moves stats meaningfully but cannot
+        // pin them to 0 or 100 from a single meal.
         switch healthiness {
-        case .veryHealthy:
-            adjustStat(\.health, by: 8.0)
-            adjustStat(\.energy, by: 6.0)
-        case .healthy:
-            adjustStat(\.health, by: 4.0)
-            adjustStat(\.energy, by: 3.0)
-        case .neutral:
-            adjustStat(\.health, by: 1.0)
-        case .unhealthy:
-            adjustStat(\.health, by: -3.0)
-            adjustStat(\.energy, by: -2.0)
-        case .veryUnhealthy:
-            adjustStat(\.health, by: -8.0)
-            adjustStat(\.energy, by: -5.0)
+        case .veryHealthy:   // grade A
+            adjustStat(\.health,     by:  4.0)
+            adjustStat(\.energy,     by:  3.0)
+            adjustStat(\.strength,   by:  1.0) // protein/micronutrient support
+            adjustStat(\.endurance,  by:  1.0)
+            adjustStat(\.focus,      by:  1.0)
+            adjustStat(\.discipline, by:  0.5)
+        case .healthy:       // grade B
+            adjustStat(\.health,     by:  2.0)
+            adjustStat(\.energy,     by:  1.5)
+            adjustStat(\.strength,   by:  0.5)
+            adjustStat(\.endurance,  by:  0.5)
+            adjustStat(\.focus,      by:  0.5)
+            adjustStat(\.discipline, by:  0.25)
+        case .neutral:       // grade C
+            adjustStat(\.health,     by:  0.5)
+            adjustStat(\.energy,     by:  0.5)
+            adjustStat(\.discipline, by:  0.25)
+        case .unhealthy:     // grade D
+            adjustStat(\.health,     by: -1.5)
+            adjustStat(\.energy,     by: -1.0)
+            adjustStat(\.focus,      by: -0.5)
+            adjustStat(\.endurance,  by: -0.5)
+        case .veryUnhealthy: // grade F
+            adjustStat(\.health,     by: -3.5)
+            adjustStat(\.energy,     by: -2.5)
+            adjustStat(\.focus,      by: -1.5)
+            adjustStat(\.endurance,  by: -1.5)
+            adjustStat(\.strength,   by: -0.5)
         }
     }
     
@@ -945,6 +963,18 @@ final class FoodItem {
         score -= Double(additiveRiskLevel) * 5
 
         return max(0, min(100, Int(score.rounded())))
+    }
+
+    /// Maps the goal-aligned letter grade to a MealHealthiness bucket so that
+    /// logging this food applies the right RPG stat adjustments.
+    func mealHealthiness(for goal: FitnessGoal) -> MealHealthiness {
+        switch goalAlignedGrade(for: goal) {
+        case "A": return .veryHealthy
+        case "B": return .healthy
+        case "C": return .neutral
+        case "D": return .unhealthy
+        default:  return .veryUnhealthy
+        }
     }
 
     /// Goal-aligned grade letter.

@@ -997,8 +997,11 @@ struct AddFoodView: View {
 
         context.insert(entry)
         context.safeSave()
-        // Update RPG stats for the logged meal (small health/energy bump).
-        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
+        // Grade-driven RPG stat update: A foods help, F foods hurt.
+        DataManager.shared.updateProfile { profile in
+            let goal = profile.fitnessGoal
+            profile.recordMeal(healthiness: food.mealHealthiness(for: goal))
+        }
         DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
@@ -1018,8 +1021,14 @@ struct AddFoodView: View {
 
         meal.lastUsed = Date()
         context.safeSave()
-        // Update RPG stats for the logged meal (small health/energy bump).
-        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
+        // Grade-driven RPG stat update applied per item in the custom meal.
+        DataManager.shared.updateProfile { profile in
+            let goal = profile.fitnessGoal
+            for item in meal.foodItems ?? [] {
+                guard let fi = item.foodItem else { continue }
+                profile.recordMeal(healthiness: fi.mealHealthiness(for: goal))
+            }
+        }
         DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
@@ -1457,8 +1466,11 @@ struct QuickAddView: View {
 
         context.insert(entry)
         context.safeSave()
-        // Update RPG stats for the logged meal (small health/energy bump).
-        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
+        // Grade-driven RPG stat update: A foods help, F foods hurt.
+        DataManager.shared.updateProfile { profile in
+            let goal = profile.fitnessGoal
+            profile.recordMeal(healthiness: foodItem.mealHealthiness(for: goal))
+        }
         DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
