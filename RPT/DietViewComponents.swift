@@ -997,6 +997,8 @@ struct AddFoodView: View {
 
         context.insert(entry)
         context.safeSave()
+        // Update RPG stats for the logged meal (small health/energy bump).
+        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
         DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
@@ -1016,6 +1018,8 @@ struct AddFoodView: View {
 
         meal.lastUsed = Date()
         context.safeSave()
+        // Update RPG stats for the logged meal (small health/energy bump).
+        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
         DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
@@ -1453,6 +1457,9 @@ struct QuickAddView: View {
 
         context.insert(entry)
         context.safeSave()
+        // Update RPG stats for the logged meal (small health/energy bump).
+        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
+        DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
 }

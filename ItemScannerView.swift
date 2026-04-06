@@ -683,6 +683,10 @@ struct ItemResultSheet: View {
         context.insert(entry)
         context.safeSave()
 
+        // Update RPG stats for the logged meal (small health/energy bump).
+        DataManager.shared.updateProfile { $0.recordMeal(healthiness: .neutral) }
+        DataManager.shared.autoCompleteNutritionQuests()
+
         // Write to HealthKit
         writeToHealthKit(servingGrams: servingSize)
 

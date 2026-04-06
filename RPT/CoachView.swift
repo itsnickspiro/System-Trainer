@@ -242,9 +242,9 @@ struct CoachView: View {
     }
 
     private func logSleep(hours: Double) {
-        guard let profile = dataManager.currentProfile else { return }
-        profile.sleepHours = hours
-        context.safeSave()
+        guard dataManager.currentProfile != nil else { return }
+        // Route through DataManager so RPG stats (energy/health/focus) are updated and persisted.
+        dataManager.recordHealthAction(.recordSleep(hours: hours))
         let formatted = String(format: "%.1f", hours)
         let systemMsg: String
         if hours >= 8 {

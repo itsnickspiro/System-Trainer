@@ -251,7 +251,11 @@ struct ActiveWorkoutView: View {
         if let profile {
             let doubleXPMultiplier = profile.hasDoubleXP ? 2 : 1
             DataManager.shared.addXPToProfile(session.xpAwarded * doubleXPMultiplier, source: "Workout")
-            profile.lastWorkoutTime = Date()
+            // Apply RPG stat gains (strength, endurance, discipline, health, energy)
+            DataManager.shared.recordHealthAction(
+                .recordWorkout(.strength, duration: max(1, session.durationMinutes))
+            )
+            DataManager.shared.autoCompleteWorkoutQuests(for: .strength)
         }
 
         context.safeSave()
