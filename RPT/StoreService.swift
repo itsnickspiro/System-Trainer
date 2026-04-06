@@ -199,10 +199,18 @@ final class StoreService: ObservableObject {
                 bonuses.energy    += item.bonusEnergy    ?? 0
                 bonuses.focus     += item.bonusFocus     ?? 0
                 bonuses.health    += item.bonusHealth    ?? 0
-            case "consumable":
-                if let mult = item.xpMultiplier, entry.isActive {
+            case "consumable" where entry.isActive,
+                 "boost" where entry.isActive:
+                // XP multiplier
+                if let mult = item.xpMultiplier {
                     xpMult *= mult
                 }
+                // Stat bonuses from active consumables/boosts
+                bonuses.strength  += item.bonusStrength  ?? 0
+                bonuses.endurance += item.bonusEndurance ?? 0
+                bonuses.energy    += item.bonusEnergy    ?? 0
+                bonuses.focus     += item.bonusFocus     ?? 0
+                bonuses.health    += item.bonusHealth    ?? 0
             default:
                 break
             }

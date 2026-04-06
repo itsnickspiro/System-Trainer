@@ -333,6 +333,9 @@ final class DataManager: ObservableObject {
         AchievementsService.shared.evaluate()
         Task { await EventsService.shared.updateAllEventProgress() }
 
+        // Check if completing this quest satisfies discipline check conditions
+        autoCompleteDisciplineQuests()
+
         // Award GP for quest completion and sync to activity/leaderboard backends
         Task {
             let rc = RemoteConfigService.shared
@@ -340,10 +343,12 @@ final class DataManager: ObservableObject {
             let baseMultiplier = rc.float("credits_multiplier_base", default: 1.0)
             let eventMultiplier = EventsService.shared.activeCreditMultiplier
             let scaledAmount = Int(Double(baseCreditsPerQuest) * Double(baseMultiplier) * eventMultiplier)
-            if scaledAmount > 0 {
+            // Add quest-specific bonus GP (from creditReward field)
+            let totalGP = scaledAmount + quest.creditReward
+            if totalGP > 0 {
                 await PlayerProfileService.shared.addCredits(
-                    amount: scaledAmount,
-                    type: "quest_reward",
+                    amount: totalGP,
+                    type: quest.creditReward > 0 ? "quest_bonus_gp" : "quest_reward",
                     referenceKey: quest.title
                 )
             }
@@ -509,14 +514,82 @@ final class DataManager: ObservableObject {
                 met = Double(profile.dailyActiveCalories) >= target
             case "sleep":
                 met = profile.sleepHours >= target
+            case "water":
+                met = Double(profile.waterIntake) >= target
+            case "meditation":
+                met = Double(profile.mindfulnessMinutesToday) >= target
             default:
-                continue  // "workout" and "manual" are not health-triggered
+                continue  // "workout", "meals", "discipline_check", "manual" handled elsewhere
             }
 
             if met {
                 completeQuest(quest)
                 completed += 1
             }
+        }
+        return completed
+    }
+
+    // MARK: - Nutrition Quest Auto-Complete
+
+    /// Counts today's food entries and auto-completes any quest with a
+    /// "meals:<count>" completionCondition when the threshold is met.
+    /// Called after a food entry is saved.
+    @discardableResult
+    func autoCompleteNutritionQuests() -> Int {
+        guard let context = modelContext else { return 0 }
+
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let descriptor = FetchDescriptor<FoodEntry>(
+            predicate: #Predicate<FoodEntry> { entry in
+                entry.dateConsumed >= todayStart
+            }
+        )
+        let todayMealCount = (try? context.fetch(descriptor))?.count ?? 0
+
+        var completed = 0
+        for quest in todaysQuests where !quest.isCompleted {
+            guard let condition = quest.completionCondition,
+                  condition.hasPrefix("meals:") else { continue }
+            let parts = condition.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2,
+                  let target = Int(parts[1]) else { continue }
+
+            if todayMealCount >= target {
+                completeQuest(quest)
+                completed += 1
+            }
+        }
+        return completed
+    }
+
+    // MARK: - Discipline Check Auto-Complete
+
+    /// Auto-completes "discipline_check" quests when at least one meal is logged
+    /// AND at least one other quest has been completed today.
+    /// Called after any quest completion and after meal logging.
+    @discardableResult
+    func autoCompleteDisciplineQuests() -> Int {
+        guard let context = modelContext else { return 0 }
+
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let descriptor = FetchDescriptor<FoodEntry>(
+            predicate: #Predicate<FoodEntry> { entry in
+                entry.dateConsumed >= todayStart
+            }
+        )
+        let hasMeals = ((try? context.fetch(descriptor))?.count ?? 0) > 0
+        let hasCompletedQuest = todaysQuests.contains { quest in
+            quest.isCompleted && quest.completionCondition != "discipline_check"
+        }
+
+        guard hasMeals && hasCompletedQuest else { return 0 }
+
+        var completed = 0
+        for quest in todaysQuests where !quest.isCompleted {
+            guard quest.completionCondition == "discipline_check" else { continue }
+            completeQuest(quest)
+            completed += 1
         }
         return completed
     }
@@ -646,7 +719,8 @@ final class DataManager: ObservableObject {
             title: "Hydration Protocol",
             details: "Drink 6 glasses of water today. Hydration accelerates recovery and stat restoration.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: 25, statTarget: "health", dateTag: date
+            xpReward: 25, statTarget: "health",
+            completionCondition: "water:6", dateTag: date
         ))
 
         // ── Nutrition Log ─────────────────────────────────────────────────────
@@ -654,10 +728,28 @@ final class DataManager: ObservableObject {
             title: "Nutrition Log",
             details: "Log at least 2 meals today in the Diary tab. Rebuilding nutritional awareness is key to recovery.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: 30, statTarget: "discipline", dateTag: date
+            xpReward: 30, statTarget: "discipline",
+            completionCondition: "meals:2", dateTag: date
         ))
 
+        applyRandomGPBonuses(to: &quests)
         return quests
+    }
+
+    /// Randomly assigns a GP bonus to ~20% of quests. Keeps the economy scarce
+    /// so Gold Pieces feel rewarding when they appear.
+    private func applyRandomGPBonuses(to quests: inout [Quest]) {
+        let rc = RemoteConfigService.shared
+        let chance = rc.float("gp_bonus_chance", default: 0.2)  // 20% of quests
+        let minGP = rc.int("gp_bonus_min", default: 5)
+        let maxGP = rc.int("gp_bonus_max", default: 25)
+        guard maxGP > 0 else { return }
+
+        for quest in quests {
+            if Double.random(in: 0..<1) < Double(chance) {
+                quest.creditReward = Int.random(in: minGP...maxGP)
+            }
+        }
     }
 
     /// Analyses the player's current health stats and returns a tailored set of quests.
@@ -743,7 +835,8 @@ final class DataManager: ObservableObject {
             title: "Daily Discipline Check",
             details: "Current streak: \(profile.currentStreak) days. Log at least one meal and complete one quest before midnight.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: rc.int("xp_discipline_check", default: 50), statTarget: "discipline", dateTag: date
+            xpReward: rc.int("xp_discipline_check", default: 50), statTarget: "discipline",
+            completionCondition: "discipline_check", dateTag: date
         ))
 
         // ── Low stat — Focus ──────────────────────────────────────────────────
@@ -753,7 +846,8 @@ final class DataManager: ObservableObject {
                 title: "Cognitive Training",
                 details: "Focus stat is low (\(Int(profile.focus))/100). Meditate for 10 minutes or complete a focused deep-work session.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
-                xpReward: rc.int("xp_cognitive_training", default: 70), statTarget: "focus", dateTag: date
+                xpReward: rc.int("xp_cognitive_training", default: 70), statTarget: "focus",
+                completionCondition: "meditation:10", dateTag: date
             ))
         }
 
@@ -791,8 +885,11 @@ final class DataManager: ObservableObject {
             title: "Nutrition Log",
             details: "Log all meals for today in the Diary tab. Hitting your calorie and protein goals awards full XP.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
-            xpReward: Int(Double(nutritionBaseXP) * tier.xpMultiplier), statTarget: "discipline", dateTag: date
+            xpReward: Int(Double(nutritionBaseXP) * tier.xpMultiplier), statTarget: "discipline",
+            completionCondition: "meals:1", dateTag: date
         ))
+
+        applyRandomGPBonuses(to: &quests)
 
         // ── Cap to max_daily_quests if configured ─────────────────────────────
         let maxQuests = rc.int("max_daily_quests", default: 0)
@@ -873,6 +970,7 @@ final class DataManager: ObservableObject {
             (HKQuantityType(.stepCount),          .hourly),
             (HKQuantityType(.activeEnergyBurned), .hourly),
             (HKQuantityType(.restingHeartRate),   .daily),
+            (HKCategoryType(.sleepAnalysis),      .daily),
             (HKObjectType.workoutType(),          .immediate),
         ]
 
@@ -937,8 +1035,16 @@ final class DataManager: ObservableObject {
         case .recordMeditation(let minutes):
             profile.recordMeditation(minutes: minutes)
         }
-        
+
         saveLocalChanges()
+
+        // Check quest auto-completion for water/meditation actions
+        switch action {
+        case .drinkWater, .recordMeditation:
+            autoCompleteHealthQuests()
+        default:
+            break
+        }
     }
     
     // MARK: - Local Storage

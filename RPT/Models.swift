@@ -629,6 +629,7 @@ final class Profile {
     }
     
     func recordMeditation(minutes: Int) {
+        self.mindfulnessMinutesToday += minutes
         adjustStat(\.focus, by: Double(minutes) * 0.8)
         adjustStat(\.health, by: Double(minutes) * 0.3)
         adjustStat(\.discipline, by: 1.5)
@@ -800,11 +801,15 @@ final class Quest {
     var isUserCreated: Bool = false
     var statTarget: String?
     /// Encodes how the quest is verified automatically. Format:
-    ///   "steps:10000"    — complete when HealthKit steps >= target
-    ///   "calories:400"   — complete when active calories >= target
+    ///   "steps:10000"       — complete when HealthKit steps >= target
+    ///   "calories:400"      — complete when active calories >= target
     ///   "workout:strength|cardio|flexibility|mixed|any" — complete when matching workout is logged
-    ///   "sleep:8"        — complete when sleep hours >= target
-    ///   "manual"         — user taps to confirm (default for system quests)
+    ///   "sleep:8"           — complete when sleep hours >= target
+    ///   "water:6"           — complete when water glasses logged today >= count
+    ///   "meditation:10"     — complete when mindfulness minutes today >= target
+    ///   "meals:2"           — complete when food entries logged today >= count
+    ///   "discipline_check"  — complete when 1+ meal logged AND 1+ other quest completed
+    ///   "manual"            — user taps to confirm (default for system quests)
     var completionCondition: String?
 
     init(title: String, details: String = "", type: QuestType = .daily, createdAt: Date = Date(), dueDate: Date? = nil, isCompleted: Bool = false, completedAt: Date? = nil, repeatDays: [Int] = [], xpReward: Int = 20, creditReward: Int = 0, isUserCreated: Bool = false, statTarget: String? = nil, completionCondition: String? = nil, dateTag: Date = Calendar.current.startOfDay(for: Date())) {

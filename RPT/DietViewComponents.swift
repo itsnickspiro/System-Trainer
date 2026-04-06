@@ -994,12 +994,13 @@ struct AddFoodView: View {
             meal: selectedMeal,
             dateConsumed: selectedDate
         )
-        
+
         context.insert(entry)
         context.safeSave()
+        DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
-    
+
     private func addCustomMeal(meal: CustomMeal) {
         for item in meal.foodItems ?? [] {
             guard let fi = item.foodItem else { continue }
@@ -1012,9 +1013,10 @@ struct AddFoodView: View {
             )
             context.insert(entry)
         }
-        
+
         meal.lastUsed = Date()
         context.safeSave()
+        DataManager.shared.autoCompleteNutritionQuests()
         dismiss()
     }
 }
