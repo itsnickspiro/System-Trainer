@@ -473,8 +473,10 @@ extension FoodDatabaseService {
 
     /// Submit a new pending food. The submitter is auto-counted as the first
     /// `confirm` vote on the server side, so we don't need to insert a vote here.
+    /// Requires a non-nil CloudKit user id — `submitted_by` is NOT NULL on the table.
     @discardableResult
     func submitPendingFood(_ submission: PendingFoodSubmission) async throws -> PendingFood? {
+        guard !submission.submitted_by.isEmpty else { throw OFFFoodError.invalidResponse }
         guard let url = URL(string: Self.pendingTableURL) else { throw OFFFoodError.invalidURL }
         let body = try JSONEncoder().encode([submission])
         let req = postgrestRequest(url, method: "POST", body: body, prefer: "return=representation")
@@ -580,22 +582,24 @@ struct PendingFood: Identifiable, Codable, Equatable {
 
 /// Payload posted to `foods_pending` when a user submits a new product.
 /// Field names use snake_case to match the table columns directly.
+/// Important: the table uses `serving_size_g` and `sodium_mg`, not the
+/// shorter names used elsewhere in the codebase. `submitted_by` is NOT NULL.
 struct PendingFoodSubmission: Codable {
     let name: String
     let brand: String?
     let barcode: String?
     let calories_per_100g: Double
-    let serving_size: Double
+    let serving_size_g: Double
     let carbohydrates: Double
     let protein: Double
     let fat: Double
     let fiber: Double
     let sugar: Double
-    let sodium: Double
+    let sodium_mg: Double
     let category: String
     let status: String                  // always "pending" from the client
     let source_type: String             // "barcode_scan" or "manual_entry"
-    let submitted_by: String?
+    let submitted_by: String            // CloudKit user id, required by NOT NULL
     let submitted_by_display_name: String?
     let vote_count: Int                 // 1 — submitter counts as first confirm
 }

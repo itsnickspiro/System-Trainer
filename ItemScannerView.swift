@@ -1198,23 +1198,28 @@ struct SubmitPendingFoodSheet: View {
         isSubmitting = true
         submitError = nil
 
+        guard let userID = FoodDatabaseService.currentCloudKitUserID(), !userID.isEmpty else {
+            submitError = "Can't submit yet — your CloudKit user id hasn't been resolved. Try again in a moment."
+            isSubmitting = false
+            return
+        }
         let normalizedBarcode = barcode.isEmpty ? nil : FoodDatabaseService.normalizeBarcode(barcode)
         let submission = PendingFoodSubmission(
             name: name.trimmingCharacters(in: .whitespaces),
             brand: brand.trimmingCharacters(in: .whitespaces).isEmpty ? nil : brand,
             barcode: normalizedBarcode,
             calories_per_100g: Double(calories) ?? 0,
-            serving_size:      Double(servingSize) ?? 100,
+            serving_size_g:    Double(servingSize) ?? 100,
             carbohydrates:     Double(carbs)  ?? 0,
             protein:           Double(protein) ?? 0,
             fat:               Double(fat)   ?? 0,
             fiber:             Double(fiber) ?? 0,
             sugar:             Double(sugar) ?? 0,
-            sodium:            Double(sodium) ?? 0,
+            sodium_mg:         Double(sodium) ?? 0,
             category: category.rawValue,
             status: "pending",
             source_type: barcode.isEmpty ? "manual_entry" : "barcode_scan",
-            submitted_by: FoodDatabaseService.currentCloudKitUserID(),
+            submitted_by: userID,
             submitted_by_display_name: FoodDatabaseService.currentDisplayName(),
             vote_count: 1
         )
