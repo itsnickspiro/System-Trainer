@@ -1306,6 +1306,13 @@ struct MeditationTimerSheet: View {
                 guard isRunning else { return }
                 if secondsRemaining > 0 {
                     secondsRemaining -= 1
+                    if secondsRemaining == 0 {
+                        isRunning = false
+                        // Award meditation credit (focus / health / discipline) for the completed session.
+                        let minutes = max(1, totalSeconds / 60)
+                        DataManager.shared.recordHealthAction(.recordMeditation(minutes: minutes))
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
                 } else {
                     isRunning = false
                 }
