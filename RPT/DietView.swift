@@ -98,6 +98,7 @@ struct DietView: View {
     @State private var selectedMealForAdding: MealType = .breakfast
     @State private var showingCopyConfirm = false
     @State private var showingMealPlanner = false
+    @State private var showingGroceryList = false
     @State private var showingRecipeCalculator = false
     // AI nutrition-label scanner
     @State private var showingPhotoMealLogger = false
@@ -171,6 +172,11 @@ struct DietView: View {
                             showingMealPlanner = true
                         } label: {
                             Label("Meal Planner", systemImage: "calendar.badge.plus")
+                        }
+                        Button {
+                            showingGroceryList = true
+                        } label: {
+                            Label("Grocery List", systemImage: "cart")
                         }
                         Button {
                             showingRecipeCalculator = true
@@ -290,6 +296,9 @@ struct DietView: View {
             }
             .sheet(isPresented: $showingMealPlanner) {
                 MealPlanCalendarView()
+            }
+            .sheet(isPresented: $showingGroceryList) {
+                GroceryListView()
             }
             .sheet(isPresented: $showingRecipeCalculator) {
                 RecipeNutritionCalculatorView()

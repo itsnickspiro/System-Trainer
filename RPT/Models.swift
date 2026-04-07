@@ -1091,6 +1091,16 @@ final class FoodItem {
     /// 0=none/unknown, 1=low risk, 2=moderate risk, 3=high risk
     var additiveRiskLevel: Int = 0
 
+    // MARK: - Yuka-style ingredient grading (Phase D session 7)
+    //
+    // Captures the raw ingredient text from a scanned label or backend
+    // source, plus the parsed additive list and computed risk level. The
+    // existing `nutritionGrade` (macro-only) is unchanged — this is a
+    // supplementary score that combines with it for the post-scan verdict.
+    var ingredientText: String = ""
+    var detectedAdditives: [String] = []   // E-numbers or common names found
+    var detectedAllergens: [String] = []   // wheat, milk, peanut, soy, etc.
+
     var createdAt: Date = Date()
     var lastUsed: Date?
     var isFavorite: Bool = false
@@ -2254,6 +2264,39 @@ final class PlannedMeal {
         self.notes = notes
         self.estimatedCalories = estimatedCalories
         self.isCompleted = false
+    }
+}
+
+// MARK: - GroceryListItem
+
+@Model
+final class GroceryListItem {
+    @Attribute(.unique) var id: UUID = UUID()
+    var foodItemID: UUID?      // nil for free-text items added manually
+    var name: String = ""
+    var quantity: Double = 1.0
+    var unit: String = "serving"   // "g", "serving", "cup", etc.
+    var category: String = "other" // FoodCategory raw value, for grouping
+    var isChecked: Bool = false
+    var isManual: Bool = false     // user-added, not from PlannedMeal
+    var weekStartDate: Date = Date()  // groups items by the planning week
+    var createdAt: Date = Date()
+    var lastModified: Date = Date()
+
+    init(name: String, quantity: Double = 1.0, unit: String = "serving",
+         category: String = "other", isManual: Bool = true,
+         foodItemID: UUID? = nil, weekStartDate: Date = Date()) {
+        self.id = UUID()
+        self.foodItemID = foodItemID
+        self.name = name
+        self.quantity = quantity
+        self.unit = unit
+        self.category = category
+        self.isChecked = false
+        self.isManual = isManual
+        self.weekStartDate = weekStartDate
+        self.createdAt = Date()
+        self.lastModified = Date()
     }
 }
 

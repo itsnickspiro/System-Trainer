@@ -12,6 +12,7 @@ const OFF_FIELDS = [
   "code", "product_name", "brands", "categories_tags",
   "serving_size", "serving_quantity", "nutriments",
   "nova_group", "additives_tags",
+  "ingredients_text",
 ].join(",");
 
 serve(async (req) => {
@@ -179,6 +180,8 @@ async function handleSupabaseSearch(body: Record<string, unknown>): Promise<Resp
     containsGluten:   row.contains_gluten     ?? false,
     containsAlcohol:  row.contains_alcohol    ?? false,
     isHalalCertified: row.is_halal_certified  ?? false,
+    // Yuka-style ingredient grading (Phase D session 7)
+    ingredientText:   row.ingredient_text     ?? "",
   }));
 
   return new Response(JSON.stringify(foods), {
@@ -258,6 +261,8 @@ function mapOFFProduct(
     containsGluten:   false,
     containsAlcohol:  false,
     isHalalCertified: false,
+    // Yuka-style ingredient grading (Phase D session 7)
+    ingredientText:   (p.ingredients_text as string | undefined) ?? "",
   };
 }
 
