@@ -421,6 +421,9 @@ private struct SupabaseFoodRow: Decodable {
         case "beverages":   return .beverages
         case "snacks":      return .snacks
         case "prepared":    return .snacks
+        case "restaurant":  return .restaurant
+        case "restaurants": return .restaurant
+        case "fast_food":   return .restaurant
         case "supplements": return .other
         default:            return .other
         }
