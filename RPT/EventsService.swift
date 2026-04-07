@@ -188,8 +188,8 @@ struct GameEvent: Codable, Identifiable {
     let title:        String
     let description:  String
     let iconSymbol:   String
-    let goalType:     String   // "workouts" | "quests" | "steps" | "xp"
-    let goalTarget:   Double
+    let goalType:     String?  // "workouts" | "quests" | "steps" | "xp"
+    let goalTarget:   Double?
     let xpMultiplier:     Double?
     let creditMultiplier: Double?
     let rewardItemKey:    String?
@@ -199,8 +199,8 @@ struct GameEvent: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case key, title, description, rarity
         case iconSymbol      = "icon_symbol"
-        case goalType        = "goal_type"
-        case goalTarget      = "goal_target"
+        case goalType        = "individual_goal_type"
+        case goalTarget      = "individual_goal_value"
         case xpMultiplier    = "xp_multiplier"
         case creditMultiplier = "credit_multiplier"
         case rewardItemKey   = "reward_item_key"
@@ -215,8 +215,8 @@ struct GameEvent: Codable, Identifiable {
         title            = try c.decode(String.self, forKey: .title)
         description      = try c.decode(String.self, forKey: .description)
         iconSymbol       = try c.decode(String.self, forKey: .iconSymbol)
-        goalType         = try c.decode(String.self, forKey: .goalType)
-        goalTarget       = try c.decode(Double.self, forKey: .goalTarget)
+        goalType         = try c.decodeIfPresent(String.self, forKey: .goalType)
+        goalTarget       = try c.decodeIfPresent(Double.self, forKey: .goalTarget)
         xpMultiplier     = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
         creditMultiplier = try c.decodeIfPresent(Double.self, forKey: .creditMultiplier)
         rewardItemKey    = try c.decodeIfPresent(String.self, forKey: .rewardItemKey)
@@ -237,8 +237,8 @@ struct GameEvent: Codable, Identifiable {
         try c.encode(title,        forKey: .title)
         try c.encode(description,  forKey: .description)
         try c.encode(iconSymbol,   forKey: .iconSymbol)
-        try c.encode(goalType,     forKey: .goalType)
-        try c.encode(goalTarget,   forKey: .goalTarget)
+        try c.encodeIfPresent(goalType,     forKey: .goalType)
+        try c.encodeIfPresent(goalTarget,   forKey: .goalTarget)
         try c.encodeIfPresent(xpMultiplier,     forKey: .xpMultiplier)
         try c.encodeIfPresent(creditMultiplier, forKey: .creditMultiplier)
         try c.encodeIfPresent(rewardItemKey,    forKey: .rewardItemKey)
@@ -261,8 +261,8 @@ struct EventParticipation: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case eventKey      = "event_key"
-        case progress
-        case isCompleted   = "is_completed"
+        case progress      = "current_progress"
+        case isCompleted   = "goal_completed"
         case rewardClaimed = "reward_claimed"
     }
 }
@@ -288,7 +288,7 @@ struct ActiveEventCard: View {
 
     var isJoined: Bool { participation != nil }
     var progress: Double { participation?.progress ?? 0 }
-    var fraction: Double { min(1.0, progress / event.goalTarget) }
+    var fraction: Double { min(1.0, progress / max(1, event.goalTarget ?? 1)) }
     var isCompleted: Bool { participation?.isCompleted == true }
     var rewardClaimed: Bool { participation?.rewardClaimed == true }
 
@@ -330,7 +330,7 @@ struct ActiveEventCard: View {
             if isJoined {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("\(Int(progress)) / \(Int(event.goalTarget)) \(event.goalType)")
+                        Text("\(Int(progress)) / \(Int(event.goalTarget ?? 0)) \(event.goalType ?? "")")
                             .font(.caption.weight(.semibold))
                         Spacer()
                         Text("\(Int(fraction * 100))%")

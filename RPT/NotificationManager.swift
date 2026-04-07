@@ -6,9 +6,11 @@ import Combine
 /// Handles all app notifications with proper permissions and scheduling
 @MainActor
 class NotificationManager: NSObject, ObservableObject {
+    static let shared = NotificationManager()
+
     @Published var authorizationStatus: UNAuthorizationStatus = .notDetermined
     @Published var isAuthorized: Bool = false
-    
+
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -291,7 +293,7 @@ extension NotificationManager {
 
 // MARK: - SwiftUI Integration Helper
 struct NotificationPermissionView: View {
-    @StateObject private var notificationManager = NotificationManager()
+    @StateObject private var notificationManager = NotificationManager.shared
     @State private var showingSettings = false
     
     var body: some View {

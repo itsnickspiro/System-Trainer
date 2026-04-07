@@ -39,7 +39,7 @@ struct OnboardingView: View {
 
     // ── Services ──────────────────────────────────────────────────────────────
     @StateObject private var healthManager       = HealthManager()
-    @StateObject private var notificationManager = NotificationManager()
+    @StateObject private var notificationManager = NotificationManager.shared
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
@@ -1319,6 +1319,21 @@ private struct NotificationsStepView: View {
                     }
                     .buttonStyle(OnboardingPrimaryButtonStyle())
                     .padding(.top, 4)
+
+                    if notificationManager.authorizationStatus == .denied {
+                        VStack(spacing: 8) {
+                            Text("Notifications are disabled in Settings.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("Open Settings") {
+                                if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.cyan)
+                        }
+                    }
                 }
             }
         }

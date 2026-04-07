@@ -181,7 +181,6 @@ struct AchievementTemplate: Codable, Identifiable {
     let conditionValue: Int
     let xpReward:      Int
     let creditReward:  Int      // GP awarded on unlock
-    let rarity:        String   // "common" | "rare" | "epic" | "legendary"
     let isEnabled:     Bool
 
     enum CodingKeys: String, CodingKey {
@@ -193,8 +192,33 @@ struct AchievementTemplate: Codable, Identifiable {
         case conditionValue = "condition_value"
         case xpReward      = "xp_reward"
         case creditReward  = "credit_reward"
-        case rarity
         case isEnabled     = "is_enabled"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key            = try c.decode(String.self, forKey: .key)
+        title          = try c.decode(String.self, forKey: .title)
+        description    = (try? c.decodeIfPresent(String.self, forKey: .description)) ?? ""
+        iconSymbol     = (try? c.decodeIfPresent(String.self, forKey: .iconSymbol)) ?? "trophy.fill"
+        conditionType  = (try? c.decodeIfPresent(String.self, forKey: .conditionType)) ?? ""
+        conditionValue = (try? c.decodeIfPresent(Int.self, forKey: .conditionValue)) ?? 0
+        xpReward       = (try? c.decodeIfPresent(Int.self, forKey: .xpReward)) ?? 0
+        creditReward   = (try? c.decodeIfPresent(Int.self, forKey: .creditReward)) ?? 0
+        isEnabled      = (try? c.decodeIfPresent(Bool.self, forKey: .isEnabled)) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(key, forKey: .key)
+        try c.encode(title, forKey: .title)
+        try c.encode(description, forKey: .description)
+        try c.encode(iconSymbol, forKey: .iconSymbol)
+        try c.encode(conditionType, forKey: .conditionType)
+        try c.encode(conditionValue, forKey: .conditionValue)
+        try c.encode(xpReward, forKey: .xpReward)
+        try c.encode(creditReward, forKey: .creditReward)
+        try c.encode(isEnabled, forKey: .isEnabled)
     }
 }
 

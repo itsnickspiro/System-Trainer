@@ -167,11 +167,11 @@ struct AnnouncementItem: Codable, Identifiable {
         case key
         case title
         case body
-        case displayType  = "display_type"
+        case displayType  = "announcement_type"
         case showOnce     = "show_once"
-        case isEnabled    = "is_enabled"
-        case ctaLabel     = "cta_label"
-        case ctaURL       = "cta_url"
+        case isEnabled    = "is_active"
+        case ctaLabel     = "action_label"
+        case ctaURL       = "action_url"
     }
 }
 

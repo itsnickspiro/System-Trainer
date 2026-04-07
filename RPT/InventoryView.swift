@@ -66,7 +66,7 @@ struct InventoryView: View {
                     .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("Item Shop")
+            .navigationTitle("Inventory")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

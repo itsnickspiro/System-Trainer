@@ -62,7 +62,7 @@ struct CoachBarView: View {
 
     private func timeToMidnightString() -> String {
         let calendar = Calendar.current
-        let startOfTomorrow = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: now)!)
+        let startOfTomorrow = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: now) ?? now.addingTimeInterval(86400))
         let comps = calendar.dateComponents([.hour, .minute, .second], from: now, to: startOfTomorrow)
         let h = comps.hour ?? 0, m = comps.minute ?? 0, s = comps.second ?? 0
         return String(format: "Reset in %02d:%02d:%02d", h, m, s)

@@ -192,7 +192,7 @@ struct HomeView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("PLAYER")
                                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                    .foregroundColor(.cyan.opacity(0.8))
+                                    .foregroundColor(colorScheme == .dark ? .cyan.opacity(0.8) : .teal)
                                 Text(currentProfile.name)
                                     .font(.system(size: 24, weight: .bold, design: .rounded))
                                     .foregroundColor(colorScheme == .dark ? .white : .black)
@@ -785,7 +785,7 @@ struct HomeView: View {
     // MARK: - Helper Functions
     
     private func timeToMidnightString() -> String {
-        let midnight = Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day, value: 1, to: now)!)
+        let midnight = Calendar.current.startOfDay(for: Calendar.current.date(byAdding: .day, value: 1, to: now) ?? now.addingTimeInterval(86400))
         return timeRemaining(until: midnight)
     }
     

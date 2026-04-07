@@ -102,9 +102,7 @@ final class LeaderboardService: ObservableObject {
             "cloudkit_user_id": cloudKitID,
             "display_name":     profile.name,
             "level":            profile.level,
-            "xp":               profile.xp,
             "total_xp":         profile.totalXPEarned,
-            "streak":           profile.currentStreak,
             "current_streak":   profile.currentStreak,
             "player_id":        PlayerProfileService.shared.playerId
         ]

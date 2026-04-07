@@ -4,6 +4,8 @@
 <dict>
 	<key>APP_SECRET</key>
 	<string>$(APP_SECRET)</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -27,13 +29,27 @@
 			</array>
 		</dict>
 	</array>
-	<key>SUPABASE_ANON_KEY</key>
-	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
 		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>System Trainer uses the camera to scan food barcodes so you can log meals instantly without typing.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>System Trainer reads your steps, sleep, heart rate, workouts, and body measurements from Apple Health to power daily quests, track your progression, and personalize coaching.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>System Trainer writes workouts, body weight, water intake, and meal nutrition back to Apple Health so all your fitness data stays in one place.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>System Trainer uses your location to track outdoor cardio routes (Patrol mode) so you can see distance, pace, and the path you ran or walked.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>System Trainer needs continued location access to keep recording your route while the screen is locked during outdoor cardio sessions.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>System Trainer uses motion data to detect workouts and steps when Apple Health is unavailable.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>System Trainer uses the advertising identifier only for anonymous analytics about which features players use most. We never share or sell your data.</string>
 </dict>
 </plist>
