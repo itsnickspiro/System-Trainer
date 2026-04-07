@@ -143,37 +143,25 @@ struct OnboardingView: View {
     private var stepContent: some View {
         switch currentStep {
         case 0:  BootStepView(
-                     onBegin: {
-                         withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
+                     // Existing user — cloud profile fully restored, skip
+                     // onboarding entirely.
+                     onExistingUserRecovered: {
+                         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                         isOnboardingComplete = true
                      },
-                     onAppleSignInSuccess: {
-                         // Give the cloud profile a brief moment to hydrate
-                         // onto the local SwiftData Profile, then gate the
-                         // onboarding skip on whether we actually recovered
-                         // a usable profile. If critical fields are missing
-                         // we stay on the welcome step and let the user
-                         // finish onboarding manually with pre-filled values.
-                         Task {
-                             try? await Task.sleep(nanoseconds: 500_000_000)
-                             await MainActor.run {
-                                 if let profile = DataManager.shared.currentProfile,
-                                    !profile.name.isEmpty,
-                                    profile.age > 0,
-                                    profile.height > 0,
-                                    profile.weight > 0 {
-                                     UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-                                     isOnboardingComplete = true
-                                 } else if let p = DataManager.shared.currentProfile {
-                                     // Pre-fill whatever we did recover
-                                     profileName    = p.name
-                                     ageText        = p.age > 0 ? "\(p.age)" : ""
-                                     heightText     = p.height > 0 ? "\(Int(p.height))" : ""
-                                     weightText     = p.weight > 0 ? "\(Int(p.weight))" : ""
-                                     selectedGender = p.gender
-                                     selectedGoal   = p.fitnessGoal
-                                 }
-                             }
+                     // New user OR existing-but-incomplete — pre-fill any
+                     // recovered fields and advance to step 1 so they
+                     // complete the rest of onboarding normally.
+                     onNewUserSignedIn: {
+                         if let p = DataManager.shared.currentProfile {
+                             profileName    = p.name
+                             ageText        = p.age > 0 ? "\(p.age)" : ""
+                             heightText     = p.height > 0 ? "\(Int(p.height))" : ""
+                             weightText     = p.weight > 0 ? "\(Int(p.weight))" : ""
+                             selectedGender = p.gender
+                             selectedGoal   = p.fitnessGoal
                          }
+                         withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
                      }
                  )
         case 1:  NameStepView(profileName: $profileName)
@@ -355,11 +343,19 @@ struct OnboardingView: View {
 // MARK: - Step 0: Boot / Welcome
 
 private struct BootStepView: View {
-    let onBegin: () -> Void
-    var onAppleSignInSuccess: () -> Void = {}
+    /// Called when SIWA succeeds AND the cloud profile is fully restored —
+    /// the BootStepView's parent skips the rest of onboarding entirely.
+    var onExistingUserRecovered: () -> Void = {}
+
+    /// Called when SIWA succeeds but the user is brand new (no cloud profile)
+    /// OR existing-but-incomplete. The parent advances to the next onboarding
+    /// step, optionally pre-filled with whatever was recovered.
+    var onNewUserSignedIn: () -> Void = {}
 
     @State private var pulse = false
     @State private var glowOpacity: Double = 0.3
+    @State private var isAuthenticating = false
+    @State private var authError: String? = nil
 
     var body: some View {
         ZStack {
@@ -380,7 +376,7 @@ private struct BootStepView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                // Title block — always visible, no opacity gate
+                // Title block
                 VStack(spacing: 16) {
                     Text("SYSTEM TRAINER")
                         .font(.system(size: 36, weight: .black, design: .monospaced))
@@ -396,53 +392,84 @@ private struct BootStepView: View {
 
                 Spacer()
 
-                // BEGIN button — always visible, no opacity gate
-                Button(action: onBegin) {
-                    Text("BEGIN")
-                        .font(.system(size: 18, weight: .black, design: .monospaced))
-                        .foregroundColor(.black)
-                        .tracking(6)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.cyan)
-                                .shadow(color: .cyan.opacity(0.6), radius: 16)
-                        )
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-
-                SignInWithAppleButtonView(label: .signIn) { result in
-                    guard let result else { return }
-                    Task {
-                        let success = await PlayerProfileService.shared.linkAppleID(
-                            appleUserID: result.userID,
-                            displayName: result.displayName
-                        )
-                        if success {
-                            await MainActor.run {
-                                onAppleSignInSuccess()
-                            }
+                // Sign in with Apple — the ONLY way into the app right now.
+                // The BEGIN button is gone. Identity protection is mandatory.
+                VStack(spacing: 14) {
+                    if isAuthenticating {
+                        HStack(spacing: 10) {
+                            ProgressView().tint(.cyan)
+                            Text("Linking your account…")
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.cyan)
+                                .tracking(1)
                         }
+                        .frame(height: 50)
+                        .frame(maxWidth: .infinity)
+                        .background(.cyan.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        SignInWithAppleButtonView(label: .signIn) { result in
+                            guard let result else { return }
+                            Task { await handleSignIn(result) }
+                        }
+                        .frame(height: 50)
                     }
-                }
-                .frame(height: 48)
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
 
-                Text("Already have an account? Sign in to recover your profile.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 6)
-                    .padding(.bottom, 40)
+                    if let err = authError {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text("Sign in with Apple is required to begin. We use your Apple ID to keep your progress safe across devices — no email, no password.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 40)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { pulse = true }
+    }
+
+    /// Handle a successful Apple credential. Two outcomes:
+    ///   1. Cloud profile is fully populated (existing user, cross-device
+    ///      recovery) → onExistingUserRecovered() — parent skips onboarding
+    ///   2. Cloud profile is missing or incomplete (brand new user, OR
+    ///      existing user whose cloud row is empty from the silent-drop
+    ///      bug period) → onNewUserSignedIn() — parent pre-fills what
+    ///      was recovered and advances to step 1
+    @MainActor
+    private func handleSignIn(_ result: AppleSignInResult) async {
+        isAuthenticating = true
+        authError = nil
+        defer { isAuthenticating = false }
+
+        let success = await PlayerProfileService.shared.linkAppleID(
+            appleUserID: result.userID,
+            displayName: result.displayName
+        )
+        guard success else {
+            authError = "Couldn't sign in with Apple. Check your connection and try again."
+            return
+        }
+
+        // Give the hydration a beat to settle
+        try? await Task.sleep(for: .seconds(0.5))
+
+        if let profile = DataManager.shared.currentProfile,
+           !profile.name.isEmpty,
+           profile.age > 0,
+           profile.height > 0,
+           profile.weight > 0 {
+            onExistingUserRecovered()
+        } else {
+            onNewUserSignedIn()
+        }
     }
 }
 
