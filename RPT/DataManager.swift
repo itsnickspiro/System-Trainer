@@ -100,11 +100,6 @@ final class DataManager: ObservableObject {
 
         // Award daily login GP bonus (once per day)
         Task { await checkDailyLoginBonus() }
-
-        // Now that the SwiftData profile is loaded, push real values to the
-        // leaderboard. The launch-time refresh in RPTApp runs before this and
-        // would otherwise persist "Warrior / Level 1 / 0 XP" placeholders.
-        Task { await LeaderboardService.shared.refresh() }
     }
 
     /// Remove duplicate quests: for each calendar day, keep only one quest per title.

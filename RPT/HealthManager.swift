@@ -89,7 +89,7 @@ class HealthManager: ObservableObject {
         
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
-        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(86400)
         
         await withTaskGroup(of: Void.self) { group in
             // Fetch all health metrics concurrently

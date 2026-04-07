@@ -214,6 +214,12 @@ final class PlayerProfileService: ObservableObject {
         if let nullCheck = try? JSONDecoder().decode(NullPayload.self, from: data), nullCheck.isNull {
             return nil
         }
+        if let envelope = try? JSONDecoder().decode(ProfileEnvelope.self, from: data) {
+            if var profile = envelope.profile {
+                profile.activeOverride = envelope.override
+                return profile
+            }
+        }
         return try? JSONDecoder().decode(PlayerProfilePayload.self, from: data)
     }
 
@@ -223,10 +229,10 @@ final class PlayerProfileService: ObservableObject {
             "action": "upsert_profile",
             "cloudkit_user_id": cloudKitUserID,
             "level": profile.level,
-            "xp": profile.xp,
+            "total_xp": profile.xp,
             "current_streak": profile.currentStreak,
-            "best_streak": profile.bestStreak,
-            "player_name": profile.name
+            "longest_streak": profile.bestStreak,
+            "display_name": profile.name
         ]
         let data = try await postToProxy(body: body)
         if let result = try? JSONDecoder().decode(PlayerProfilePayload.self, from: data) {
@@ -247,9 +253,9 @@ final class PlayerProfileService: ObservableObject {
             "action": "save_backup",
             "cloudkit_user_id": cloudKitUserID,
             "level": profile.level,
-            "xp": profile.xp,
+            "total_xp": profile.xp,
             "current_streak": profile.currentStreak,
-            "best_streak": profile.bestStreak
+            "longest_streak": profile.bestStreak
         ]
         _ = try await postToProxy(body: body)
     }
@@ -282,6 +288,11 @@ final class PlayerProfileService: ObservableObject {
 
 // MARK: - Wire Models (private)
 
+private struct ProfileEnvelope: Decodable {
+    let profile: PlayerProfilePayload?
+    let override: PlayerOverridePayload?
+}
+
 private struct PlayerProfilePayload: Decodable {
     let playerId:             String
     let level:                Int
@@ -290,16 +301,30 @@ private struct PlayerProfilePayload: Decodable {
     let bestStreak:           Int?
     let systemCredits:        Int?
     let lifetimeCreditsEarned: Int?
-    let activeOverride:       PlayerOverridePayload?
+    var activeOverride:       PlayerOverridePayload?
 
     enum CodingKeys: String, CodingKey {
         case playerId              = "player_id"
-        case level, xp
+        case level
+        case xp                    = "total_xp"
         case currentStreak         = "current_streak"
-        case bestStreak            = "best_streak"
+        case bestStreak            = "longest_streak"
         case systemCredits         = "system_credits"
         case lifetimeCreditsEarned = "lifetime_credits_earned"
         case activeOverride        = "active_override"
+        case displayName           = "display_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        playerId              = (try? c.decodeIfPresent(String.self, forKey: .playerId)) ?? ""
+        level                 = (try? c.decodeIfPresent(Int.self, forKey: .level)) ?? 1
+        xp                    = (try? c.decodeIfPresent(Int.self, forKey: .xp)) ?? 0
+        currentStreak         = try? c.decodeIfPresent(Int.self, forKey: .currentStreak)
+        bestStreak            = try? c.decodeIfPresent(Int.self, forKey: .bestStreak)
+        systemCredits         = try? c.decodeIfPresent(Int.self, forKey: .systemCredits)
+        lifetimeCreditsEarned = try? c.decodeIfPresent(Int.self, forKey: .lifetimeCreditsEarned)
+        activeOverride        = try? c.decodeIfPresent(PlayerOverridePayload.self, forKey: .activeOverride)
     }
 }
 
@@ -311,9 +336,10 @@ private struct PlayerOverridePayload: Decodable {
     let systemCredits: Int?
 
     enum CodingKeys: String, CodingKey {
-        case level, xp
+        case level
+        case xp            = "total_xp"
         case currentStreak = "current_streak"
-        case bestStreak    = "best_streak"
+        case bestStreak    = "longest_streak"
         case systemCredits = "system_credits"
     }
 }

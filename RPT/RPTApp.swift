@@ -14,7 +14,7 @@ struct RPTApp: App {
     @AppStorage("colorScheme") private var colorScheme = "dark"
     @State private var isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     @State private var hasBootedUp = false
-    @State private var notificationManager = NotificationManager()
+    private let notificationManager = NotificationManager.shared
 
 
 
@@ -136,10 +136,15 @@ struct RPTApp: App {
                 await LeaderboardService.shared.resolveCloudKitUserIDIfNeeded()
 
                 // Step 2: Notification permission (non-blocking UI)
-                await notificationManager.requestAuthorization()
-                if notificationManager.isAuthorized {
-                    notificationManager.setupNotificationCategories()
-                    notificationManager.configureRecurringNotifications()
+                // Only request after onboarding — otherwise the OS dialog
+                // appears over the boot screen with no context.
+                let isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+                if isOnboardingComplete {
+                    await notificationManager.requestAuthorization()
+                    if notificationManager.isAuthorized {
+                        notificationManager.setupNotificationCategories()
+                        notificationManager.configureRecurringNotifications()
+                    }
                 }
                 // Step 3: Remote config — feature flags / thresholds available ASAP
                 await RemoteConfigService.shared.refresh()

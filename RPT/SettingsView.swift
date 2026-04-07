@@ -272,31 +272,35 @@ struct SettingsView: View {
                     }
                     
                     // Replace these URLs with your actual hosted privacy policy and terms pages
-                    Link(destination: URL(string: "https://spiro-technologies.github.io/rpt/privacy")!) {
-                        HStack {
-                            Image(systemName: "hand.raised.fill")
-                                .foregroundColor(.green)
-                            Text("Privacy Policy")
-                            Spacer()
-                            Image(systemName: "arrow.up.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    if let privacyURL = URL(string: "https://spiro-technologies.github.io/rpt/privacy") {
+                        Link(destination: privacyURL) {
+                            HStack {
+                                Image(systemName: "hand.raised.fill")
+                                    .foregroundColor(.green)
+                                Text("Privacy Policy")
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
+                        .foregroundColor(.primary)
                     }
-                    .foregroundColor(.primary)
 
-                    Link(destination: URL(string: "https://spiro-technologies.github.io/rpt/terms")!) {
-                        HStack {
-                            Image(systemName: "doc.text.fill")
-                                .foregroundColor(.blue)
-                            Text("Terms of Service")
-                            Spacer()
-                            Image(systemName: "arrow.up.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    if let termsURL = URL(string: "https://spiro-technologies.github.io/rpt/terms") {
+                        Link(destination: termsURL) {
+                            HStack {
+                                Image(systemName: "doc.text.fill")
+                                    .foregroundColor(.blue)
+                                Text("Terms of Service")
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
+                        .foregroundColor(.primary)
                     }
-                    .foregroundColor(.primary)
                 }
             }
             .navigationTitle("Settings")

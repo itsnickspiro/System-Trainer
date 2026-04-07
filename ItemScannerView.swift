@@ -60,6 +60,7 @@ struct ItemScannerView: View {
                             .padding(10)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .accessibilityLabel("Close scanner")
 
                     Spacer()
 
@@ -77,6 +78,7 @@ struct ItemScannerView: View {
                             .padding(10)
                             .background(.ultraThinMaterial, in: Circle())
                     }
+                    .accessibilityLabel(torchOn ? "Turn off torch" : "Turn on torch")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 60)

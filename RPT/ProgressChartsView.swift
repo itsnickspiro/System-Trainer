@@ -506,11 +506,11 @@ struct ProgressChartsView: View {
 
                 ZStack {
                     // Area fill
-                    if pts.count > 1 {
+                    if pts.count > 1, let firstPt = pts.first, let lastPt = pts.last {
                         Path { p in
-                            p.move(to: CGPoint(x: pts.first!.x, y: geo.size.height))
+                            p.move(to: CGPoint(x: firstPt.x, y: geo.size.height))
                             pts.forEach { p.addLine(to: $0) }
-                            p.addLine(to: CGPoint(x: pts.last!.x, y: geo.size.height))
+                            p.addLine(to: CGPoint(x: lastPt.x, y: geo.size.height))
                             p.closeSubpath()
                         }
                         .fill(LinearGradient(colors: [.teal.opacity(0.3), .clear], startPoint: .top, endPoint: .bottom))
@@ -559,11 +559,11 @@ struct ProgressChartsView: View {
                 }
 
                 ZStack {
-                    if pts.count > 1 {
+                    if pts.count > 1, let firstPt = pts.first, let lastPt = pts.last {
                         Path { p in
-                            p.move(to: CGPoint(x: pts.first!.x, y: geo.size.height))
+                            p.move(to: CGPoint(x: firstPt.x, y: geo.size.height))
                             pts.forEach { p.addLine(to: $0) }
-                            p.addLine(to: CGPoint(x: pts.last!.x, y: geo.size.height))
+                            p.addLine(to: CGPoint(x: lastPt.x, y: geo.size.height))
                             p.closeSubpath()
                         }
                         .fill(LinearGradient(colors: [.orange.opacity(0.3), .clear], startPoint: .top, endPoint: .bottom))

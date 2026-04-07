@@ -205,7 +205,7 @@ private struct WeeklyLeaderboardView: View {
     private var secondsUntilReset: Int {
         let now = Date()
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
+        cal.timeZone = TimeZone(identifier: "UTC") ?? TimeZone.current
         let weekday = cal.component(.weekday, from: now) // 1=Sun, 2=Mon, ..., 7=Sat
         let daysUntilMonday = weekday == 2 ? 7 : (9 - weekday) % 7
         guard let nextMonday = cal.date(byAdding: .day, value: daysUntilMonday, to: cal.startOfDay(for: now)) else { return 0 }

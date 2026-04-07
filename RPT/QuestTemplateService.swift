@@ -47,12 +47,12 @@ final class QuestTemplateService: ObservableObject {
     /// Templates filtered by arc key (nil = all templates)
     func templates(for arcKey: String? = nil) -> [QuestTemplate] {
         guard let arcKey else { return templates }
-        return templates.filter { $0.arcKey == arcKey }
+        return templates.filter { $0.requiresArc == arcKey }
     }
 
     /// Look up a template by its stable key
     func template(key: String) -> QuestTemplate? {
-        templates.first { $0.templateKey == key }
+        templates.first { $0.key == key }
     }
 
     // MARK: - Refresh
@@ -103,32 +103,27 @@ final class QuestTemplateService: ObservableObject {
 // MARK: - Public Models
 
 struct QuestTemplate: Codable, Identifiable {
-    var id: String { templateKey }
+    var id: String { key }
 
-    let templateKey:   String
-    let arcKey:        String?
-    let title:         String
-    let details:       String
-    let questType:     String      // "daily" | "weekly" | "special"
-    let statTarget:    String?
-    let xpBase:        Int
-    let minLevel:      Int
-    let maxLevel:      Int?
-    let condition:     String?     // completionCondition, e.g. "steps:10000"
-    let creditReward:  Int         // GP awarded on completion (0 if none)
-    let isEnabled:     Bool
+    let key: String
+    let title: String
+    let subtitle: String?
+    let category: String
+    let questType: String
+    let conditionType: String?
+    let conditionTarget: Double?
+    let xpReward: Int
+    let bonusXpReward: Int?
+    let requiresArc: String?
+    let arcDay: Int?
 }
 
 struct QuestArc: Codable, Identifiable {
-    var id: String { arcKey }
+    var id: String { key }
 
-    let arcKey:        String
-    let displayName:   String
-    let description:   String
-    let iconSymbol:    String
-    let accentColor:   String
-    let sortOrder:     Int
-    let isEnabled:     Bool
+    let key: String
+    let title: String
+    let sortOrder: Int
 }
 
 // MARK: - Wire Model

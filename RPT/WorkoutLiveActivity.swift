@@ -34,7 +34,7 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         /// Elapsed workout duration in seconds (from startedAt)
         var elapsedSeconds: Int
 
-        var isResting: Bool { restTimerEnd != nil && restTimerEnd! > Date() }
+        var isResting: Bool { restTimerEnd.map { $0 > Date() } ?? false }
 
         var progressFraction: Double {
             guard totalSets > 0 else { return 0 }

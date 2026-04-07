@@ -382,14 +382,14 @@ final class Profile {
         // Only update once per day
         guard !calendar.isDate(lastStatUpdate, inSameDayAs: now) else { return }
         
+        // Reset daily counters FIRST so stats are computed from fresh values
+        resetDailyCounters()
+
         // Update stats based on real health data
         updateStatsFromHealthData()
-        
+
         // Decay stats over time if no activity
         applyDailyDecay()
-        
-        // Reset daily counters
-        resetDailyCounters()
 
         // Advance Rehabilitation Arc countdown
         advanceRecoveryIfNeeded()
