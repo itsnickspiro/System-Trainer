@@ -37,7 +37,12 @@ final class Profile {
     // Diet preference (Phase D1). Stored as raw string for CloudKit compatibility.
     // Use the `dietType` computed accessor (Profile extension) for type-safe reads/writes.
     var dietTypeRaw: String = "none"
-    
+
+    // Player class / archetype (Phase D-3). Stored as raw string for CloudKit compatibility.
+    // Use the `playerClass` computed accessor (Profile extension) for type-safe reads/writes.
+    var playerClassRaw: String = "unselected"
+
+
     // HealthKit Integration Properties
     var dailySteps: Int = 0
     var dailyStepsGoal: Int = 10000
@@ -2452,5 +2457,84 @@ enum DietCompliance: Equatable {
         case .caution(let r): return r
         case .notCompliant(let r): return r
         }
+    }
+}
+
+// MARK: - Player Class (Phase D-3)
+
+enum PlayerClass: String, CaseIterable, Codable, Identifiable {
+    case unselected = "unselected"
+    case warrior    = "warrior"
+    case ranger     = "ranger"
+    case monk       = "monk"
+    case sage       = "sage"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .unselected: return "Unselected"
+        case .warrior:    return "Warrior"
+        case .ranger:     return "Ranger"
+        case .monk:       return "Monk"
+        case .sage:       return "Sage"
+        }
+    }
+
+    var tagline: String {
+        switch self {
+        case .unselected: return "Pick a path"
+        case .warrior:    return "Strength is the foundation"
+        case .ranger:     return "Endurance is the journey"
+        case .monk:       return "Discipline is the way"
+        case .sage:       return "Focus is the answer"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .unselected: return "Choose a class to get a 10% XP bonus on quests that match your path."
+        case .warrior:    return "Built for raw power. Warriors gain bonus XP on strength training and progressive overload quests."
+        case .ranger:     return "Built for the long run. Rangers gain bonus XP on cardio, steps, and endurance quests."
+        case .monk:       return "Built on consistency. Monks gain bonus XP on discipline, streaks, mindfulness, and recovery quests."
+        case .sage:       return "Built on awareness. Sages gain bonus XP on focus, deep work, and nutrition tracking quests."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .unselected: return "questionmark.circle"
+        case .warrior:    return "figure.strengthtraining.traditional"
+        case .ranger:     return "figure.run"
+        case .monk:       return "figure.mind.and.body"
+        case .sage:       return "brain.head.profile"
+        }
+    }
+
+    var bonusStatTarget: String {
+        switch self {
+        case .unselected: return ""
+        case .warrior:    return "strength"
+        case .ranger:     return "endurance"
+        case .monk:       return "discipline"
+        case .sage:       return "focus"
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .unselected: return "gray"
+        case .warrior:    return "red"
+        case .ranger:     return "green"
+        case .monk:       return "purple"
+        case .sage:       return "cyan"
+        }
+    }
+}
+
+extension Profile {
+    var playerClass: PlayerClass {
+        get { PlayerClass(rawValue: playerClassRaw) ?? .unselected }
+        set { playerClassRaw = newValue.rawValue }
     }
 }
