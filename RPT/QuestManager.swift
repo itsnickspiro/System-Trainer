@@ -652,6 +652,102 @@ final class QuestManager {
     }
 }
 
+// MARK: - Bodyweight Alternative Quests
+
+extension QuestManager {
+
+    /// Builds a single one-off bodyweight alternative quest derived from a
+    /// training focus. Used when the player has no access to equipment
+    /// (travel days, home workouts, etc.). Not added to the daily generator —
+    /// spawned on demand via `spawnBodyweightAlternative`.
+    func bodyweightAlternativeQuest(focusBodyParts: [String], date: Date, dueDate: Date?) -> Quest {
+        // Normalize inputs to lowercase for keyword matching.
+        let parts = focusBodyParts.map { $0.lowercased() }
+
+        // Pick the most prominent body part and resolve it to a focus bucket.
+        // Priority order mirrors the spec: push → pull → legs → core → cardio → default.
+        let focusLabel: String
+        let movements: String
+        if parts.contains(where: { ["chest", "push", "shoulders", "arms"].contains($0) }) {
+            focusLabel = "Push"
+            movements = """
+            3 sets of 10–15 reps each:
+            • Push-Ups
+            • Pike Push-Ups
+            • Tricep Dips (use a sturdy chair)
+            """
+        } else if parts.contains(where: { ["back", "pull"].contains($0) }) {
+            focusLabel = "Pull"
+            movements = """
+            3 sets of 8–12 reps each:
+            • Inverted Rows (use a sturdy table)
+            • Doorway Pulls
+            • Superman Holds
+            """
+        } else if parts.contains(where: { ["legs", "glutes", "lower"].contains($0) }) {
+            focusLabel = "Legs"
+            movements = """
+            3 sets of 15–20 reps each:
+            • Bodyweight Squats
+            • Walking Lunges
+            • Glute Bridges
+            • Calf Raises
+            """
+        } else if parts.contains("core") {
+            focusLabel = "Core"
+            movements = """
+            3 rounds of 30 seconds each:
+            • Plank
+            • Dead Bug
+            • Mountain Climbers
+            • Side Plank
+            """
+        } else if parts.contains("cardio") {
+            focusLabel = "Cardio"
+            movements = """
+            4 rounds of 1 minute work / 30 sec rest:
+            • Jumping Jacks
+            • High Knees
+            • Burpees
+            """
+        } else {
+            // mobility, fullBody, mixed, or anything unrecognized.
+            focusLabel = "Full Body"
+            movements = """
+            15-minute full-body bodyweight circuit:
+            • Bodyweight Squats
+            • Push-Ups
+            • Planks
+            • Walking Lunges
+            Repeat as many rounds as possible in 15 minutes.
+            """
+        }
+
+        return Quest(
+            title: "Bodyweight Alternative — \(focusLabel)",
+            details: movements,
+            type: .daily,
+            dueDate: dueDate,
+            xpReward: 60,
+            statTarget: "discipline",
+            completionCondition: "workout:any",
+            dateTag: date
+        )
+    }
+
+    /// Inserts a bodyweight alternative quest into the given context so it
+    /// appears immediately in the quest list. The quest auto-completes when
+    /// any workout is logged (via the existing `workout:any` path).
+    @MainActor
+    func spawnBodyweightAlternative(focusBodyParts: [String], context: ModelContext) {
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86400)
+        let quest = bodyweightAlternativeQuest(focusBodyParts: focusBodyParts, date: today, dueDate: tomorrow)
+        context.insert(quest)
+        try? context.save()
+    }
+}
+
 // MARK: - TierRank Ordinal (for arithmetic)
 
 extension QuestManager.TierRank {

@@ -10,13 +10,13 @@ import SwiftData
 //  0  — Boot / Welcome     (no progress bar)
 //  1  — Name
 //  2  — Biological Sex
-//  3  — Fitness Goal
-//  4  — Body Stats
-//  5  — Avatar Selection   (skippable)
-//  6  — Workout Plan       (skippable)
-//  7  — Gold Pieces Explainer
-//  8  — HealthKit          (skippable)
-//  9  — Notifications      (skippable)
+//  3  — Basics (age + height + weight on one screen)
+//  4  — Fitness Goal
+//  5  — Workout Plan  (anime plans filtered by gender + goal, or Build-my-own)
+//  6  — Goal Survey Gate (only shown if Build-my-own was chosen)
+//  7  — HealthKit          (skippable)
+//  8  — Notifications      (skippable)
+//  9  — ATT Prompt          (skippable)
 //  10 — Ready Screen       (no progress bar)
 
 struct OnboardingView: View {
@@ -36,6 +36,12 @@ struct OnboardingView: View {
     @State private var selectedAvatarKey: String?      = nil
     @State private var selectedPlanID: String?         = nil   // nil = skip / custom
     @State private var useMetric: Bool = (Locale.current.measurementSystem == .metric)
+    /// Set to true when the user picks "Build my own plan" on the plan step.
+    /// Controls whether step 6 (the Goal Survey gate) is shown.
+    @State private var isBuildingCustomPlan: Bool = false
+    /// Tracks whether the in-memory profile has had its goal survey completed.
+    /// Bound against the actual Profile model so step 6 Continue can enable.
+    @State private var goalSurveyCompleted: Bool = false
 
     // ── Services ──────────────────────────────────────────────────────────────
     @StateObject private var healthManager       = HealthManager()
@@ -43,8 +49,8 @@ struct OnboardingView: View {
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 9   // steps 1–9 show the progress bar
-    private let skippableSteps: Set<Int> = [5, 6, 8, 9]
+    private let totalProgressSteps = 10  // logical progress denominator (1–9 visible + Ready)
+    private let skippableSteps: Set<Int> = [7, 8, 9]  // Health, Notifs, ATT are optional
     private let noProgressBarSteps: Set<Int> = [0, 10]
 
     var body: some View {
@@ -137,8 +143,7 @@ struct OnboardingView: View {
                  })
         case 1:  NameStepView(profileName: $profileName)
         case 2:  GenderStepView(selectedGender: $selectedGender)
-        case 3:  GoalStepView(selectedGoal: $selectedGoal)
-        case 4:  BodyStatsStepView(
+        case 3:  BodyStatsStepView(
                     ageText: $ageText,
                     heightText: $heightText,
                     weightText: $weightText,
@@ -147,11 +152,20 @@ struct OnboardingView: View {
                     selectedGender: selectedGender,
                     selectedGoal: selectedGoal
                  )
-        case 5:  AvatarStepView(selectedAvatarKey: $selectedAvatarKey)
-        case 6:  WorkoutPlanStepView(selectedPlanID: $selectedPlanID, playerGender: selectedGender)
-        case 7:  GPExplainerStepView()
-        case 8:  HealthStepView(healthManager: healthManager)
-        case 9:  NotificationsStepView(notificationManager: notificationManager)
+        case 4:  GoalStepView(selectedGoal: $selectedGoal)
+        case 5:  WorkoutPlanStepView(
+                    selectedPlanID: $selectedPlanID,
+                    isBuildingCustomPlan: $isBuildingCustomPlan,
+                    playerGender: selectedGender,
+                    playerGoal: selectedGoal
+                 )
+        case 6:  GoalSurveyGateStepView(
+                    profileProvider: { ensureProfile() },
+                    goalSurveyCompleted: $goalSurveyCompleted
+                 )
+        case 7:  HealthStepView(healthManager: healthManager)
+        case 8:  NotificationsStepView(notificationManager: notificationManager)
+        case 9:  ATTPromptStepView()
         case 10: ReadyStepView(
                     name: profileName,
                     goal: selectedGoal,
@@ -172,11 +186,18 @@ struct OnboardingView: View {
             .buttonStyle(OnboardingPrimaryButtonStyle())
             .disabled(!canAdvance)
 
+            // Helper text when the goal survey gate blocks progression
+            if currentStep == 6 && !goalSurveyCompleted {
+                Text("Complete the goal survey to continue.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+
             // Skip button (optional steps only)
             if skippableSteps.contains(currentStep) {
                 Button("Skip for now") {
                     withAnimation(.easeInOut(duration: 0.35)) {
-                        currentStep += 1
+                        advanceFrom(currentStep)
                     }
                 }
                 .font(.system(size: 14, weight: .medium))
@@ -190,8 +211,19 @@ struct OnboardingView: View {
     private var canAdvance: Bool {
         switch currentStep {
         case 1: return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
+        case 6: return goalSurveyCompleted
         default: return true
         }
+    }
+
+    /// Advances from `step`, skipping the Goal Survey Gate (step 6) when the
+    /// user didn't pick "Build my own plan".
+    private func advanceFrom(_ step: Int) {
+        var next = step + 1
+        if next == 6 && !isBuildingCustomPlan {
+            next = 7
+        }
+        currentStep = next
     }
 
     private func handleAdvance() {
@@ -206,8 +238,18 @@ struct OnboardingView: View {
             return
         }
         withAnimation(.easeInOut(duration: 0.35)) {
-            currentStep += 1
+            advanceFrom(currentStep)
         }
+    }
+
+    /// Fetch-or-create the live Profile so step 6's survey sheet can mutate it.
+    private func ensureProfile() -> Profile {
+        let existing = try? modelContext.fetch(FetchDescriptor<Profile>())
+        if let first = existing?.first { return first }
+        let p = Profile()
+        modelContext.insert(p)
+        try? modelContext.save()
+        return p
     }
 
     // MARK: - Complete Onboarding
@@ -235,8 +277,15 @@ struct OnboardingView: View {
         profile.weight             = weight   // stored in kg
         profile.useMetric          = useMetric
         profile.activityLevelIndex = activityLevelIndex
-        if let planID = selectedPlanID, !planID.isEmpty {
+        if isBuildingCustomPlan {
+            // Leave the "custom_pending" (or whatever the survey set) sentinel in place.
+            if (profile.activePlanID ?? "").isEmpty {
+                profile.activePlanID = "custom_pending"
+            }
+        } else if let planID = selectedPlanID, !planID.isEmpty {
             profile.activePlanID = planID
+        } else {
+            profile.activePlanID = ""
         }
         try? modelContext.save()
 
@@ -829,8 +878,11 @@ private struct AvatarCell: View {
 
 private struct WorkoutPlanStepView: View {
     @Binding var selectedPlanID: String?
+    @Binding var isBuildingCustomPlan: Bool
     /// Player's biological sex — used to filter anime programs to gender-appropriate ones.
     let playerGender: PlayerGender
+    /// Player's fitness goal — used (best-effort) to filter plans by recommended goal.
+    let playerGoal: FitnessGoal
     @ObservedObject private var planService = AnimeWorkoutPlanService.shared
 
     @State private var showingAnimePicker = false
@@ -839,6 +891,7 @@ private struct WorkoutPlanStepView: View {
     private enum PickMode { case none, anime, custom }
 
     /// Plans whose target gender matches the player (or that are gender-neutral).
+    /// The goal filter is applied as a nice-to-have if the plan model exposes it.
     private var visiblePlans: [AnimeWorkoutPlan] {
         planService.all.filter { plan in
             plan.targetGender == nil || plan.targetGender == playerGender
@@ -872,17 +925,18 @@ private struct WorkoutPlanStepView: View {
                     }
                 }
 
-                // Custom Plan card
+                // Build my own plan card — triggers the Goal Survey gate.
                 PlanOptionCard(
-                    icon: "wrench.and.screwdriver.fill",
-                    title: "Custom Protocol",
-                    subtitle: "Build your own training plan in the Training tab",
+                    icon: "plus.circle.fill",
+                    title: "Build my own plan",
+                    subtitle: "Answer a short survey so we can tailor quests to you",
                     color: .blue,
                     isSelected: pickMode == .custom
                 ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         pickMode = .custom
-                        selectedPlanID = nil
+                        selectedPlanID = "custom_pending"
+                        isBuildingCustomPlan = true
                     }
                 }
 
@@ -901,6 +955,7 @@ private struct WorkoutPlanStepView: View {
                                                  isSelected: selectedPlanID == plan.id) {
                                         selectedPlanID = plan.id
                                         pickMode = .anime
+                                        isBuildingCustomPlan = false
                                     }
                                 }
                             }
@@ -936,6 +991,12 @@ private struct WorkoutPlanStepView: View {
                 plans: visiblePlans,
                 selectedPlanID: $selectedPlanID
             )
+        }
+        .onChange(of: selectedPlanID) { _, newValue in
+            // Any non-sentinel real plan ID clears the "custom" intent.
+            if let id = newValue, !id.isEmpty, id != "custom_pending" {
+                isBuildingCustomPlan = false
+            }
         }
     }
 }
@@ -1546,6 +1607,120 @@ struct SecondaryButtonStyle: ButtonStyle {
 // MARK: - QuestDifficulty, QuestCategory (still in QuestsView.swift — no change)
 
 // MARK: - Preview
+
+// MARK: - Step 6: Goal Survey Gate
+//
+// Only shown when the user picked "Build my own plan" on step 5.
+// Presents GoalSurveyView in a fullScreenCover. Continue (in the parent nav
+// bar) is disabled until `profile.goalSurveyCompleted == true`.
+
+private struct GoalSurveyGateStepView: View {
+    /// Lazily fetches-or-creates the live Profile so the survey sheet has
+    /// something to mutate.
+    let profileProvider: () -> Profile
+    @Binding var goalSurveyCompleted: Bool
+
+    @State private var showingSurvey = false
+    @State private var resolvedProfile: Profile? = nil
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "list.bullet.clipboard.fill",
+            iconColor: .cyan,
+            title: "Goal Survey Required",
+            subtitle: "To generate quests for your custom plan, complete a 7-question survey about your training preferences."
+        ) {
+            VStack(spacing: 16) {
+                Button {
+                    resolvedProfile = profileProvider()
+                    showingSurvey = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: goalSurveyCompleted
+                              ? "checkmark.circle.fill"
+                              : "arrow.right.circle.fill")
+                        Text(goalSurveyCompleted ? "Survey Complete" : "Take the Survey")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .foregroundColor(goalSurveyCompleted ? .green : .cyan)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill((goalSurveyCompleted ? Color.green : Color.cyan).opacity(0.12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke((goalSurveyCompleted ? Color.green : Color.cyan)
+                                            .opacity(0.4), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if goalSurveyCompleted {
+                    Text("Nice — tap Continue to keep going.")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showingSurvey) {
+            if let profile = resolvedProfile {
+                GoalSurveyView(profile: profile) {
+                    // Sync local gate state from the profile after the survey dismisses.
+                    goalSurveyCompleted = profile.goalSurveyCompleted
+                    showingSurvey = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Step 9: ATT (App Tracking Transparency) Prompt
+//
+// Briefly explains why we want tracking permission, then triggers the system
+// prompt via AppTrackingHelper. Both buttons advance the step — the Skip link
+// just advances without requesting.
+
+private struct ATTPromptStepView: View {
+    var body: some View {
+        OnboardingStepShell(
+            icon: "hand.raised.fill",
+            iconColor: .cyan,
+            title: "Analytics Permission",
+            subtitle: "We use the advertising identifier only for anonymous analytics about which features you use most. We never share or sell your data.",
+            isSkippable: true
+        ) {
+            VStack(spacing: 14) {
+                Button {
+                    Task { await AppTrackingHelper.requestIfNeeded() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.shield.fill")
+                        Text("OK, ask me")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .foregroundColor(.cyan)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.cyan.opacity(0.12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color.cyan.opacity(0.4), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Text("You can change this later in Settings → Privacy.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+        }
+    }
+}
 
 #Preview {
     OnboardingView(isOnboardingComplete: .constant(false))
