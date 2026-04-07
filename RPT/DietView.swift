@@ -99,6 +99,8 @@ struct DietView: View {
     @State private var showingCopyConfirm = false
     @State private var showingMealPlanner = false
     @State private var showingRecipeCalculator = false
+    // AI nutrition-label scanner
+    @State private var showingPhotoMealLogger = false
     // Entry editing / nutrition detail
     @State private var entryToEdit: FoodEntry? = nil
     @State private var entryForNutrition: FoodEntry? = nil
@@ -276,6 +278,11 @@ struct DietView: View {
             .sheet(isPresented: $showingAddFood) {
                 if !isDateLocked {
                     AddFoodView(selectedMeal: $selectedMealForAdding, selectedDate: selectedDate)
+                }
+            }
+            .sheet(isPresented: $showingPhotoMealLogger) {
+                if !isDateLocked {
+                    PhotoMealLoggerView(selectedMeal: selectedMealForAdding)
                 }
             }
             .sheet(isPresented: $showingNutritionGoals) {
@@ -907,28 +914,52 @@ struct DietView: View {
                 .frame(height: CGFloat(mealEntries.count) * 62)
 
                 if !isDateLocked {
-                    Button("Log Rations") {
-                        selectedMealForAdding = mealType
-                        showingAddFood = true
+                    Menu {
+                        Button {
+                            selectedMealForAdding = mealType
+                            showingAddFood = true
+                        } label: {
+                            Label("Search & Add", systemImage: "magnifyingglass")
+                        }
+                        Button {
+                            selectedMealForAdding = mealType
+                            showingPhotoMealLogger = true
+                        } label: {
+                            Label("Scan Nutrition Label (AI)", systemImage: "doc.text.viewfinder")
+                        }
+                    } label: {
+                        Label("Log Rations", systemImage: "plus.circle.fill")
+                            .font(.subheadline)
+                            .foregroundColor(.blue)
                     }
-                    .font(.subheadline)
-                    .foregroundColor(.blue)
                     .padding(.top, 4)
                 }
             } else if !isDateLocked {
-                Button("Log Rations") {
-                    selectedMealForAdding = mealType
-                    showingAddFood = true
+                Menu {
+                    Button {
+                        selectedMealForAdding = mealType
+                        showingAddFood = true
+                    } label: {
+                        Label("Search & Add", systemImage: "magnifyingglass")
+                    }
+                    Button {
+                        selectedMealForAdding = mealType
+                        showingPhotoMealLogger = true
+                    } label: {
+                        Label("Scan Nutrition Label (AI)", systemImage: "doc.text.viewfinder")
+                    }
+                } label: {
+                    Label("Log Rations", systemImage: "plus.circle")
+                        .font(.subheadline)
+                        .foregroundColor(.blue)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(color.opacity(0.1))
+                                .stroke(color.opacity(0.3), lineWidth: 1)
+                        )
                 }
-                .font(.subheadline)
-                .foregroundColor(.blue)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(color.opacity(0.1))
-                        .stroke(color.opacity(0.3), lineWidth: 1)
-                )
             } else {
                 Text("No meals logged")
                     .font(.caption)

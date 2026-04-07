@@ -319,6 +319,76 @@ final class AIManager: ObservableObject {
     }
 }
 
+// MARK: - Nutrition Label Parsing
+
+/// Structured nutrition estimate parsed from a photographed nutrition label
+/// or a user-typed description. Every numeric field is per single serving
+/// (not per 100g) because that's how physical labels are printed.
+@Generable
+struct MealEstimate: Codable, Sendable {
+    @Guide(description: "Best-guess name of the food. Examples: 'Whey Protein Chocolate', 'Greek Yogurt Plain', 'Granola Bar'. 2-6 words, title-case.")
+    let name: String
+
+    @Guide(description: "Brand name if identifiable from the label, otherwise empty string.")
+    let brand: String
+
+    @Guide(description: "Calories per serving in kcal. Integer. Return 0 if genuinely unknown, never fabricate.")
+    let calories: Int
+
+    @Guide(description: "Protein per serving in grams. Return 0 if unknown.")
+    let protein: Double
+
+    @Guide(description: "Carbohydrates per serving in grams. Return 0 if unknown.")
+    let carbohydrates: Double
+
+    @Guide(description: "Total fat per serving in grams. Return 0 if unknown.")
+    let fat: Double
+
+    @Guide(description: "Fiber per serving in grams. Return 0 if unknown.")
+    let fiber: Double
+
+    @Guide(description: "Sugar per serving in grams. Return 0 if unknown.")
+    let sugar: Double
+
+    @Guide(description: "Sodium per serving in milligrams. Return 0 if unknown.")
+    let sodium: Double
+
+    @Guide(description: "Serving size in grams. Return 100 if unknown.")
+    let servingGrams: Double
+
+    @Guide(description: "Confidence 0-100 in the extracted values. Under 50 means the label was unclear and the user should review carefully.")
+    let confidence: Int
+}
+
+extension AIManager {
+    /// Parse raw text extracted from a nutrition label (via Vision) into a
+    /// structured MealEstimate using the on-device Foundation Models.
+    func parseNutritionLabel(text: String) async throws -> MealEstimate {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AIManagerError.generationFailed("Nothing to analyze — point the camera at a nutrition label.")
+        }
+        guard isAvailable else { throw AIManagerError.unavailable }
+
+        let prompt = """
+        Extract the nutrition facts from this raw OCR text scanned from a food label.
+        The text may be noisy, reordered, or missing values. Fill in what you can
+        confidently read; return 0 for any field you cannot determine with certainty.
+
+        --- RAW OCR TEXT ---
+        \(text)
+        --- END ---
+
+        Output a structured MealEstimate with the food's name (best guess from any
+        product title visible), brand (if shown), and per-serving macros + micros
+        as they appear on the label. Do not fabricate values.
+        """
+
+        let session = LanguageModelSession(instructions: "You are a precise nutrition label parser. Extract exactly what the label says. Never invent values.")
+        let response = try await session.respond(to: prompt, generating: MealEstimate.self)
+        return response.content
+    }
+}
+
 // MARK: - Error
 
 enum AIManagerError: LocalizedError {

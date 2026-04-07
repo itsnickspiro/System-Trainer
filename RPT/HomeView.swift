@@ -225,6 +225,10 @@ struct HomeView: View {
                                 Text(currentProfile.name)
                                     .font(.system(size: 24, weight: .bold, design: .rounded))
                                     .foregroundColor(colorScheme == .dark ? .white : .black)
+                                // DBZ-style scouter badge — recomputes live as
+                                // stats / level / streak / XP change.
+                                PowerLevelBadge(profile: currentProfile)
+                                    .padding(.top, 2)
                             }
 
                             Spacer()
