@@ -71,6 +71,18 @@ final class PlayerProfileService: ObservableObject {
     func refresh() async {
         guard let cloudKitID = LeaderboardService.shared.currentUserID,
               !cloudKitID.isEmpty else { return }
+
+        // If the user has previously signed in with Apple, ensure the profile is
+        // linked to their current cloudkit_user_id (cheap idempotent call). This
+        // also handles the cross-device case where they signed in here for the
+        // first time on a new device — the proxy will return the existing profile
+        // and we adopt it.
+        if let cachedAppleID = UserDefaults.standard.string(forKey: "rpt_linked_apple_user_id"),
+           !cachedAppleID.isEmpty {
+            let displayName = UserDefaults.standard.string(forKey: "rpt_apple_display_name")
+            _ = await linkAppleID(appleUserID: cachedAppleID, displayName: displayName)
+        }
+
         isLoading = true
         lastError = nil
         defer { isLoading = false }
@@ -167,6 +179,81 @@ final class PlayerProfileService: ObservableObject {
         } catch {
             lastError = error.localizedDescription
             return []
+        }
+    }
+
+    // MARK: - Sign in with Apple
+
+    /// Links the provided Apple user ID to the current device's player profile.
+    /// Handles all three response cases from the player-proxy `link_apple_id`
+    /// action, including cross-device matches where another device's profile is
+    /// returned and adopted locally.
+    func linkAppleID(appleUserID: String, displayName: String?) async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else {
+            print("[PlayerProfileService] linkAppleID skipped — CloudKit user id not yet resolved")
+            return false
+        }
+        guard !appleUserID.isEmpty else {
+            print("[PlayerProfileService] linkAppleID skipped — empty appleUserID")
+            return false
+        }
+
+        var body: [String: Any] = [
+            "action":           "link_apple_id",
+            "cloudkit_user_id": cloudKitID,
+            "apple_user_id":    appleUserID
+        ]
+        if let displayName, !displayName.isEmpty {
+            body["display_name"] = displayName
+        }
+
+        do {
+            let data = try await postToProxy(body: body)
+            struct LinkResponse: Decodable {
+                let success: Bool?
+                let linked: Bool?
+                let profile: PlayerProfilePayload?
+                let message: String?
+                let created: Bool?
+            }
+            let response = try JSONDecoder().decode(LinkResponse.self, from: data)
+            guard response.success == true, let payload = response.profile else {
+                return false
+            }
+
+            // Apply the returned profile to the local SwiftData Profile so the
+            // device immediately shows the cross-device data.
+            applyRemoteProfile(payload)
+
+            // Persist the apple user id locally so future launches know the
+            // user is signed in even before AppleAuthService re-checks.
+            UserDefaults.standard.set(appleUserID, forKey: "rpt_linked_apple_user_id")
+
+            return true
+        } catch {
+            print("[PlayerProfileService] linkAppleID failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Looks up a player profile by Apple ID without linking. Idempotent.
+    fileprivate func lookupByAppleID(_ appleUserID: String) async -> PlayerProfilePayload? {
+        guard !appleUserID.isEmpty else { return nil }
+        let body: [String: Any] = [
+            "action":        "lookup_by_apple_id",
+            "apple_user_id": appleUserID
+        ]
+        do {
+            let data = try await postToProxy(body: body)
+            struct LookupResponse: Decodable {
+                let found: Bool?
+                let profile: PlayerProfilePayload?
+            }
+            let response = try JSONDecoder().decode(LookupResponse.self, from: data)
+            return response.profile
+        } catch {
+            print("[PlayerProfileService] lookupByAppleID failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AuthenticationServices
 
 // MARK: - OnboardingView
 //
@@ -140,9 +141,15 @@ struct OnboardingView: View {
     @ViewBuilder
     private var stepContent: some View {
         switch currentStep {
-        case 0:  BootStepView(onBegin: {
-                     withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
-                 })
+        case 0:  BootStepView(
+                     onBegin: {
+                         withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
+                     },
+                     onAppleSignInSuccess: {
+                         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                         isOnboardingComplete = true
+                     }
+                 )
         case 1:  NameStepView(profileName: $profileName)
         case 2:  GenderStepView(selectedGender: $selectedGender)
         case 3:  BodyStatsStepView(
@@ -321,6 +328,7 @@ struct OnboardingView: View {
 
 private struct BootStepView: View {
     let onBegin: () -> Void
+    var onAppleSignInSuccess: () -> Void = {}
 
     @State private var pulse = false
     @State private var glowOpacity: Double = 0.3
@@ -376,7 +384,33 @@ private struct BootStepView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 24)
-                .padding(.bottom, 56)
+                .padding(.top, 8)
+
+                SignInWithAppleButtonView(label: .signIn) { result in
+                    guard let result else { return }
+                    Task {
+                        let success = await PlayerProfileService.shared.linkAppleID(
+                            appleUserID: result.userID,
+                            displayName: result.displayName
+                        )
+                        if success {
+                            await MainActor.run {
+                                onAppleSignInSuccess()
+                            }
+                        }
+                    }
+                }
+                .frame(height: 48)
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+
+                Text("Already have an account? Sign in to recover your profile.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 6)
+                    .padding(.bottom, 40)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
