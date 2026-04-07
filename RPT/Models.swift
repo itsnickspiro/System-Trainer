@@ -2538,3 +2538,50 @@ extension Profile {
         set { playerClassRaw = newValue.rawValue }
     }
 }
+
+extension Profile {
+    /// Dragon Ball Z-style "power level" — a single deterministic number
+    /// that combines level, all six stats, streak, and lifetime XP into one
+    /// summary figure visible on the Home player card and leaderboards.
+    var powerLevel: Int {
+        let base = Double(level) * 120.0
+        let statSum = health + energy + strength + endurance + focus + discipline
+        let streakBoost = Double(currentStreak) * 8.0
+        let xpBoost = Double(totalXPEarned) / 50.0
+        let raw = base + (statSum * 5.0) + streakBoost + xpBoost
+        return max(0, Int(raw.rounded()))
+    }
+
+    /// Short-formatted power level string — "1,234" or "12.3K" for big numbers.
+    var powerLevelFormatted: String {
+        let pl = powerLevel
+        if pl >= 1000 {
+            let k = Double(pl) / 1000.0
+            if k >= 100 {
+                return String(format: "%.0fK", k)
+            } else if k >= 10 {
+                return String(format: "%.1fK", k)
+            } else {
+                return String(format: "%.2fK", k)
+            }
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.groupingSeparator = ","
+        return formatter.string(from: NSNumber(value: pl)) ?? "\(pl)"
+    }
+
+    /// Qualitative tier label based on power level. Used for flavor text.
+    var powerLevelTier: String {
+        switch powerLevel {
+        case 0..<1000:      return "Trainee"
+        case 1000..<3000:   return "Adept"
+        case 3000..<6000:   return "Veteran"
+        case 6000..<9000:   return "Elite"
+        case 9000..<15000:  return "Beyond Elite"
+        case 15000..<25000: return "Legendary"
+        case 25000..<50000: return "Mythic"
+        default:            return "Transcendent"
+        }
+    }
+}
