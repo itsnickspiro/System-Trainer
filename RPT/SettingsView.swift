@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AuthenticationServices
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
@@ -15,6 +16,8 @@ struct SettingsView: View {
     @State private var showingCreditHistory = false
     @ObservedObject private var playerProfile = PlayerProfileService.shared
     @ObservedObject private var storeService = StoreService.shared
+    @ObservedObject private var appleAuth = AppleAuthService.shared
+    @State private var showingRestartOnboardingAlert = false
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
     @State private var copiedPlayerID = false
     @State private var showingDietInfo = false
@@ -38,6 +41,56 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Account Section (Sign in with Apple)
+                Section {
+                    if appleAuth.isSignedIn {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.system(size: 32))
+                                .foregroundColor(.cyan)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(appleAuth.currentDisplayName ?? "Signed in with Apple")
+                                    .font(.subheadline.weight(.semibold))
+                                if let email = appleAuth.currentEmail {
+                                    Text(email)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            Spacer()
+                        }
+                        Button(role: .destructive) {
+                            appleAuth.signOut()
+                        } label: {
+                            Label("Sign out of Apple", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Sign in with Apple to back up your profile and recover it on any other device.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            SignInWithAppleButtonView(label: .signIn) { result in
+                                guard let result else { return }
+                                Task {
+                                    _ = await PlayerProfileService.shared.linkAppleID(
+                                        appleUserID: result.userID,
+                                        displayName: result.displayName
+                                    )
+                                }
+                            }
+                            .frame(height: 50)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("Account")
+                } footer: {
+                    if !appleAuth.isSignedIn {
+                        Text("Your CloudKit account still works as before — Apple ID is just an extra portable identifier.")
+                    }
+                }
+
                 // Profile Section
                 Section("Player Profile") {
                     Button {
@@ -299,6 +352,16 @@ struct SettingsView: View {
                             Text("Reset All Data")
                         }
                     }
+
+                    Button(role: .destructive) {
+                        UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+                        showingRestartOnboardingAlert = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise")
+                            Text("Restart Onboarding")
+                        }
+                    }
                 }
                 
                 // About Section
@@ -378,6 +441,11 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("This will permanently delete all your progress, quests, and settings. This action cannot be undone.")
+            }
+            .alert("Onboarding Reset", isPresented: $showingRestartOnboardingAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Restart the app to begin onboarding again.")
             }
         }
         .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
