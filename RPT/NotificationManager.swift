@@ -1,6 +1,7 @@
 import SwiftUI
 import UserNotifications
 import Combine
+import SwiftData
 
 /// Production-ready notification manager
 /// Handles all app notifications with proper permissions and scheduling
@@ -261,6 +262,108 @@ extension NotificationManager {
         }
     }
     
+    /// Overload that also schedules learned-pattern smart meal reminders.
+    func configureRecurringNotifications(context: ModelContext) {
+        configureRecurringNotifications()
+        scheduleSmartMealReminders(context: context)
+    }
+
+    @MainActor
+    func scheduleSmartMealReminders(context: ModelContext) {
+        // Query the last 14 days of FoodEntry records
+        let fourteenDaysAgo = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date.distantPast
+        let descriptor = FetchDescriptor<FoodEntry>(
+            predicate: #Predicate<FoodEntry> { $0.dateConsumed >= fourteenDaysAgo }
+        )
+        guard let entries = try? context.fetch(descriptor) else { return }
+
+        // Group by meal slot, compute median minute-of-day per slot
+        var byMeal: [MealType: [Int]] = [:]
+        for entry in entries {
+            let comps = Calendar.current.dateComponents([.hour, .minute], from: entry.dateConsumed)
+            let minuteOfDay = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+            byMeal[entry.meal, default: []].append(minuteOfDay)
+        }
+
+        // Schedule a reminder for each meal slot
+        for slot in [MealType.breakfast, .lunch, .dinner, .snacks] {
+            let samples = byMeal[slot] ?? []
+            let scheduledMinute: Int
+            if samples.count >= 3 {
+                scheduledMinute = max(0, median(samples) - 15) // 15 min before usual time
+            } else {
+                // Default fallback for new users
+                switch slot {
+                case .breakfast: scheduledMinute = 7 * 60 + 45    // 7:45
+                case .lunch:     scheduledMinute = 12 * 60 + 15   // 12:15
+                case .dinner:    scheduledMinute = 18 * 60 + 15   // 18:15
+                case .snacks:    scheduledMinute = 15 * 60 + 15   // 15:15
+                }
+            }
+            scheduleDailyMealNotification(
+                id: "rpt_smart_meal_\(slot.rawValue)",
+                hour: scheduledMinute / 60,
+                minute: scheduledMinute % 60,
+                title: titleFor(meal: slot),
+                body:  bodyFor(meal: slot, minutes: scheduledMinute, sampleCount: samples.count)
+            )
+        }
+    }
+
+    private func median(_ values: [Int]) -> Int {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        if sorted.count % 2 == 0 {
+            return (sorted[mid - 1] + sorted[mid]) / 2
+        } else {
+            return sorted[mid]
+        }
+    }
+
+    private func scheduleDailyMealNotification(id: String, hour: Int, minute: Int, title: String, body: String) {
+        let center = UNUserNotificationCenter.current()
+        // Replace any existing pending request with the same id
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body  = body
+        content.sound = .default
+
+        var components = DateComponents()
+        components.hour   = hour
+        components.minute = minute
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+        center.add(request) { error in
+            if let error {
+                print("[NotificationManager] failed to schedule \(id): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func titleFor(meal: MealType) -> String {
+        switch meal {
+        case .breakfast: return "Breakfast time"
+        case .lunch:     return "Lunch check-in"
+        case .dinner:    return "Dinner reminder"
+        case .snacks:    return "Snack window"
+        }
+    }
+
+    private func bodyFor(meal: MealType, minutes: Int, sampleCount: Int) -> String {
+        let learned = sampleCount >= 3
+        let suffix = learned ? "Based on your usual schedule." : "Tap to log your meal in System Trainer."
+        switch meal {
+        case .breakfast: return "Time to fuel up. \(suffix)"
+        case .lunch:     return "Don't skip the midday refuel. \(suffix)"
+        case .dinner:    return "Wind down with a tracked meal. \(suffix)"
+        case .snacks:    return "Mind your macros — log that snack. \(suffix)"
+        }
+    }
+
     private func cancelRecurringNotifications() {
         let recurringIdentifiers = ["dailyQuestReminder", "streakWarning"]
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: recurringIdentifiers)

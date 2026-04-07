@@ -32,6 +32,7 @@ struct OnboardingView: View {
     @State private var selectedGender: PlayerGender    = .male
     @State private var selectedGoal: FitnessGoal       = .generalHealth
     @State private var selectedDietType: DietType      = .none
+    @State private var selectedClass: PlayerClass      = .unselected
     @State private var ageText             = "25"
     @State private var heightText          = "170"   // always stored in cm internally
     @State private var weightText          = "70"    // always stored in kg internally
@@ -52,9 +53,9 @@ struct OnboardingView: View {
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 11  // logical progress denominator (1–10 visible + Ready)
-    private let skippableSteps: Set<Int> = [8, 9, 10]  // Health, Notifs, ATT are optional
-    private let noProgressBarSteps: Set<Int> = [0, 11]
+    private let totalProgressSteps = 12  // logical progress denominator (1–11 visible + Ready)
+    private let skippableSteps: Set<Int> = [9, 10, 11]  // Health, Notifs, ATT are optional
+    private let noProgressBarSteps: Set<Int> = [0, 12]
 
     var body: some View {
         ZStack {
@@ -162,21 +163,22 @@ struct OnboardingView: View {
                     selectedGoal: selectedGoal
                  )
         case 4:  GoalStepView(selectedGoal: $selectedGoal)
-        case 5:  DietPreferenceStepView(selectedDietType: $selectedDietType)
-        case 6:  WorkoutPlanStepView(
+        case 5:  ClassSelectionStepView(selectedClass: $selectedClass)
+        case 6:  DietPreferenceStepView(selectedDietType: $selectedDietType)
+        case 7:  WorkoutPlanStepView(
                     selectedPlanID: $selectedPlanID,
                     isBuildingCustomPlan: $isBuildingCustomPlan,
                     playerGender: selectedGender,
                     playerGoal: selectedGoal
                  )
-        case 7:  GoalSurveyGateStepView(
+        case 8:  GoalSurveyGateStepView(
                     profileProvider: { ensureProfile() },
                     goalSurveyCompleted: $goalSurveyCompleted
                  )
-        case 8:  HealthStepView(healthManager: healthManager)
-        case 9:  NotificationsStepView(notificationManager: notificationManager)
-        case 10: ATTPromptStepView()
-        case 11: ReadyStepView(
+        case 9:  HealthStepView(healthManager: healthManager)
+        case 10: NotificationsStepView(notificationManager: notificationManager)
+        case 11: ATTPromptStepView()
+        case 12: ReadyStepView(
                     name: profileName,
                     goal: selectedGoal,
                     avatarKey: selectedAvatarKey ?? "avatar_default"
@@ -190,14 +192,14 @@ struct OnboardingView: View {
     private var navigationButtons: some View {
         VStack(spacing: 12) {
             // Continue / advance button
-            Button(currentStep == 10 ? "Complete Setup" : "Continue") {
+            Button(currentStep == 11 ? "Complete Setup" : "Continue") {
                 handleAdvance()
             }
             .buttonStyle(OnboardingPrimaryButtonStyle())
             .disabled(!canAdvance)
 
             // Helper text when the goal survey gate blocks progression
-            if currentStep == 7 && !goalSurveyCompleted {
+            if currentStep == 8 && !goalSurveyCompleted {
                 Text("Complete the goal survey to continue.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.white.opacity(0.5))
@@ -221,17 +223,17 @@ struct OnboardingView: View {
     private var canAdvance: Bool {
         switch currentStep {
         case 1: return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
-        case 7: return goalSurveyCompleted
+        case 8: return goalSurveyCompleted
         default: return true
         }
     }
 
-    /// Advances from `step`, skipping the Goal Survey Gate (step 6) when the
+    /// Advances from `step`, skipping the Goal Survey Gate when the
     /// user didn't pick "Build my own plan".
     private func advanceFrom(_ step: Int) {
         var next = step + 1
-        if next == 7 && !isBuildingCustomPlan {
-            next = 8
+        if next == 8 && !isBuildingCustomPlan {
+            next = 9
         }
         currentStep = next
     }
@@ -242,7 +244,7 @@ struct OnboardingView: View {
             withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
             return
         }
-        if currentStep == 10 {
+        if currentStep == 11 {
             // Final setup step → complete
             completeOnboarding()
             return
@@ -282,6 +284,7 @@ struct OnboardingView: View {
         if !trimmedName.isEmpty { profile.name = trimmedName }
         profile.fitnessGoal        = selectedGoal
         profile.dietType           = selectedDietType
+        profile.playerClass        = selectedClass
         profile.gender             = selectedGender
         profile.age                = age
         profile.height             = height   // stored in cm
@@ -675,6 +678,111 @@ private struct DietCard: View {
                     )
             )
             .scaleEffect(isSelected ? 1.01 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step 5: Class Selection
+
+private struct ClassSelectionStepView: View {
+    @Binding var selectedClass: PlayerClass
+
+    private let classes: [PlayerClass] = [.warrior, .ranger, .monk, .sage]
+
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "shield.lefthalf.filled",
+            iconColor: .cyan,
+            title: "Choose your path",
+            subtitle: "Your class shapes how you grow. You can change it later in Settings."
+        ) {
+            VStack(spacing: 12) {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(classes) { pc in
+                        ClassCard(
+                            playerClass: pc,
+                            isSelected: selectedClass == pc
+                        ) {
+                            selectedClass = (selectedClass == pc) ? .unselected : pc
+                        }
+                    }
+                }
+
+                if selectedClass != .unselected {
+                    Text(selectedClass.description)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.65))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 6)
+                        .transition(.opacity)
+                } else {
+                    Text("Optional — pick one for a 10% XP bonus on matching quests.")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 6)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: selectedClass)
+        }
+    }
+}
+
+private struct ClassCard: View {
+    let playerClass: PlayerClass
+    let isSelected: Bool
+    let action: () -> Void
+
+    private var accentColor: Color {
+        switch playerClass.color {
+        case "red":    return .red
+        case "green":  return .green
+        case "purple": return .purple
+        case "cyan":   return .cyan
+        default:       return .gray
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: playerClass.icon)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundColor(isSelected ? accentColor : .white.opacity(0.55))
+                    .frame(height: 36)
+
+                Text(playerClass.displayName)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text(playerClass.tagline)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? accentColor.opacity(0.14) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(isSelected ? accentColor : Color.white.opacity(0.1),
+                                    lineWidth: isSelected ? 1.5 : 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.02 : 1.0)
             .animation(.easeInOut(duration: 0.15), value: isSelected)
         }
         .buttonStyle(.plain)
