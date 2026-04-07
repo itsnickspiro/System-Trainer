@@ -642,6 +642,18 @@ struct NutritionGoalsView: View {
 
 // MARK: - Add Food View
 
+enum FoodCategoryFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case restaurants = "Restaurants"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .restaurants: return "fork.knife.circle.fill"
+        }
+    }
+}
+
 struct AddFoodView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -655,6 +667,7 @@ struct AddFoodView: View {
     
     @State private var searchText = ""
     @State private var selectedTab = 0
+    @State private var foodFilter: FoodCategoryFilter = .all
     @State private var showingFoodCreator = false
     @State private var showingQuickAdd = false
     @State private var showingBarcodeScanner = false
@@ -673,11 +686,25 @@ struct AddFoodView: View {
     @StateObject private var foodDatabase = FoodDatabaseService.shared
     
     private var filteredFoods: [FoodItem] {
+        // Apply category pill filter first
+        let base: [FoodItem] = {
+            switch foodFilter {
+            case .all: return allFoods
+            case .restaurants: return allFoods.filter { $0.category == .restaurant }
+            }
+        }()
         if searchText.isEmpty {
-            return allFoods.sorted { $0.lastUsed ?? Date.distantPast > $1.lastUsed ?? Date.distantPast }
+            return base.sorted { $0.lastUsed ?? Date.distantPast > $1.lastUsed ?? Date.distantPast }
         } else {
-            return FuzzySearch.sort(query: searchText, items: allFoods, string: { $0.name },
+            return FuzzySearch.sort(query: searchText, items: base, string: { $0.name },
                                     additionalStrings: { food in [food.brand].compactMap { $0 } })
+        }
+    }
+
+    private var filteredRemoteResults: [FoodItem] {
+        switch foodFilter {
+        case .all: return remoteSearchResults
+        case .restaurants: return remoteSearchResults.filter { $0.category == .restaurant }
         }
     }
 
@@ -793,6 +820,38 @@ struct AddFoodView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
+
+                // Category filter pills (only on Foods tab)
+                if selectedTab == 0 {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(FoodCategoryFilter.allCases) { filter in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        foodFilter = filter
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: filter.icon)
+                                            .font(.caption)
+                                        Text(filter.rawValue)
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        Capsule()
+                                            .fill(foodFilter == filter ? Color.blue : Color.gray.opacity(0.2))
+                                    )
+                                    .foregroundColor(foodFilter == filter ? .white : .primary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    }
+                }
                 
                 // Content
                 ScrollView {
@@ -806,7 +865,7 @@ struct AddFoodView: View {
                             }
 
                             // Remote search results (USDA + Open Food Facts)
-                            if showingRemoteSection {
+                            if showingRemoteSection && !filteredRemoteResults.isEmpty {
                                 HStack(spacing: 8) {
                                     let hasUSDA = remoteSearchResults.contains { $0.dataSource == "USDA" }
                                     let hasOFF  = remoteSearchResults.contains { $0.dataSource == "OpenFoodFacts" }
@@ -827,7 +886,7 @@ struct AddFoodView: View {
                                 .padding(.horizontal, 4)
                                 .padding(.top, 8)
 
-                                ForEach(remoteSearchResults, id: \.id) { food in
+                                ForEach(filteredRemoteResults, id: \.id) { food in
                                     FoodItemRow(food: food, showSourceBadge: true) { quantity, unit in
                                         // Save to local DB on first use
                                         context.insert(food)
@@ -1395,9 +1454,16 @@ struct FoodItemRow: View {
                         .lineLimit(2)
                     
                     if let brand = food.brand {
-                        Text(brand)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            if food.category == .restaurant {
+                                Image(systemName: "fork.knife.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            }
+                            Text(brand)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                     HStack(spacing: 8) {

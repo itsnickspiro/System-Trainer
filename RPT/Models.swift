@@ -1287,6 +1287,7 @@ enum FoodCategory: String, CaseIterable, Codable {
     case desserts = "desserts"
     case condiments = "condiments"
     case packaged = "packaged"
+    case restaurant = "restaurant"
     case other = "other"
     
     var displayName: String {
@@ -1302,6 +1303,7 @@ enum FoodCategory: String, CaseIterable, Codable {
         case .desserts: return "Desserts"
         case .condiments: return "Condiments"
         case .packaged: return "Packaged Foods"
+        case .restaurant: return "Restaurants"
         case .other: return "Other"
         }
     }
@@ -1319,6 +1321,7 @@ enum FoodCategory: String, CaseIterable, Codable {
         case .desserts: return "🍰"
         case .condiments: return "🧂"
         case .packaged: return "📦"
+        case .restaurant: return "🍔"
         case .other: return "🍽️"
         }
     }
