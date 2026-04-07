@@ -2,16 +2,26 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+// Rolling 30-day window for bounded @Query predicates in DietView.
+// Module-level `let` so the #Predicate macro can capture it (static members
+// on the enclosing type aren't supported inside #Predicate key paths).
+private let dietViewCutoffDate: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date.distantPast
+
 struct DietView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var context
     @Query private var profiles: [Profile]
-    @Query private var foodEntries: [FoodEntry]
-    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var workoutSessions: [WorkoutSession]
+    @Query(filter: #Predicate<FoodEntry> { entry in
+        entry.dateConsumed >= dietViewCutoffDate
+    }, sort: \FoodEntry.dateConsumed, order: .reverse) private var foodEntries: [FoodEntry]
+    @Query(filter: #Predicate<WorkoutSession> { session in
+        session.startedAt >= dietViewCutoffDate
+    }, sort: \WorkoutSession.startedAt, order: .reverse) private var workoutSessions: [WorkoutSession]
     @State private var selectedDate = Date()
     @State private var showingNutritionGoals = false
     @State private var macrosExpanded = false
     @State private var isPlanBannerExpanded = false
+    @State private var resolvedActivePlan: AnimeWorkoutPlan? = nil
 
     private var profile: Profile {
         profiles.first ?? Profile(name: "Default User")
@@ -101,13 +111,22 @@ struct DietView: View {
     private var waterGlasses: Int { profile.waterIntake }
 
     // Active plan (anime or custom) — nil = generic mode
-    private var activePlan: AnimeWorkoutPlan? {
-        guard !profile.activePlanID.isEmpty else { return nil }
-        if let anime = AnimeWorkoutPlanService.shared.plan(id: profile.activePlanID) { return anime }
-        // Fall back to user-created custom plan
+    // Resolved lazily in onAppear / onChange to avoid a SwiftData fetch every render.
+    private var activePlan: AnimeWorkoutPlan? { resolvedActivePlan }
+
+    private func resolveActivePlan() {
         let id = profile.activePlanID
+        guard !id.isEmpty else { resolvedActivePlan = nil; return }
+        if let anime = AnimeWorkoutPlanService.shared.plan(id: id) {
+            resolvedActivePlan = anime
+            return
+        }
         let descriptor = FetchDescriptor<CustomWorkoutPlan>(predicate: #Predicate { $0.id == id })
-        return (try? context.fetch(descriptor))?.first?.asAnimeWorkoutPlan()
+        if let custom = (try? context.fetch(descriptor))?.first {
+            resolvedActivePlan = custom.asAnimeWorkoutPlan()
+        } else {
+            resolvedActivePlan = nil
+        }
     }
 
     // Goals — plan overrides custom goals; custom goals override TDEE defaults
@@ -274,6 +293,8 @@ struct DietView: View {
             .sheet(item: $entryForNutrition) { entry in
                 FoodNutritionSheet(entry: entry, fitnessGoal: profile.fitnessGoal)
             }
+            .onAppear { resolveActivePlan() }
+            .onChange(of: profile.activePlanID) { _, _ in resolveActivePlan() }
         }
     }
 

@@ -65,14 +65,31 @@ final class StoreService: ObservableObject {
     }()
 
     private init() {
-        // Load cached catalog so the store tab can display immediately
-        storeItems = (try? JSONDecoder().decode([StoreItem].self,
-                                                from: Data(contentsOf: Self.catalogCacheURL))) ?? []
+        // Start empty; load cached catalog off-main so init() returns instantly on cold launch.
+        storeItems = []
+        Task.detached(priority: .utility) { [weak self] in
+            let url = Self.catalogCacheURL
+            guard let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode([StoreItem].self, from: data),
+                  !decoded.isEmpty else { return }
+            await MainActor.run { [weak self] in
+                self?.storeItems = decoded
+            }
+        }
     }
+
+    /// Timestamp of the last successful refresh. Used by the 5-minute staleness gate.
+    private var lastSuccessfulRefreshAt: Date = .distantPast
 
     // MARK: - Refresh
 
-    func refresh() async {
+    func refresh(force: Bool = false) async {
+        // Catalog + inventory changes infrequently; skip the network round-trip
+        // if we refreshed successfully within the last 5 minutes.
+        if !force, Date().timeIntervalSince(lastSuccessfulRefreshAt) < 300 {
+            return
+        }
+
         isLoading = true
         lastError = nil
         defer { isLoading = false }
@@ -114,6 +131,7 @@ final class StoreService: ObservableObject {
             }
 
             recomputeBonuses()
+            lastSuccessfulRefreshAt = Date()
         } catch {
             lastError = error.localizedDescription
         }
@@ -145,7 +163,7 @@ final class StoreService: ObservableObject {
                 body["pay_with"] = "credits"
             }
             try await postToProxy(body: body)
-            await refresh()
+            await refresh(force: true)
             return true
         } catch {
             // Revert optimistic deduction

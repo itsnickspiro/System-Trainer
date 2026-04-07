@@ -36,10 +36,26 @@ final class QuestTemplateService: ObservableObject {
     }()
 
     private init() {
-        templates = (try? JSONDecoder().decode([QuestTemplate].self,
-                                               from: Data(contentsOf: Self.templatesCacheURL))) ?? []
-        arcs      = (try? JSONDecoder().decode([QuestArc].self,
-                                               from: Data(contentsOf: Self.arcsCacheURL)))      ?? []
+        // Start empty; load disk caches off-main to keep init() fast on cold launch.
+        templates = []
+        arcs = []
+        Task.detached(priority: .utility) { [weak self] in
+            let templatesURL = Self.templatesCacheURL
+            let arcsURL = Self.arcsCacheURL
+            let decodedTemplates: [QuestTemplate] = {
+                guard let data = try? Data(contentsOf: templatesURL) else { return [] }
+                return (try? JSONDecoder().decode([QuestTemplate].self, from: data)) ?? []
+            }()
+            let decodedArcs: [QuestArc] = {
+                guard let data = try? Data(contentsOf: arcsURL) else { return [] }
+                return (try? JSONDecoder().decode([QuestArc].self, from: data)) ?? []
+            }()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if !decodedTemplates.isEmpty { self.templates = decodedTemplates }
+                if !decodedArcs.isEmpty { self.arcs = decodedArcs }
+            }
+        }
     }
 
     // MARK: - Public Accessors

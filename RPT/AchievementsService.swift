@@ -43,8 +43,17 @@ final class AchievementsService: ObservableObject {
     private static let unlockedDefaultsKey = "rpt_unlocked_achievement_keys"
 
     private init() {
-        achievements = (try? JSONDecoder().decode([AchievementTemplate].self,
-                                                  from: Data(contentsOf: Self.cacheURL))) ?? []
+        // Start empty; load disk cache off-main to keep init() fast on cold launch.
+        achievements = []
+        Task.detached(priority: .utility) { [weak self] in
+            let url = Self.cacheURL
+            guard let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode([AchievementTemplate].self, from: data),
+                  !decoded.isEmpty else { return }
+            await MainActor.run { [weak self] in
+                self?.achievements = decoded
+            }
+        }
     }
 
     // MARK: - Refresh

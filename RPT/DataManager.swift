@@ -32,6 +32,9 @@ final class DataManager: ObservableObject {
     /// Active observer queries, keyed by sample type identifier.
     /// Keeping strong references prevents queries from being deallocated.
     private var observerQueries: [String: HKObserverQuery] = [:]
+    /// Last time handleHealthDataUpdate() actually performed work. Used to debounce
+    /// the 5+ observer callbacks HealthKit fires in rapid succession after a sync.
+    private var lastHealthFetchAt: Date = .distantPast
     /// Reuse HealthManager's HKHealthStore to avoid duplicate instances.
     private var hkStore: HKHealthStore { healthManager.healthStore }
 
@@ -371,11 +374,15 @@ final class DataManager: ObservableObject {
     /// Ensures the InventoryItem for hermitMiracleSeed matches profile.exemptionPassCount.
     private func syncExemptionPassToInventory(profile: Profile) {
         guard let context = modelContext else { return }
-        // Fetch all inventory items and filter in-memory (enum predicates not supported in SwiftData)
-        let descriptor = FetchDescriptor<InventoryItem>()
+        // Scope the fetch to the one item type we care about via a predicate
+        // so we don't pull the entire inventory table on every quest completion.
+        let targetType = InventoryItemType.hermitMiracleSeed
+        var descriptor = FetchDescriptor<InventoryItem>(
+            predicate: #Predicate<InventoryItem> { $0.itemType == targetType }
+        )
+        descriptor.fetchLimit = 1
         let allItems = (try? context.fetch(descriptor)) ?? []
-        let seedTypeRaw = InventoryItemType.hermitMiracleSeed.rawValue
-        if let existing = allItems.first(where: { $0.itemType.rawValue == seedTypeRaw }) {
+        if let existing = allItems.first {
             existing.quantity = profile.exemptionPassCount
         } else {
             let newItem = InventoryItem(itemType: .hermitMiracleSeed, quantity: profile.exemptionPassCount)
@@ -946,6 +953,14 @@ final class DataManager: ObservableObject {
     /// Called whenever HealthKit delivers new data (via observer query) or the
     /// health manager publishes an objectWillChange notification.
     private func handleHealthDataUpdate() async {
+        // Multiple HealthKit observer queries can fire in rapid succession after a
+        // workout sync (steps + active calories + workouts + HR + sleep all at once).
+        // Debounce to one fetch per minute to prevent battery drain and write storms.
+        if Date().timeIntervalSince(lastHealthFetchAt) < 60 {
+            return
+        }
+        lastHealthFetchAt = Date()
+
         guard let profile = currentProfile else { return }
 
         // Fetch latest health data

@@ -2,14 +2,21 @@ import SwiftUI
 import SwiftData
 import Combine
 
+// Rolling 30-day window for bounded @Query predicates in HomeView.
+private let homeViewSessionCutoff: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date.distantPast
+
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var dataManager = DataManager.shared
     @StateObject private var achievementManager = AchievementManager.shared
     @ObservedObject private var avatarService = AvatarService.shared
-    @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var recentSessions: [WorkoutSession]
+    @Query(filter: #Predicate<WorkoutSession> { session in
+        session.startedAt >= homeViewSessionCutoff
+    }, sort: \WorkoutSession.startedAt, order: .reverse) private var recentSessions: [WorkoutSession]
+
     @State private var now: Date = Date()
+    @State private var lastTickMinute: Int = -1
     @State private var rotationAngle: Double = 0
     @State private var showingHealthPermissions = false
     @State private var showingSettingsSheet = false
@@ -89,9 +96,14 @@ struct HomeView: View {
         }
         .onReceive(timer) { t in
             now = t
-            
+
+            // Gate the expensive per-tick work to once per minute.
+            let minute = Calendar.current.component(.minute, from: now)
+            guard minute != lastTickMinute else { return }
+            lastTickMinute = minute
+
             guard let currentProfile = profile else { return }
-            
+
             let prevLevel = currentProfile.level
             currentProfile.applyHardcoreResetIfNeeded(now: now)
             currentProfile.updateDailyStats()

@@ -1,10 +1,15 @@
 import SwiftUI
 import SwiftData
 
+// Rolling 14-day window for bounded @Query predicate in QuestsView.
+private let questsViewCutoff: Date = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date.distantPast
+
 struct QuestsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
-    @Query(sort: \Quest.createdAt, order: .reverse) private var quests: [Quest]
+    @Query(filter: #Predicate<Quest> { q in
+        q.dateTag >= questsViewCutoff
+    }, sort: \Quest.createdAt, order: .reverse) private var quests: [Quest]
     @ObservedObject private var dataManager = DataManager.shared
     @State private var selectedDay = Date()
     @State private var showingCreateQuest = false
