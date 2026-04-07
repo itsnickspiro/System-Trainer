@@ -6,6 +6,54 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
+// Whitelist of columns that upsert_profile is allowed to write to
+// player_profiles. Anything not on this list is silently ignored to
+// prevent injection of arbitrary fields from the client.
+const UPSERT_ALLOWED_COLUMNS = [
+  "display_name",
+  "level",
+  "total_xp",
+  "current_streak",
+  "longest_streak",
+  "active_anime_plan_key",
+  "avatar_key",
+  "app_version",
+  "device_model",
+  "weight_kg",
+  "height_cm",
+  "date_of_birth",
+  "biological_sex",
+  "fitness_goal",
+  "diet_type",
+  "player_class",
+  "gym_environment",
+  "use_metric",
+  "activity_level_index",
+  "goal_survey_completed",
+  "goal_survey_days_per_week",
+  "goal_survey_split_raw",
+  "goal_survey_session_minutes",
+  "goal_survey_intensity_raw",
+  "goal_survey_focus_areas_raw",
+  "goal_survey_cardio_raw",
+  "rival_cloudkit_user_id",
+  "rival_display_name",
+  "guild_id",
+  "guild_name",
+  "guild_role",
+  "rank",
+  "system_credits",
+  "lifetime_credits_earned",
+  "total_workouts_logged",
+  "total_quests_completed",
+  "total_days_active",
+  "daily_calorie_goal",
+  "daily_protein_goal",
+  "daily_step_goal",
+  "daily_water_goal_oz",
+  "onboarding_completed",
+];
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -39,20 +87,34 @@ serve(async (req) => {
     // All other actions require cloudkit_user_id
     if (!cloudkitUserId) return new Response(JSON.stringify({ error: "cloudkit_user_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    // GET PROFILE
+    // GET PROFILE — returns the row as flat top-level fields (no envelope).
+    // The previous { profile, override } envelope is dropped per the new
+    // shared contract; the override system is unused on the client.
     if (action === "get_profile") {
-      const { data, error } = await supabase.from("player_profiles").select("*").eq("cloudkit_user_id", cloudkitUserId).single();
+      const { data, error } = await supabase.from("player_profiles").select("*").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
       if (error && error.code !== "PGRST116") throw error;
-      const { data: override } = await supabase.from("player_overrides").select("*").eq("cloudkit_user_id", cloudkitUserId).eq("is_active", true).single();
-      return new Response(JSON.stringify({ profile: data ?? null, override: override ?? null }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (!data) {
+        return new Response(JSON.stringify({ success: false, error: "not_found" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ success: true, ...data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // UPSERT PROFILE
+    // UPSERT PROFILE — reads FLAT top-level fields from body (NOT body.profile).
+    // Only whitelisted columns are written, and undefined/null values are
+    // skipped so the client can do partial updates without nuking existing data.
     if (action === "upsert_profile") {
-      const profile = body.profile ?? {};
-      const { data, error } = await supabase.from("player_profiles").upsert({ ...profile, cloudkit_user_id: cloudkitUserId, updated_at: new Date().toISOString() }, { onConflict: "cloudkit_user_id" }).select().single();
+      const upsertPayload: Record<string, unknown> = {
+        cloudkit_user_id: cloudkitUserId,
+        updated_at: new Date().toISOString(),
+      };
+      for (const key of UPSERT_ALLOWED_COLUMNS) {
+        if (body[key] !== undefined && body[key] !== null) {
+          upsertPayload[key] = body[key];
+        }
+      }
+      const { data, error } = await supabase.from("player_profiles").upsert(upsertPayload, { onConflict: "cloudkit_user_id" }).select().single();
       if (error) throw error;
-      return new Response(JSON.stringify({ profile: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ success: true, profile: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // SAVE BACKUP

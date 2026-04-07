@@ -147,8 +147,33 @@ struct OnboardingView: View {
                          withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
                      },
                      onAppleSignInSuccess: {
-                         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-                         isOnboardingComplete = true
+                         // Give the cloud profile a brief moment to hydrate
+                         // onto the local SwiftData Profile, then gate the
+                         // onboarding skip on whether we actually recovered
+                         // a usable profile. If critical fields are missing
+                         // we stay on the welcome step and let the user
+                         // finish onboarding manually with pre-filled values.
+                         Task {
+                             try? await Task.sleep(nanoseconds: 500_000_000)
+                             await MainActor.run {
+                                 if let profile = DataManager.shared.currentProfile,
+                                    !profile.name.isEmpty,
+                                    profile.age > 0,
+                                    profile.height > 0,
+                                    profile.weight > 0 {
+                                     UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                                     isOnboardingComplete = true
+                                 } else if let p = DataManager.shared.currentProfile {
+                                     // Pre-fill whatever we did recover
+                                     profileName    = p.name
+                                     ageText        = p.age > 0 ? "\(p.age)" : ""
+                                     heightText     = p.height > 0 ? "\(Int(p.height))" : ""
+                                     weightText     = p.weight > 0 ? "\(Int(p.weight))" : ""
+                                     selectedGender = p.gender
+                                     selectedGoal   = p.fitnessGoal
+                                 }
+                             }
+                         }
                      }
                  )
         case 1:  NameStepView(profileName: $profileName)

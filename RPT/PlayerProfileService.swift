@@ -92,12 +92,12 @@ final class PlayerProfileService: ObservableObject {
 
             if let profile {
                 applyRemoteProfile(profile)
-                if let override = profile.activeOverride {
+                if let override = profile.active_override {
                     applyOverride(override)
                     try? await markOverrideApplied(cloudKitUserID: cloudKitID)
                 }
             } else {
-                try await upsertProfile(cloudKitUserID: cloudKitID)
+                await upsertProfile()
             }
         } catch {
             lastError = error.localizedDescription
@@ -110,7 +110,7 @@ final class PlayerProfileService: ObservableObject {
               !cloudKitID.isEmpty else { return }
         do {
             try await saveBackup(cloudKitUserID: cloudKitID)
-            try await upsertProfile(cloudKitUserID: cloudKitID)
+            await upsertProfile()
         } catch {
             lastError = error.localizedDescription
         }
@@ -260,18 +260,102 @@ final class PlayerProfileService: ObservableObject {
     // MARK: - Private Helpers
 
     private func applyRemoteProfile(_ remote: PlayerProfilePayload) {
-        if !remote.playerId.isEmpty {
-            playerId = remote.playerId
-            UserDefaults.standard.set(remote.playerId, forKey: "rpt_player_id")
+        // Player ID + credits (service-level state)
+        if let pid = remote.player_id, !pid.isEmpty {
+            playerId = pid
+            UserDefaults.standard.set(pid, forKey: "rpt_player_id")
         }
 
-        systemCredits         = remote.systemCredits ?? systemCredits
-        lifetimeCreditsEarned = remote.lifetimeCreditsEarned ?? lifetimeCreditsEarned
-        UserDefaults.standard.set(systemCredits, forKey: "rpt_system_credits")
+        // Ensure a local Profile exists before hydrating
+        if DataManager.shared.currentProfile == nil {
+            DataManager.shared.ensureProfileExists()
+        }
+        guard let profile = DataManager.shared.currentProfile else {
+            print("[PlayerProfileService] applyRemoteProfile: failed to materialize local profile")
+            return
+        }
 
-        guard let profile = DataManager.shared.currentProfile else { return }
-        if remote.level > profile.level { profile.level = remote.level }
-        if remote.xp > profile.xp      { profile.xp    = remote.xp    }
+        // Identity — remote wins when non-empty
+        if let name = remote.display_name, !name.isEmpty {
+            profile.name = name
+        }
+
+        // Demographics
+        if let w = remote.weight_kg, w > 0 { profile.weight = w }
+        if let h = remote.height_cm, h > 0 { profile.height = h }
+        if let dob = remote.date_of_birth {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            if let date = formatter.date(from: dob) {
+                let years = Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 0
+                if years > 0 { profile.age = years }
+            }
+        }
+        if let sex = remote.biological_sex, !sex.isEmpty,
+           let gender = PlayerGender(rawValue: sex) {
+            profile.gender = gender
+        }
+        if let useMetric = remote.use_metric { profile.useMetric = useMetric }
+        if let act = remote.activity_level_index { profile.activityLevelIndex = act }
+
+        // Goals + class + diet
+        if let fg = remote.fitness_goal, !fg.isEmpty,
+           let goal = FitnessGoal(rawValue: fg) {
+            profile.fitnessGoal = goal
+        }
+        if let dt = remote.diet_type, !dt.isEmpty {
+            profile.dietTypeRaw = dt
+        }
+        if let pc = remote.player_class, !pc.isEmpty {
+            profile.playerClassRaw = pc
+        }
+        if let gym = remote.gym_environment, !gym.isEmpty,
+           let env = GymEnvironment(rawValue: gym) {
+            profile.gymEnvironment = env
+        }
+        if let plan = remote.active_anime_plan_key, !plan.isEmpty {
+            profile.activePlanID = plan
+        }
+
+        // Goal survey — only restore when remote says it's completed
+        if let completed = remote.goal_survey_completed, completed {
+            profile.goalSurveyCompleted = true
+            if let days = remote.goal_survey_days_per_week { profile.goalSurveyDaysPerWeek = days }
+            if let split = remote.goal_survey_split_raw, !split.isEmpty { profile.goalSurveySplitRaw = split }
+            if let mins = remote.goal_survey_session_minutes { profile.goalSurveySessionMinutes = mins }
+            if let intensity = remote.goal_survey_intensity_raw, !intensity.isEmpty { profile.goalSurveyIntensityRaw = intensity }
+            if let focus = remote.goal_survey_focus_areas_raw { profile.goalSurveyFocusAreasRaw = focus }
+            if let cardio = remote.goal_survey_cardio_raw, !cardio.isEmpty { profile.goalSurveyCardioRaw = cardio }
+        }
+
+        // Social
+        if let rivalID = remote.rival_cloudkit_user_id { profile.rivalCloudKitUserID = rivalID }
+        if let rivalName = remote.rival_display_name { profile.rivalDisplayName = rivalName }
+        if let gid = remote.guild_id { profile.guildID = gid }
+        if let gname = remote.guild_name { profile.guildName = gname }
+        if let grole = remote.guild_role { profile.guildRole = grole }
+
+        // Progression — max wins (monotonic)
+        if let level = remote.level, level > profile.level { profile.level = level }
+        if let xp = remote.total_xp, xp > profile.totalXPEarned {
+            profile.totalXPEarned = xp
+            if xp > profile.xp { profile.xp = xp }
+        }
+        if let streak = remote.current_streak, streak > profile.currentStreak { profile.currentStreak = streak }
+        if let best = remote.longest_streak, best > profile.bestStreak { profile.bestStreak = best }
+
+        // Credits
+        if let credits = remote.system_credits {
+            self.systemCredits = max(self.systemCredits, credits)
+            UserDefaults.standard.set(self.systemCredits, forKey: "rpt_system_credits")
+        }
+        if let lifetime = remote.lifetime_credits_earned {
+            self.lifetimeCreditsEarned = max(self.lifetimeCreditsEarned, lifetime)
+        }
+
+        // Persist
+        try? DataManager.shared.saveContext()
     }
 
     private func applyOverride(_ override: PlayerOverridePayload) {
@@ -301,36 +385,85 @@ final class PlayerProfileService: ObservableObject {
         if let nullCheck = try? JSONDecoder().decode(NullPayload.self, from: data), nullCheck.isNull {
             return nil
         }
-        if let envelope = try? JSONDecoder().decode(ProfileEnvelope.self, from: data) {
-            if var profile = envelope.profile {
-                profile.activeOverride = envelope.override
-                return profile
-            }
+        // New contract: flat top-level fields. An error response has
+        // { success: false, error: "not_found" } — treat that as nil.
+        struct ErrorEnvelope: Decodable { let success: Bool?; let error: String? }
+        if let err = try? JSONDecoder().decode(ErrorEnvelope.self, from: data),
+           err.success == false {
+            return nil
         }
         return try? JSONDecoder().decode(PlayerProfilePayload.self, from: data)
     }
 
-    private func upsertProfile(cloudKitUserID: String) async throws {
-        guard let profile = DataManager.shared.currentProfile else { return }
-        let body: [String: Any] = [
+    /// Upserts the full local Profile to the backend using the flat
+    /// top-level snake_case contract. Nil/empty fields are skipped so we don't
+    /// clobber existing remote data with empty values.
+    func upsertProfile() async {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty,
+              let profile = DataManager.shared.currentProfile else { return }
+
+        var body: [String: Any] = [
             "action": "upsert_profile",
-            "cloudkit_user_id": cloudKitUserID,
-            "level": profile.level,
-            "total_xp": profile.xp,
-            "current_streak": profile.currentStreak,
-            "longest_streak": profile.bestStreak,
-            "display_name": profile.name
+            "cloudkit_user_id": cloudKitID
         ]
-        let data = try await postToProxy(body: body)
-        if let result = try? JSONDecoder().decode(PlayerProfilePayload.self, from: data) {
-            if !result.playerId.isEmpty {
-                playerId = result.playerId
-                UserDefaults.standard.set(result.playerId, forKey: "rpt_player_id")
+
+        // Identity
+        if !profile.name.isEmpty { body["display_name"] = profile.name }
+        body["level"] = profile.level
+        body["total_xp"] = profile.totalXPEarned
+        body["current_streak"] = profile.currentStreak
+        body["longest_streak"] = profile.bestStreak
+
+        // Demographics
+        if profile.weight > 0 { body["weight_kg"] = profile.weight }
+        if profile.height > 0 { body["height_cm"] = profile.height }
+        if profile.age > 0 {
+            let year = Calendar.current.component(.year, from: Date()) - profile.age
+            body["date_of_birth"] = "\(year)-01-01"
+        }
+        body["biological_sex"] = profile.gender.rawValue
+        body["use_metric"] = profile.useMetric
+        body["activity_level_index"] = profile.activityLevelIndex
+
+        // Goals + class + diet
+        body["fitness_goal"] = profile.fitnessGoal.rawValue
+        body["diet_type"] = profile.dietTypeRaw
+        body["player_class"] = profile.playerClassRaw
+        body["gym_environment"] = profile.gymEnvironment.rawValue
+        if !profile.activePlanID.isEmpty { body["active_anime_plan_key"] = profile.activePlanID }
+
+        // Goal survey
+        body["goal_survey_completed"] = profile.goalSurveyCompleted
+        body["goal_survey_days_per_week"] = profile.goalSurveyDaysPerWeek
+        body["goal_survey_split_raw"] = profile.goalSurveySplitRaw
+        body["goal_survey_session_minutes"] = profile.goalSurveySessionMinutes
+        body["goal_survey_intensity_raw"] = profile.goalSurveyIntensityRaw
+        body["goal_survey_focus_areas_raw"] = profile.goalSurveyFocusAreasRaw
+        body["goal_survey_cardio_raw"] = profile.goalSurveyCardioRaw
+
+        // Social
+        body["rival_cloudkit_user_id"] = profile.rivalCloudKitUserID
+        body["rival_display_name"] = profile.rivalDisplayName
+        body["guild_id"] = profile.guildID
+        body["guild_name"] = profile.guildName
+        body["guild_role"] = profile.guildRole
+
+        body["onboarding_completed"] = true
+
+        do {
+            let data = try await postToProxy(body: body)
+            if let result = try? JSONDecoder().decode(PlayerProfilePayload.self, from: data) {
+                if let pid = result.player_id, !pid.isEmpty {
+                    playerId = pid
+                    UserDefaults.standard.set(pid, forKey: "rpt_player_id")
+                }
+                if let credits = result.system_credits {
+                    systemCredits = credits
+                    UserDefaults.standard.set(credits, forKey: "rpt_system_credits")
+                }
             }
-            if let credits = result.systemCredits {
-                systemCredits = credits
-                UserDefaults.standard.set(credits, forKey: "rpt_system_credits")
-            }
+        } catch {
+            print("[PlayerProfileService] upsertProfile failed: \(error.localizedDescription)")
         }
     }
 
@@ -340,7 +473,7 @@ final class PlayerProfileService: ObservableObject {
             "action": "save_backup",
             "cloudkit_user_id": cloudKitUserID,
             "level": profile.level,
-            "total_xp": profile.xp,
+            "total_xp": profile.totalXPEarned,
             "current_streak": profile.currentStreak,
             "longest_streak": profile.bestStreak
         ]
@@ -375,44 +508,61 @@ final class PlayerProfileService: ObservableObject {
 
 // MARK: - Wire Models (private)
 
-private struct ProfileEnvelope: Decodable {
-    let profile: PlayerProfilePayload?
-    let override: PlayerOverridePayload?
-}
-
 private struct PlayerProfilePayload: Decodable {
-    let playerId:             String
-    let level:                Int
-    let xp:                   Int
-    let currentStreak:        Int?
-    let bestStreak:           Int?
-    let systemCredits:        Int?
-    let lifetimeCreditsEarned: Int?
-    var activeOverride:       PlayerOverridePayload?
+    // Identity
+    let cloudkit_user_id: String?
+    let player_id: String?
+    let display_name: String?
+    let avatar_key: String?
 
-    enum CodingKeys: String, CodingKey {
-        case playerId              = "player_id"
-        case level
-        case xp                    = "total_xp"
-        case currentStreak         = "current_streak"
-        case bestStreak            = "longest_streak"
-        case systemCredits         = "system_credits"
-        case lifetimeCreditsEarned = "lifetime_credits_earned"
-        case activeOverride        = "active_override"
-        case displayName           = "display_name"
-    }
+    // Progression
+    let level: Int?
+    let total_xp: Int?
+    let current_streak: Int?
+    let longest_streak: Int?
+    let rank: String?
 
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        playerId              = (try? c.decodeIfPresent(String.self, forKey: .playerId)) ?? ""
-        level                 = (try? c.decodeIfPresent(Int.self, forKey: .level)) ?? 1
-        xp                    = (try? c.decodeIfPresent(Int.self, forKey: .xp)) ?? 0
-        currentStreak         = try? c.decodeIfPresent(Int.self, forKey: .currentStreak)
-        bestStreak            = try? c.decodeIfPresent(Int.self, forKey: .bestStreak)
-        systemCredits         = try? c.decodeIfPresent(Int.self, forKey: .systemCredits)
-        lifetimeCreditsEarned = try? c.decodeIfPresent(Int.self, forKey: .lifetimeCreditsEarned)
-        activeOverride        = try? c.decodeIfPresent(PlayerOverridePayload.self, forKey: .activeOverride)
-    }
+    // Demographics
+    let weight_kg: Double?
+    let height_cm: Double?
+    let date_of_birth: String?
+    let biological_sex: String?
+    let use_metric: Bool?
+    let activity_level_index: Int?
+
+    // Goals + class + diet
+    let fitness_goal: String?
+    let diet_type: String?
+    let player_class: String?
+    let gym_environment: String?
+    let active_anime_plan_key: String?
+
+    // Goal survey
+    let goal_survey_completed: Bool?
+    let goal_survey_days_per_week: Int?
+    let goal_survey_split_raw: String?
+    let goal_survey_session_minutes: Int?
+    let goal_survey_intensity_raw: String?
+    let goal_survey_focus_areas_raw: [String]?
+    let goal_survey_cardio_raw: String?
+
+    // Social
+    let rival_cloudkit_user_id: String?
+    let rival_display_name: String?
+    let guild_id: String?
+    let guild_name: String?
+    let guild_role: String?
+
+    // Credits + lifetime stats
+    let system_credits: Int?
+    let lifetime_credits_earned: Int?
+    let total_workouts_logged: Int?
+    let total_quests_completed: Int?
+    let total_days_active: Int?
+    let onboarding_completed: Bool?
+
+    // Admin override (optional top-level)
+    var active_override: PlayerOverridePayload?
 }
 
 private struct PlayerOverridePayload: Decodable {
