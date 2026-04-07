@@ -646,25 +646,9 @@ final class DataManager: ObservableObject {
                 UserDefaults.standard.set(today, forKey: key)
                 return
             }
-            // Custom plan branch — until the goal survey exists, only emit the
-            // discipline check + nutrition log, plus an informational banner.
-            let descriptor = FetchDescriptor<CustomWorkoutPlan>(
-                predicate: #Predicate { $0.id == activePlanID }
-            )
-            if let _ = (try? context.fetch(descriptor))?.first {
-                var quests: [Quest] = []
-                // Informational banner — non-functional completionCondition so
-                // auto-completion logic ignores it. Placeholder until the survey ships.
-                quests.append(Quest(
-                    title: "[CUSTOM PLAN] Goal Survey Required",
-                    details: "Custom plan active — complete the goal survey in Settings to unlock training quests.",
-                    type: .daily, createdAt: Date(), dueDate: tomorrow,
-                    xpReward: 0, statTarget: "discipline",
-                    completionCondition: "", dateTag: today
-                ))
-                quests.append(makeDisciplineCheckQuest(for: profile, on: today, dueDate: tomorrow))
-                quests.append(makeNutritionLogQuest(for: profile, on: today, dueDate: tomorrow))
-                applyRandomGPBonuses(to: &quests)
+            // Custom plan branch — derive training quests from the goal survey.
+            if let _ = (try? context.fetch(FetchDescriptor<CustomWorkoutPlan>(predicate: #Predicate { $0.id == activePlanID })))?.first {
+                let quests = buildCustomPlanQuests(for: profile, on: today, dueDate: tomorrow)
                 quests.forEach { addQuest($0) }
                 UserDefaults.standard.set(today, forKey: key)
                 return
@@ -1130,6 +1114,203 @@ final class DataManager: ObservableObject {
         }
 
         saveLocalChanges()
+    }
+
+    // MARK: - Custom Plan Quest Builder
+
+    private func buildCustomPlanQuests(for profile: Profile, on date: Date, dueDate: Date?) -> [Quest] {
+        // If the user hasn't completed the goal survey yet, fall back to the
+        // existing placeholder set so quests are never empty.
+        guard profile.goalSurveyCompleted else {
+            var quests: [Quest] = []
+            quests.append(Quest(
+                title: "[CUSTOM PLAN] Goal Survey Required",
+                details: "Open the goal survey from Settings to unlock training quests for your custom plan.",
+                type: .daily, createdAt: Date(), dueDate: dueDate,
+                xpReward: 0, statTarget: "discipline",
+                completionCondition: "", dateTag: date
+            ))
+            quests.append(makeDisciplineCheckQuest(for: profile, on: date, dueDate: dueDate))
+            quests.append(makeNutritionLogQuest(for: profile, on: date, dueDate: dueDate))
+            applyRandomGPBonuses(to: &quests)
+            return quests
+        }
+
+        var quests: [Quest] = []
+
+        // Compute today's training day from the survey schedule.
+        let weekday = Calendar.current.component(.weekday, from: date) // 1=Sun … 7=Sat
+        let day = trainingDay(
+            for: weekday,
+            daysPerWeek: profile.goalSurveyDaysPerWeek,
+            split: profile.goalSurveySplit ?? .fullBody
+        )
+
+        let intensity = profile.goalSurveyIntensity ?? .moderate
+        let sessionMinutes = profile.goalSurveySessionMinutes > 0 ? profile.goalSurveySessionMinutes : 60
+        let baseXP = 80
+        let scaledXP = Int(Double(baseXP) * intensity.xpMultiplier)
+
+        switch day {
+        case .rest:
+            // Rest day — just nutrition + recovery + discipline
+            quests.append(Quest(
+                title: "Rest Day Recovery",
+                details: "Hit your sleep and water targets today. Rest is when growth happens — protect it.",
+                type: .daily, createdAt: Date(), dueDate: dueDate,
+                xpReward: 30, statTarget: "energy",
+                completionCondition: "water:8", dateTag: date
+            ))
+
+        case .training(let focus):
+            let bodyParts = focus.bodyParts.joined(separator: ", ")
+            let intensityNote: String
+            switch intensity {
+            case .easy:     intensityNote = "Keep RPE 6-7. Focus on form."
+            case .moderate: intensityNote = "RPE 7-8. Steady working weight."
+            case .intense:  intensityNote = "RPE 8-9. Push the last reps."
+            }
+            quests.append(Quest(
+                title: "Daily Training: \(focus.title)",
+                details: "Today is \(focus.title) day. Hit \(bodyParts). 3 working sets of any qualifying movement. Target \(sessionMinutes) min. \(intensityNote)",
+                type: .daily, createdAt: Date(), dueDate: dueDate,
+                xpReward: scaledXP, statTarget: "strength",
+                completionCondition: "workout:any", dateTag: date
+            ))
+
+            // Bonus quest if today's focus matches one of the user's chosen focus areas
+            let userFocusAreas = profile.goalSurveyFocusAreas.map { $0.rawValue.lowercased() }
+            if focus.bodyParts.contains(where: { userFocusAreas.contains($0.lowercased()) }) {
+                quests.append(Quest(
+                    title: "Bonus Focus: \(focus.title)",
+                    details: "You marked this body part as a priority. Hit at least 2 dedicated isolation sets after the main lifts.",
+                    type: .daily, createdAt: Date(), dueDate: dueDate,
+                    xpReward: 25, statTarget: "discipline",
+                    completionCondition: "", dateTag: date
+                ))
+            }
+        }
+
+        // Cardio quest a few days a week based on cardio preference
+        let cardio = profile.goalSurveyCardio ?? .none
+        if cardio.sessionsPerWeek > 0 {
+            // Map sessions per week to deterministic weekdays so the quest doesn't appear randomly.
+            // 2 sessions: Tue, Fri. 3 sessions: Mon, Wed, Fri. 4 sessions: Mon, Tue, Thu, Fri.
+            let cardioDays: Set<Int>
+            switch cardio.sessionsPerWeek {
+            case 2: cardioDays = [3, 6]
+            case 3: cardioDays = [2, 4, 6]
+            case 4: cardioDays = [2, 3, 5, 6]
+            default: cardioDays = []
+            }
+            if cardioDays.contains(weekday) {
+                let cardioMinutes: Int
+                let cardioDescription: String
+                switch cardio {
+                case .light:    cardioMinutes = 20; cardioDescription = "20 min walk or easy bike"
+                case .moderate: cardioMinutes = 30; cardioDescription = "30 min jog or steady cycling"
+                case .high:     cardioMinutes = 25; cardioDescription = "25 min HIIT or sprint intervals"
+                default: cardioMinutes = 0; cardioDescription = ""
+                }
+                if cardioMinutes > 0 {
+                    quests.append(Quest(
+                        title: "Cardio Session",
+                        details: "\(cardioDescription). Track via the Patrol map or log a workout.",
+                        type: .daily, createdAt: Date(), dueDate: dueDate,
+                        xpReward: 50, statTarget: "endurance",
+                        completionCondition: "workout:cardio", dateTag: date
+                    ))
+                }
+            }
+        }
+
+        // Always include the standard daily anchors
+        quests.append(makeDisciplineCheckQuest(for: profile, on: date, dueDate: dueDate))
+        quests.append(makeNutritionLogQuest(for: profile, on: date, dueDate: dueDate))
+
+        applyRandomGPBonuses(to: &quests)
+        return quests
+    }
+
+    // MARK: - Custom Plan Schedule
+
+    private enum CustomTrainingDay {
+        case rest
+        case training(focus: TrainingFocus)
+    }
+
+    private struct TrainingFocus {
+        let title: String       // "Push", "Pull", "Legs", "Full Body", "Upper", "Lower", "Chest", etc.
+        let bodyParts: [String] // matched against profile.goalSurveyFocusAreas
+    }
+
+    private func trainingDay(for weekday: Int, daysPerWeek: Int, split: GoalSurveySplit) -> CustomTrainingDay {
+        // weekday: 1 = Sunday, 2 = Monday, ..., 7 = Saturday
+        let schedule: [CustomTrainingDay] = scheduleFor(daysPerWeek: max(2, min(daysPerWeek, 7)), split: split)
+        // schedule index 0 = Monday by convention; remap weekday (1=Sun..7=Sat) accordingly
+        let mondayBasedIndex = (weekday + 5) % 7  // Sun=6, Mon=0, Tue=1, ... Sat=5
+        return schedule[mondayBasedIndex]
+    }
+
+    private func scheduleFor(daysPerWeek: Int, split: GoalSurveySplit) -> [CustomTrainingDay] {
+        let push  = TrainingFocus(title: "Push",      bodyParts: ["chest","shoulders","arms"])
+        let pull  = TrainingFocus(title: "Pull",      bodyParts: ["back","arms"])
+        let legs  = TrainingFocus(title: "Legs",      bodyParts: ["legs","glutes"])
+        let upper = TrainingFocus(title: "Upper",     bodyParts: ["chest","back","shoulders","arms"])
+        let lower = TrainingFocus(title: "Lower",     bodyParts: ["legs","glutes","core"])
+        let full  = TrainingFocus(title: "Full Body", bodyParts: ["chest","back","legs","shoulders","arms","glutes","core"])
+        let chest = TrainingFocus(title: "Chest",     bodyParts: ["chest"])
+        let back  = TrainingFocus(title: "Back",      bodyParts: ["back"])
+        let legs2 = TrainingFocus(title: "Legs",      bodyParts: ["legs","glutes"])
+        let shldr = TrainingFocus(title: "Shoulders", bodyParts: ["shoulders"])
+        let arms  = TrainingFocus(title: "Arms",      bodyParts: ["arms"])
+
+        let rest: CustomTrainingDay = .rest
+
+        // Indices: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+        switch split {
+        case .fullBody:
+            switch daysPerWeek {
+            case 2: return [.training(focus: full), rest, rest, .training(focus: full), rest, rest, rest]
+            case 3: return [.training(focus: full), rest, .training(focus: full), rest, .training(focus: full), rest, rest]
+            case 4: return [.training(focus: full), .training(focus: full), rest, .training(focus: full), .training(focus: full), rest, rest]
+            default: return [.training(focus: full), .training(focus: full), .training(focus: full), .training(focus: full), .training(focus: full), rest, rest]
+            }
+        case .upperLower:
+            switch daysPerWeek {
+            case 2: return [.training(focus: upper), rest, rest, .training(focus: lower), rest, rest, rest]
+            case 3: return [.training(focus: upper), rest, .training(focus: lower), rest, .training(focus: upper), rest, rest]
+            case 4: return [.training(focus: upper), .training(focus: lower), rest, .training(focus: upper), .training(focus: lower), rest, rest]
+            case 5: return [.training(focus: upper), .training(focus: lower), .training(focus: upper), rest, .training(focus: lower), .training(focus: upper), rest]
+            default: return [.training(focus: upper), .training(focus: lower), .training(focus: upper), .training(focus: lower), .training(focus: upper), .training(focus: lower), rest]
+            }
+        case .pushPullLegs:
+            switch daysPerWeek {
+            case 3: return [.training(focus: push), rest, .training(focus: pull), rest, .training(focus: legs), rest, rest]
+            case 4: return [.training(focus: push), .training(focus: pull), rest, .training(focus: legs), .training(focus: push), rest, rest]
+            case 5: return [.training(focus: push), .training(focus: pull), .training(focus: legs), rest, .training(focus: push), .training(focus: pull), rest]
+            default: return [.training(focus: push), .training(focus: pull), .training(focus: legs), .training(focus: push), .training(focus: pull), .training(focus: legs), rest]
+            }
+        case .broSplit:
+            switch daysPerWeek {
+            case 4: return [.training(focus: chest), .training(focus: back), rest, .training(focus: legs2), .training(focus: arms), rest, rest]
+            default: return [.training(focus: chest), .training(focus: back), .training(focus: shldr), .training(focus: legs2), .training(focus: arms), rest, rest]
+            }
+        case .custom:
+            // For "custom" the survey doesn't impose a schedule. Treat every requested day as a generic full-body day so the user has SOMETHING to log.
+            var sched: [CustomTrainingDay] = Array(repeating: .rest, count: 7)
+            let trainingIndices: [Int]
+            switch daysPerWeek {
+            case 2: trainingIndices = [0, 3]
+            case 3: trainingIndices = [0, 2, 4]
+            case 4: trainingIndices = [0, 1, 3, 4]
+            case 5: trainingIndices = [0, 1, 3, 4, 5]
+            case 6: trainingIndices = [0, 1, 2, 3, 4, 5]
+            default: trainingIndices = [0, 1, 2, 3, 4, 5, 6]
+            }
+            for i in trainingIndices { sched[i] = .training(focus: full) }
+            return sched
+        }
     }
 
     // MARK: - Cleanup

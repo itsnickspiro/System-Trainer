@@ -73,6 +73,16 @@ final class Profile {
     var gymEnvironmentRaw: String = GymEnvironment.fullGym.rawValue
     var fitnessGoalRaw: String = FitnessGoal.generalHealth.rawValue
 
+    // Goal Survey — populated when the user picks "Build my own plan" during
+    // onboarding. Drives quest generation for the custom plan path.
+    var goalSurveyCompleted: Bool = false
+    var goalSurveyDaysPerWeek: Int = 0          // 0 = unset
+    var goalSurveySplitRaw: String = ""         // raw of GoalSurveySplit
+    var goalSurveySessionMinutes: Int = 0
+    var goalSurveyIntensityRaw: String = ""     // raw of GoalSurveyIntensity
+    var goalSurveyFocusAreasRaw: [String] = []  // raw values, max 3
+    var goalSurveyCardioRaw: String = ""        // raw of GoalSurveyCardio
+
     var gender: PlayerGender {
         get { PlayerGender(rawValue: genderRaw) ?? .male }
         set { genderRaw = newValue.rawValue }
@@ -2193,3 +2203,109 @@ extension Color {
     }
 }
 
+// MARK: - Goal Survey enums
+
+enum GoalSurveySplit: String, CaseIterable, Codable, Identifiable {
+    case fullBody     = "fullBody"
+    case upperLower   = "upperLower"
+    case pushPullLegs = "pushPullLegs"
+    case broSplit     = "broSplit"
+    case custom       = "custom"
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .fullBody:     return "Full Body"
+        case .upperLower:   return "Upper / Lower"
+        case .pushPullLegs: return "Push / Pull / Legs"
+        case .broSplit:     return "Bro Split"
+        case .custom:      return "Custom (I decide each day)"
+        }
+    }
+    var blurb: String {
+        switch self {
+        case .fullBody:     return "Hit every muscle every session"
+        case .upperLower:   return "Two upper-body days, two lower-body days"
+        case .pushPullLegs: return "Push, pull, legs — classic 3-way split"
+        case .broSplit:     return "One muscle group per day"
+        case .custom:       return "Flexible — you pick each day"
+        }
+    }
+}
+
+enum GoalSurveyIntensity: String, CaseIterable, Codable, Identifiable {
+    case easy, moderate, intense
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .easy:     return "Easy — Build the habit"
+        case .moderate: return "Moderate — Steady gains"
+        case .intense:  return "Intense — Push hard"
+        }
+    }
+    var xpMultiplier: Double {
+        switch self {
+        case .easy: return 0.8
+        case .moderate: return 1.0
+        case .intense: return 1.3
+        }
+    }
+}
+
+enum GoalSurveyCardio: String, CaseIterable, Codable, Identifiable {
+    case none, light, moderate, high
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .none:     return "None"
+        case .light:    return "Light — walks, easy bike"
+        case .moderate: return "Moderate — jogging, cycling"
+        case .high:     return "High — HIIT, sprints"
+        }
+    }
+    var sessionsPerWeek: Int {
+        switch self {
+        case .none: return 0
+        case .light: return 2
+        case .moderate: return 3
+        case .high: return 4
+        }
+    }
+}
+
+enum GoalSurveyFocusArea: String, CaseIterable, Codable, Identifiable {
+    case arms, chest, back, shoulders, legs, glutes, core, cardio, mobility
+    var id: String { rawValue }
+    var displayName: String { rawValue.capitalized }
+    var icon: String {
+        switch self {
+        case .arms:      return "figure.arms.open"
+        case .chest:     return "figure.cross.training"
+        case .back:      return "figure.strengthtraining.traditional"
+        case .shoulders: return "figure.boxing"
+        case .legs:      return "figure.run"
+        case .glutes:    return "figure.walk"
+        case .core:      return "figure.core.training"
+        case .cardio:    return "heart.fill"
+        case .mobility:  return "figure.flexibility"
+        }
+    }
+}
+
+extension Profile {
+    var goalSurveySplit: GoalSurveySplit? {
+        get { GoalSurveySplit(rawValue: goalSurveySplitRaw) }
+        set { goalSurveySplitRaw = newValue?.rawValue ?? "" }
+    }
+    var goalSurveyIntensity: GoalSurveyIntensity? {
+        get { GoalSurveyIntensity(rawValue: goalSurveyIntensityRaw) }
+        set { goalSurveyIntensityRaw = newValue?.rawValue ?? "" }
+    }
+    var goalSurveyCardio: GoalSurveyCardio? {
+        get { GoalSurveyCardio(rawValue: goalSurveyCardioRaw) }
+        set { goalSurveyCardioRaw = newValue?.rawValue ?? "" }
+    }
+    var goalSurveyFocusAreas: [GoalSurveyFocusArea] {
+        get { goalSurveyFocusAreasRaw.compactMap { GoalSurveyFocusArea(rawValue: $0) } }
+        set { goalSurveyFocusAreasRaw = newValue.map(\.rawValue) }
+    }
+}

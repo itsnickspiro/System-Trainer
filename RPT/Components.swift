@@ -716,6 +716,30 @@ struct QuestRow: View {
     var onToggle: (() -> Void)?
     var isLocked: Bool = false
     @State private var showingDetail = false
+    @Environment(\.modelContext) private var modelContext
+
+    // Parses the quest title for body-part keywords so the spawned
+    // bodyweight alternative matches the original training focus.
+    private var inferredFocusParts: [String] {
+        let t = quest.title.lowercased()
+        var parts: [String] = []
+        if t.contains("push") { parts.append("push") }
+        if t.contains("pull") { parts.append("pull") }
+        if t.contains("leg") || t.contains("lower") { parts.append("legs") }
+        if t.contains("chest") { parts.append("chest") }
+        if t.contains("back") { parts.append("back") }
+        if t.contains("upper") { parts.append("push") }
+        if t.contains("full body") { parts.append("fullBody") }
+        if t.contains("core") || t.contains("abs") { parts.append("core") }
+        if t.contains("cardio") || t.contains("run") { parts.append("cardio") }
+        return parts.isEmpty ? ["fullBody"] : parts
+    }
+
+    // Shows the Bodyweight Mode pill only on open training-day quests.
+    private var showsBodyweightButton: Bool {
+        guard !quest.isCompleted, !isLocked else { return false }
+        return quest.completionCondition?.hasPrefix("workout:") == true
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -807,8 +831,40 @@ struct QuestRow: View {
                         }
                     }
                 }
+
+                // Bodyweight Mode pill — spawns a bodyweight alternative quest
+                // so the user can train without equipment on travel/no-gym days.
+                if showsBodyweightButton {
+                    HStack {
+                        Spacer()
+                        Button {
+                            QuestManager.shared.spawnBodyweightAlternative(
+                                focusBodyParts: inferredFocusParts,
+                                context: modelContext
+                            )
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "figure.flexibility")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Bodyweight")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.mint)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .fill(Color.mint.opacity(0.15))
+                                    .overlay(Capsule().stroke(Color.mint.opacity(0.7), lineWidth: 1))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Switch to bodyweight alternative")
+                    }
+                    .padding(.top, 2)
+                }
             }
-            
+
             // Action button
             Button(action: { if !isLocked { onToggle?() } }) {
                 ZStack {
