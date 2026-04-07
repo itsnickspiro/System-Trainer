@@ -357,6 +357,8 @@ private struct SupabaseFoodRow: Decodable {
     let containsGluten: Bool?
     let containsAlcohol: Bool?
     let isHalalCertified: Bool?
+    // Yuka-style ingredient grading (Phase D session 7)
+    let ingredientText: String?
 
     func toFoodItem() -> FoodItem? {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
@@ -394,6 +396,14 @@ private struct SupabaseFoodRow: Decodable {
         item.containsGluten   = containsGluten ?? false
         item.containsAlcohol  = containsAlcohol ?? false
         item.isHalalCertified = isHalalCertified ?? false
+
+        // Yuka-style: stash ingredient text and parse out additives/allergens
+        // so the post-scan verdict and row indicators have data immediately.
+        item.ingredientText = ingredientText ?? ""
+        let parsed = IngredientGrader.parse(ingredientText: item.ingredientText)
+        item.detectedAdditives = parsed.additives.map { $0.id }
+        item.detectedAllergens = parsed.allergens
+
         return item
     }
 

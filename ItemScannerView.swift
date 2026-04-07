@@ -201,6 +201,13 @@ struct ItemScannerView: View {
                     return
                 }
 
+                // 1b. Yuka-style ingredient parse — populate detected additives
+                // and allergens from the raw ingredient text so the row indicator
+                // and the post-scan verdict screen have data to render.
+                let parsed = IngredientGrader.parse(ingredientText: foodItem.ingredientText)
+                foodItem.detectedAdditives = parsed.additives.map { $0.id }
+                foodItem.detectedAllergens = parsed.allergens
+
                 // 2. Request AI analysis
                 let verdict = try? await AIManager.shared.analyzeFood(foodItem)
 
@@ -495,6 +502,7 @@ struct ItemResultSheet: View {
     @State private var servingSize: Double = 100.0
     @State private var selectedMeal: MealType = .snacks
     @State private var saveSuccess = false
+    @State private var showVerdictSheet = false
 
     private let healthStore = HKHealthStore()
 
@@ -554,6 +562,31 @@ struct ItemResultSheet: View {
 
                         MacroGrid(foodItem: foodItem)
                             .padding(.horizontal, 24)
+
+                        // Yuka-style verdict button — opens the ingredient/additive
+                        // breakdown screen. Shown for every scanned item.
+                        Button {
+                            showVerdictSheet = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: foodItem.detectedAdditives.contains(where: { IngredientGrader.highRiskAdditiveIDs.contains($0) }) ? "exclamationmark.shield.fill" : "checkmark.shield.fill")
+                                Text("View Verdict")
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .foregroundStyle(.cyan)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 14)
+                            .background(Color.cyan.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.cyan.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
                     }
 
                     // AI System Verdict
@@ -680,6 +713,16 @@ struct ItemResultSheet: View {
         .presentationDragIndicator(.hidden)
         .onAppear {
             servingSize = foodItem.servingSize > 0 ? foodItem.servingSize : 100.0
+        }
+        .sheet(isPresented: $showVerdictSheet) {
+            PostScanVerdictView(
+                food: foodItem,
+                onLogAnyway: {
+                    showVerdictSheet = false
+                    consumeItem()
+                },
+                onDismiss: { showVerdictSheet = false }
+            )
         }
     }
 

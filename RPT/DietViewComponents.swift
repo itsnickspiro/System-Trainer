@@ -1409,6 +1409,16 @@ struct FoodItemRow: View {
                         NutritionGradeBadge(grade: food.nutritionGrade, score: food.nutritionScore)
                         DietComplianceBadge(food: food, diet: currentDiet)
 
+                        // High-risk additive flag — Yuka-style red shield if any
+                        // detected additive ID is in the curated high-risk set.
+                        if food.detectedAdditives.contains(where: { IngredientGrader.highRiskAdditiveIDs.contains($0) }) {
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.red)
+                                .accessibilityLabel("Contains high-risk additives")
+                                .help("Contains high-risk additives")
+                        }
+
                         if !food.isCustom {
                             Image(systemName: "checkmark.seal.fill")
                                 .font(.caption)
