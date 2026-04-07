@@ -33,6 +33,10 @@ final class Profile {
     var lastWorkoutTime: Date?
     var sleepHours: Double = 7.0
     var lastStatUpdate: Date = Date()
+
+    // Diet preference (Phase D1). Stored as raw string for CloudKit compatibility.
+    // Use the `dietType` computed accessor (Profile extension) for type-safe reads/writes.
+    var dietTypeRaw: String = "none"
     
     // HealthKit Integration Properties
     var dailySteps: Int = 0
@@ -893,6 +897,16 @@ final class FoodItem {
     var cholesterolMg: Double = 0.0
     var saturatedFatG: Double = 0.0
 
+    // Diet compatibility tags. Populated from the foods-proxy backend or backfilled
+    // from category/macro heuristics. Defaults represent "unknown / safe assumption."
+    var containsMeat: Bool = false      // beef, pork, poultry, etc.
+    var containsFish: Bool = false      // any fish or seafood
+    var containsDairy: Bool = false     // milk, cheese, yogurt, butter
+    var containsEggs: Bool = false      // any whole eggs or egg ingredients
+    var containsGluten: Bool = false    // wheat, barley, rye, malt
+    var containsAlcohol: Bool = false   // for halal compliance
+    var isHalalCertified: Bool = false  // explicit halal certification
+
     /// Nutrition score 0–100 and A–F grade (per 100 kcal basis, Nutri-Score inspired).
     /// Positive points: protein, fiber, potassium, calcium, iron, vitamins.
     /// Negative points: sugar, saturated fat, sodium, calories.
@@ -973,6 +987,45 @@ final class FoodItem {
         score -= Double(additiveRiskLevel) * 5
 
         return max(0, min(100, Int(score.rounded())))
+    }
+
+    /// Returns whether this food item is compatible with the given diet.
+    /// Returns `.compliant`, `.caution`, or `.notCompliant` based on the tags
+    /// and macro thresholds. Used by the DietComplianceBadge UI.
+    func dietCompliance(for diet: DietType) -> DietCompliance {
+        switch diet {
+        case .none:
+            return .compliant
+        case .vegetarian:
+            if containsMeat || containsFish { return .notCompliant(reason: "Contains meat or fish") }
+            return .compliant
+        case .vegan:
+            if containsMeat || containsFish { return .notCompliant(reason: "Contains meat or fish") }
+            if containsDairy { return .notCompliant(reason: "Contains dairy") }
+            if containsEggs { return .notCompliant(reason: "Contains eggs") }
+            return .compliant
+        case .pescatarian:
+            if containsMeat { return .notCompliant(reason: "Contains meat") }
+            return .compliant
+        case .keto:
+            // Threshold: under 10g net carbs per 100g is keto-friendly
+            let netCarbs = max(0, carbohydrates - fiber)
+            if netCarbs <= 5 { return .compliant }
+            if netCarbs <= 10 { return .caution(reason: "Moderate carbs (\(Int(netCarbs))g per 100g)") }
+            return .notCompliant(reason: "Too high in carbs (\(Int(netCarbs))g per 100g)")
+        case .halal:
+            if !isHalalCertified && containsMeat {
+                return .caution(reason: "Meat — verify halal certification")
+            }
+            if containsAlcohol { return .notCompliant(reason: "Contains alcohol") }
+            return .compliant
+        case .glutenFree:
+            if containsGluten { return .notCompliant(reason: "Contains gluten") }
+            return .compliant
+        case .lactoseFree:
+            if containsDairy { return .notCompliant(reason: "Contains dairy / lactose") }
+            return .compliant
+        }
     }
 
     /// Maps the goal-aligned letter grade to a MealHealthiness bucket so that
@@ -2307,5 +2360,97 @@ extension Profile {
     var goalSurveyFocusAreas: [GoalSurveyFocusArea] {
         get { goalSurveyFocusAreasRaw.compactMap { GoalSurveyFocusArea(rawValue: $0) } }
         set { goalSurveyFocusAreasRaw = newValue.map(\.rawValue) }
+    }
+}
+
+// MARK: - Diet Preferences (Phase D1)
+
+enum DietType: String, CaseIterable, Codable, Identifiable {
+    case none         = "none"
+    case vegetarian   = "vegetarian"
+    case vegan        = "vegan"
+    case pescatarian  = "pescatarian"
+    case keto         = "keto"
+    case halal        = "halal"
+    case glutenFree   = "glutenFree"
+    case lactoseFree  = "lactoseFree"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none:        return "No restrictions"
+        case .vegetarian:  return "Vegetarian"
+        case .vegan:       return "Vegan"
+        case .pescatarian: return "Pescatarian"
+        case .keto:        return "Keto"
+        case .halal:       return "Halal"
+        case .glutenFree:  return "Gluten-Free"
+        case .lactoseFree: return "Lactose-Free"
+        }
+    }
+
+    /// Short tagline used in the diet picker.
+    var tagline: String {
+        switch self {
+        case .none:        return "Eat anything"
+        case .vegetarian:  return "No meat or fish"
+        case .vegan:       return "No animal products at all"
+        case .pescatarian: return "Vegetarian + fish/seafood"
+        case .keto:        return "Very low carb, high fat"
+        case .halal:       return "Permitted under Islamic law"
+        case .glutenFree:  return "No wheat, barley, rye"
+        case .lactoseFree: return "No milk-derived dairy"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .none:        return "fork.knife"
+        case .vegetarian:  return "leaf"
+        case .vegan:       return "leaf.fill"
+        case .pescatarian: return "fish"
+        case .keto:        return "flame"
+        case .halal:       return "moon.stars"
+        case .glutenFree:  return "exclamationmark.shield"
+        case .lactoseFree: return "drop.triangle"
+        }
+    }
+}
+
+extension Profile {
+    var dietType: DietType {
+        get { DietType(rawValue: dietTypeRaw) ?? .none }
+        set { dietTypeRaw = newValue.rawValue }
+    }
+}
+
+enum DietCompliance: Equatable {
+    case compliant
+    case caution(reason: String)
+    case notCompliant(reason: String)
+
+    var symbolName: String {
+        switch self {
+        case .compliant:    return "checkmark.seal.fill"
+        case .caution:      return "exclamationmark.triangle.fill"
+        case .notCompliant: return "xmark.octagon.fill"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .compliant:    return "Compatible"
+        case .caution:      return "Caution"
+        case .notCompliant: return "Not compatible"
+        }
+    }
+
+    var reason: String? {
+        switch self {
+        case .compliant: return nil
+        case .caution(let r): return r
+        case .notCompliant(let r): return r
+        }
     }
 }

@@ -159,6 +159,8 @@ struct FoodNutritionSheet: View {
     let entry: FoodEntry
     var fitnessGoal: FitnessGoal? = nil
     @Environment(\.dismiss) private var dismiss
+    @Query private var profiles: [Profile]
+    private var currentDiet: DietType { profiles.first?.dietType ?? .none }
 
     private var food: FoodItem? { entry.foodItem }
     private var qty: Double { entry.quantity }
@@ -207,7 +209,15 @@ struct FoodNutritionSheet: View {
                             Text("Nutrition Grade")
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundColor(.secondary)
+
+                            if let f = food, currentDiet != .none {
+                                HStack {
+                                    DietComplianceBadge(food: f, diet: currentDiet, compact: false)
+                                }
                                 .padding(.bottom, 24)
+                            } else {
+                                Color.clear.frame(height: 24)
+                            }
                         }
                         .padding(.horizontal)
                     }
@@ -1067,6 +1077,47 @@ struct AddFoodView: View {
 // MARK: - Nutrition Grade Badge
 
 /// Yuka-style A/B/C/D/F grade badge for a food item.
+// MARK: - Diet Compliance Badge
+
+/// Compact badge showing whether a food complies with the user's selected
+/// diet type. Renders nothing if the user has no diet set (DietType.none).
+struct DietComplianceBadge: View {
+    let food: FoodItem
+    let diet: DietType
+    var compact: Bool = true
+
+    private var compliance: DietCompliance { food.dietCompliance(for: diet) }
+
+    private var color: Color {
+        switch compliance {
+        case .compliant:    return .green
+        case .caution:      return .orange
+        case .notCompliant: return .red
+        }
+    }
+
+    var body: some View {
+        if diet == .none {
+            EmptyView()
+        } else {
+            HStack(spacing: 4) {
+                Image(systemName: compliance.symbolName)
+                    .font(.system(size: compact ? 9 : 11, weight: .bold))
+                if !compact {
+                    Text(compliance.label)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                }
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, compact ? 5 : 8)
+            .padding(.vertical, compact ? 2 : 3)
+            .background(color.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .help(compliance.reason ?? compliance.label)
+        }
+    }
+}
+
 // MARK: - Food Source Badge
 
 struct FoodSourceBadge: View {
@@ -1300,10 +1351,26 @@ struct FoodItemRow: View {
     let onAdd: (Double, FoodUnit) -> Void
 
     @Environment(\.modelContext) private var context
+    @Query private var profiles: [Profile]
+    private var currentDiet: DietType { profiles.first?.dietType ?? .none }
     @State private var quantity: Double = 1.0
     @State private var selectedUnit: FoodUnit = FoodUnit.servings
     @State private var showingDetails = false
-    
+    @State private var showingComplianceWarning = false
+    @State private var pendingQuantity: Double = 0
+    @State private var pendingUnit: FoodUnit = .servings
+
+    private func attemptAdd(quantity: Double, unit: FoodUnit) {
+        let compliance = food.dietCompliance(for: currentDiet)
+        if case .notCompliant = compliance {
+            pendingQuantity = quantity
+            pendingUnit = unit
+            showingComplianceWarning = true
+        } else {
+            onAdd(quantity, unit)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -1326,6 +1393,7 @@ struct FoodItemRow: View {
 
                         // Nutrition grade badge
                         NutritionGradeBadge(grade: food.nutritionGrade, score: food.nutritionScore)
+                        DietComplianceBadge(food: food, diet: currentDiet)
 
                         if !food.isCustom {
                             Image(systemName: "checkmark.seal.fill")
@@ -1406,7 +1474,7 @@ struct FoodItemRow: View {
                 
                 // Add Button
                 Button {
-                    onAdd(quantity, selectedUnit)
+                    attemptAdd(quantity: quantity, unit: selectedUnit)
                 } label: {
                     Text("Add")
                         .font(.subheadline.weight(.semibold))
@@ -1429,6 +1497,18 @@ struct FoodItemRow: View {
         )
         .sheet(isPresented: $showingDetails) {
             FoodDetailsView(food: food)
+        }
+        .alert("Doesn't fit your \(currentDiet.displayName) diet", isPresented: $showingComplianceWarning) {
+            Button("Log Anyway", role: .destructive) {
+                onAdd(pendingQuantity, pendingUnit)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let reason = food.dietCompliance(for: currentDiet).reason {
+                Text(reason + ". Log it anyway?")
+            } else {
+                Text("This food isn't part of your selected diet. Log it anyway?")
+            }
         }
     }
 }

@@ -171,6 +171,14 @@ async function handleSupabaseSearch(body: Record<string, unknown>): Promise<Resp
     category:         row.category         ?? null,
     isVerified:       row.is_verified      ?? false,
     dataSource:       row.data_source      ?? "rpt",
+    // Diet tags (Phase D1)
+    containsMeat:     row.contains_meat       ?? false,
+    containsFish:     row.contains_fish       ?? false,
+    containsDairy:    row.contains_dairy      ?? false,
+    containsEggs:     row.contains_eggs       ?? false,
+    containsGluten:   row.contains_gluten     ?? false,
+    containsAlcohol:  row.contains_alcohol    ?? false,
+    isHalalCertified: row.is_halal_certified  ?? false,
   }));
 
   return new Response(JSON.stringify(foods), {
@@ -242,6 +250,14 @@ function mapOFFProduct(
     dataSource:     "OpenFoodFacts",
     novaGroup:      novaGroup,
     additiveRisk:   computeAdditiveRisk(additiveTags),
+    // Diet tags (Phase D1) — OFF doesn't supply these directly; defaults are safe.
+    containsMeat:     false,
+    containsFish:     false,
+    containsDairy:    false,
+    containsEggs:     false,
+    containsGluten:   false,
+    containsAlcohol:  false,
+    isHalalCertified: false,
   };
 }
 

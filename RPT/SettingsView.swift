@@ -17,6 +17,16 @@ struct SettingsView: View {
     @ObservedObject private var storeService = StoreService.shared
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
     @State private var copiedPlayerID = false
+    @State private var showingDietInfo = false
+
+    private var dietBinding: Binding<DietType> {
+        Binding(
+            get: { dataManager.currentProfile?.dietType ?? .none },
+            set: { newValue in
+                dataManager.updateProfile { $0.dietType = newValue }
+            }
+        )
+    }
     
     var profile: Profile {
         if let p = profiles.first { return p }
@@ -172,6 +182,35 @@ struct SettingsView: View {
                     .foregroundColor(.primary)
                 }
 
+                // Diet & Nutrition Section
+                Section {
+                    Picker("Diet Plan", selection: dietBinding) {
+                        ForEach(DietType.allCases, id: \.self) { diet in
+                            Text(diet.displayName).tag(diet)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Button {
+                        showingDietInfo = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "fork.knife.circle")
+                                .foregroundColor(.green)
+                            Text("Browse diet plans")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                } header: {
+                    Text("Diet & Nutrition")
+                } footer: {
+                    Text("Logged foods that don't match your diet will show a warning before being added to your diary.")
+                }
+
                 // Health Integration Section
                 Section("Health Integration") {
                     HStack {
@@ -324,6 +363,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingCreditHistory) {
                 CreditHistoryView()
+            }
+            .sheet(isPresented: $showingDietInfo) {
+                DietInfoView()
             }
             .confirmationDialog(
                 "Reset All Data",

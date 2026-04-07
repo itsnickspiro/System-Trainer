@@ -349,6 +349,14 @@ private struct SupabaseFoodRow: Decodable {
     let category: String?
     let isVerified: Bool?
     let dataSource: String?
+    // Diet tags (Phase D1)
+    let containsMeat: Bool?
+    let containsFish: Bool?
+    let containsDairy: Bool?
+    let containsEggs: Bool?
+    let containsGluten: Bool?
+    let containsAlcohol: Bool?
+    let isHalalCertified: Bool?
 
     func toFoodItem() -> FoodItem? {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
@@ -379,6 +387,13 @@ private struct SupabaseFoodRow: Decodable {
         item.cholesterolMg = cholesterolMg ?? 0
         item.isVerified    = isVerified ?? true
         item.dataSource    = dataSource ?? "rpt"
+        item.containsMeat     = containsMeat ?? false
+        item.containsFish     = containsFish ?? false
+        item.containsDairy    = containsDairy ?? false
+        item.containsEggs     = containsEggs ?? false
+        item.containsGluten   = containsGluten ?? false
+        item.containsAlcohol  = containsAlcohol ?? false
+        item.isHalalCertified = isHalalCertified ?? false
         return item
     }
 
