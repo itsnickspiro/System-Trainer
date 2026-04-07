@@ -1041,6 +1041,16 @@ struct AddFoodView: View {
             profile.recordMeal(healthiness: food.mealHealthiness(for: goal))
         }
         DataManager.shared.autoCompleteNutritionQuests()
+        // Round-trip to Apple Health so macros + micros show up in the
+        // Nutrition screen alongside data from other apps.
+        let servingGrams = unit == .grams ? quantity : quantity * food.servingSize
+        Task {
+            await DataManager.shared.healthManager.saveMealSample(
+                foodItem: food,
+                servingGrams: servingGrams,
+                date: selectedDate
+            )
+        }
         dismiss()
     }
 
