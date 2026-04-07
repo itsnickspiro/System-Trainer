@@ -67,6 +67,32 @@ final class DataManager: ObservableObject {
             .store(in: &cancellables)
     }
     
+    // MARK: - Profile Helpers
+
+    /// Ensures a local Profile row exists in SwiftData. Used by
+    /// PlayerProfileService to hydrate a cross-device cloud profile onto a
+    /// fresh install where currentProfile is still nil.
+    @MainActor
+    func ensureProfileExists() {
+        guard currentProfile == nil, let context = modelContext else { return }
+        let descriptor = FetchDescriptor<Profile>()
+        if let existing = (try? context.fetch(descriptor))?.first {
+            currentProfile = existing
+            return
+        }
+        let savedName = UserDefaults.standard.string(forKey: "userProfileName") ?? "Player"
+        let newProfile = Profile(name: savedName)
+        context.insert(newProfile)
+        try? context.save()
+        currentProfile = newProfile
+    }
+
+    /// Saves the SwiftData context if available. Throws if the save fails.
+    @MainActor
+    func saveContext() throws {
+        try modelContext?.save()
+    }
+
     // MARK: - Data Loading
     private func loadLocalData() {
         guard let context = modelContext else { return }
