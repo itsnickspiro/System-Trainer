@@ -1,15 +1,26 @@
 import SwiftUI
 import SwiftData
 
+// Rolling 90-day window for bounded @Query predicates in ProgressChartsView.
+private let progressChartsCutoff: Date = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date.distantPast
+
 // MARK: - Progress Charts View
 
 struct ProgressChartsView: View {
     @Environment(\.modelContext) private var context
-    @Query(sort: \WorkoutSession.startedAt) private var workoutSessions: [WorkoutSession]
+    @Query(filter: #Predicate<WorkoutSession> { s in
+        s.startedAt >= progressChartsCutoff
+    }, sort: \WorkoutSession.startedAt) private var workoutSessions: [WorkoutSession]
     @Query private var profiles: [Profile]
-    @Query(sort: \ExerciseSet.loggedAt) private var allSets: [ExerciseSet]
-    @Query(sort: \BodyMeasurement.date) private var bodyMeasurements: [BodyMeasurement]
-    @Query(sort: \FoodEntry.dateConsumed) private var foodEntries: [FoodEntry]
+    @Query(filter: #Predicate<ExerciseSet> { set in
+        set.loggedAt >= progressChartsCutoff
+    }, sort: \ExerciseSet.loggedAt) private var allSets: [ExerciseSet]
+    @Query(filter: #Predicate<BodyMeasurement> { m in
+        m.date >= progressChartsCutoff
+    }, sort: \BodyMeasurement.date) private var bodyMeasurements: [BodyMeasurement]
+    @Query(filter: #Predicate<FoodEntry> { e in
+        e.dateConsumed >= progressChartsCutoff
+    }, sort: \FoodEntry.dateConsumed) private var foodEntries: [FoodEntry]
 
     @State private var selectedExercise: String = ""
 

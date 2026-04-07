@@ -44,8 +44,17 @@ final class EventsService: ObservableObject {
     }()
 
     private init() {
-        activeEvents = (try? JSONDecoder().decode([GameEvent].self,
-                                                   from: Data(contentsOf: Self.cacheURL))) ?? []
+        // Start empty; load disk cache off-main to keep init() fast on cold launch.
+        activeEvents = []
+        Task.detached(priority: .utility) { [weak self] in
+            let url = Self.cacheURL
+            guard let data = try? Data(contentsOf: url),
+                  let decoded = try? JSONDecoder().decode([GameEvent].self, from: data),
+                  !decoded.isEmpty else { return }
+            await MainActor.run { [weak self] in
+                self?.activeEvents = decoded
+            }
+        }
     }
 
     // MARK: - Refresh

@@ -41,9 +41,18 @@ final class AnimeWorkoutPlanService: ObservableObject {
     }()
 
     private init() {
-        // Load disk cache so plans are available synchronously before network fetch
-        if let cached = loadDiskCache() {
-            remotePlans = cached
+        // Start empty (falls back to bundled plans via `all`);
+        // load disk cache off-main to keep init() fast on cold launch.
+        remotePlans = nil
+        Task.detached(priority: .utility) { [weak self] in
+            let url = Self.cacheURL
+            guard let data = try? Data(contentsOf: url),
+                  let rows = try? JSONDecoder().decode([AnimePlanRow].self, from: data) else { return }
+            let plans = rows.compactMap { $0.toAnimeWorkoutPlan() }
+            guard !plans.isEmpty else { return }
+            await MainActor.run { [weak self] in
+                self?.remotePlans = plans
+            }
         }
     }
 
