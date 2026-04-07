@@ -111,6 +111,14 @@ final class Profile {
     /// Generated once from the CloudKit user record ID and stored persistently.
     var friendCode: String = ""
 
+    // MARK: - Rival
+    //
+    // The user can pick one friend from the leaderboard as their rival.
+    // The Home screen shows a weekly Versus banner comparing the two on
+    // level / XP / streak. Cosmetic — the rival doesn't know.
+    var rivalCloudKitUserID: String = ""
+    var rivalDisplayName: String = ""
+
     /// The ID of the currently active anime workout plan (e.g. "saitama").
     /// Empty string means no plan is active — use the generic quest/workout system.
     var activePlanID: String = ""

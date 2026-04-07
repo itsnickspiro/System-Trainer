@@ -571,10 +571,50 @@ struct PodiumCard: View {
 
 struct LeaderboardRow: View {
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var dataManager = DataManager.shared
+    @State private var showRivalConfirmation = false
     let entry: LeaderboardEntry
     var showWeeklyXP: Bool = false
 
+    private var isRival: Bool {
+        guard let id = entry.playerId, !id.isEmpty,
+              let profile = dataManager.currentProfile else { return false }
+        return profile.rivalCloudKitUserID == id
+    }
+
+    private var canBeRival: Bool {
+        // Don't allow setting yourself as a rival
+        entry.isCurrentUser != true && (entry.playerId?.isEmpty == false)
+    }
+
     var body: some View {
+        rowContent
+            .contextMenu {
+                if canBeRival {
+                    if isRival {
+                        Button(role: .destructive) {
+                            LeaderboardService.shared.clearRival()
+                        } label: {
+                            Label("Clear Rival", systemImage: "flame.fill")
+                        }
+                    } else {
+                        Button {
+                            LeaderboardService.shared.setRival(entry: entry)
+                            showRivalConfirmation = true
+                        } label: {
+                            Label("Set as Rival", systemImage: "flame.fill")
+                        }
+                    }
+                }
+            }
+            .alert("Rival Set", isPresented: $showRivalConfirmation) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("\(entry.displayName) is now your rival. Surpass them!")
+            }
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 12) {
             Text("#\(entry.rank ?? 0)")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
@@ -596,6 +636,17 @@ struct LeaderboardRow: View {
                             .foregroundColor(.white)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Capsule().fill(.cyan))
+                    }
+
+                    if isRival {
+                        HStack(spacing: 3) {
+                            Image(systemName: "flame.fill").font(.system(size: 8))
+                            Text("RIVAL")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(.red))
                     }
                 }
 
@@ -628,9 +679,10 @@ struct LeaderboardRow: View {
                       (colorScheme == .dark ? .cyan.opacity(0.1) : .cyan.opacity(0.05)) :
                       (colorScheme == .dark ? .black.opacity(0.2) : .white.opacity(0.8)))
                 .overlay(RoundedRectangle(cornerRadius: 12)
-                    .stroke(entry.isCurrentUser == true ? .cyan.opacity(0.5) : .gray.opacity(0.2), lineWidth: 1))
+                    .stroke(isRival ? .red.opacity(0.7) : (entry.isCurrentUser == true ? .cyan.opacity(0.5) : .gray.opacity(0.2)),
+                            lineWidth: isRival ? 1.5 : 1))
         )
-        .shadow(color: entry.isCurrentUser == true ? .cyan.opacity(0.2) : .clear, radius: 4, x: 0, y: 2)
+        .shadow(color: isRival ? .red.opacity(0.25) : (entry.isCurrentUser == true ? .cyan.opacity(0.2) : .clear), radius: 4, x: 0, y: 2)
     }
 }
 

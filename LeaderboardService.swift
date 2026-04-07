@@ -218,6 +218,47 @@ final class LeaderboardService: ObservableObject {
         }
     }
 
+    // MARK: - Rival System
+    //
+    // The player picks one leaderboard friend as their rival. We store a
+    // snapshot (CloudKit ID + display name) on the local Profile, and the
+    // Home screen Versus banner reads the latest stats from cached
+    // leaderboard entries when available.
+
+    @MainActor
+    func setRival(entry: LeaderboardEntry) {
+        guard let rivalID = entry.playerId, !rivalID.isEmpty else { return }
+        DataManager.shared.updateProfile { profile in
+            profile.rivalCloudKitUserID = rivalID
+            profile.rivalDisplayName = entry.displayName
+        }
+    }
+
+    @MainActor
+    func clearRival() {
+        DataManager.shared.updateProfile { profile in
+            profile.rivalCloudKitUserID = ""
+            profile.rivalDisplayName = ""
+        }
+    }
+
+    /// Returns the rival's most recent leaderboard row from the cached
+    /// globalEntries / friendEntries / weeklyEntries lists if it's there.
+    /// Falls back to a stub built from the snapshot fields on the local profile.
+    func currentRivalEntry(for profile: Profile) -> LeaderboardEntry? {
+        let id = profile.rivalCloudKitUserID
+        guard !id.isEmpty else { return nil }
+        if let cached = (globalEntries + friendEntries + weeklyEntries).first(where: { $0.playerId == id }) {
+            return cached
+        }
+        return LeaderboardEntry(
+            playerId: id,
+            displayName: profile.rivalDisplayName,
+            level: nil, totalXP: nil, weeklyXP: nil, weeklyWorkouts: nil,
+            rank: nil, currentStreak: nil, avatarKey: nil, isCurrentUser: false
+        )
+    }
+
     // MARK: - CloudKit user ID resolution
 
     /// Resolves the CloudKit user record ID the first time it is needed.

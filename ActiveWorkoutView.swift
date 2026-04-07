@@ -28,6 +28,21 @@ struct ActiveWorkoutView: View {
     @State private var showResumeAlert = false
     @State private var pendingAutosave: WorkoutAutosaveState? = nil
 
+    // MARK: - Strong-parity state
+    // Rest timer (auto-starts when any set is marked complete)
+    @State private var restTimerActive: Bool = false
+    @State private var restSecondsRemaining: Int = 0
+    @State private var restTimerTotal: Int = 90
+    @State private var restTimer: Timer? = nil
+    private let defaultRestSeconds: Int = 90
+
+    // Superset grouping: wgerID -> groupID ("A","B",...). Exercises sharing
+    // the same groupID render as A1/A2 and share a rest timer.
+    @State private var supersetGroups: [Int: String] = [:]
+
+    /// Current user's metric/imperial preference for the plate calculator.
+    private var useMetric: Bool { profile?.useMetric ?? true }
+
     private var profile: Profile? { profiles.first }
 
     // MARK: - Body
@@ -46,13 +61,18 @@ struct ActiveWorkoutView: View {
                         .padding(.top, 8)
 
                         // ── Exercise cards ─────────────────────────────────
-                        ForEach(routine.exerciseWgerIDs, id: \.self) { wgerID in
+                        ForEach(Array(routine.exerciseWgerIDs.enumerated()), id: \.offset) { index, wgerID in
                             ActiveExerciseCard(
                                 wgerID: wgerID,
                                 sets: Binding(
                                     get: { setStates[wgerID] ?? [] },
                                     set: { setStates[wgerID] = $0 }
-                                )
+                                ),
+                                supersetLabel: supersetLabel(for: wgerID),
+                                canLinkSuperset: index > 0 && supersetGroups[wgerID] == nil,
+                                onLinkSuperset: { linkSupersetWithPrevious(at: index) },
+                                onSetCompleted: { startRestTimer(seconds: defaultRestSeconds) },
+                                useMetric: useMetric
                             )
                             .padding(.horizontal, 16)
                         }
@@ -101,6 +121,19 @@ struct ActiveWorkoutView: View {
                     )
                 }
             }
+            .overlay(alignment: .top) {
+                if restTimerActive {
+                    ActiveRestTimerBanner(
+                        secondsRemaining: restSecondsRemaining,
+                        totalSeconds: restTimerTotal,
+                        onCancel: { stopRestTimer() }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.4), value: restTimerActive)
             .navigationTitle("ACTIVE QUEST")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.black, for: .navigationBar)
@@ -221,6 +254,62 @@ struct ActiveWorkoutView: View {
         pendingAutosave = nil
     }
 
+    // MARK: - Strong-parity helpers
+
+    /// Returns e.g. "A1" / "A2" if wgerID belongs to a superset group, else nil.
+    private func supersetLabel(for wgerID: Int) -> String? {
+        guard let group = supersetGroups[wgerID] else { return nil }
+        // Index within the group, in routine order.
+        let ordered = routine.exerciseWgerIDs.filter { supersetGroups[$0] == group }
+        guard let idx = ordered.firstIndex(of: wgerID) else { return nil }
+        return "\(group)\(idx + 1)"
+    }
+
+    /// Links exercise at `index` with the one before it into a superset group.
+    /// Reuses the previous exercise's group if present, otherwise creates a new letter.
+    private func linkSupersetWithPrevious(at index: Int) {
+        guard index > 0, index < routine.exerciseWgerIDs.count else { return }
+        let current = routine.exerciseWgerIDs[index]
+        let previous = routine.exerciseWgerIDs[index - 1]
+        let group: String
+        if let existing = supersetGroups[previous] {
+            group = existing
+        } else {
+            // Next unused capital letter.
+            let used = Set(supersetGroups.values)
+            let letters = (0..<26).map { String(UnicodeScalar(65 + $0)!) }
+            group = letters.first(where: { !used.contains($0) }) ?? "A"
+            supersetGroups[previous] = group
+        }
+        supersetGroups[current] = group
+    }
+
+    /// Starts (or restarts) the rest timer with the given seconds.
+    private func startRestTimer(seconds: Int) {
+        restTimer?.invalidate()
+        restTimerTotal = seconds
+        restSecondsRemaining = seconds
+        restTimerActive = true
+        restTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in
+                if restSecondsRemaining > 0 {
+                    restSecondsRemaining -= 1
+                } else {
+                    restTimer?.invalidate()
+                    restTimer = nil
+                    restTimerActive = false
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            }
+        }
+    }
+
+    private func stopRestTimer() {
+        restTimer?.invalidate()
+        restTimer = nil
+        restTimerActive = false
+    }
+
     // MARK: - Complete Quest
 
     private func completeQuest() {
@@ -237,7 +326,7 @@ struct ActiveWorkoutView: View {
                     weightKg: editSet.weightKgValue,
                     reps: editSet.repsValue,
                     isWarmUp: false,
-                    rpe: 7.0
+                    rpe: editSet.rpe
                 )
                 context.insert(record)
                 if session.sets == nil { session.sets = [] }
@@ -315,6 +404,9 @@ final class WorkoutEditableSet: Identifiable {
     var weightText: String = ""
     var repsText: String = ""
     var isComplete: Bool = false
+    // Strong-parity additions:
+    var rpe: Double = 7.0            // Rate of Perceived Exertion, 5.0–10.0
+    var showRPE: Bool = false        // Inline slider disclosure
 
     init(setNumber: Int, wgerID: Int) {
         self.setNumber = setNumber
@@ -376,6 +468,12 @@ private struct ActiveSessionHeader: View {
 private struct ActiveExerciseCard: View {
     let wgerID: Int
     @Binding var sets: [WorkoutEditableSet]
+    // Strong-parity injections from parent
+    var supersetLabel: String? = nil
+    var canLinkSuperset: Bool = false
+    var onLinkSuperset: (() -> Void)? = nil
+    var onSetCompleted: (() -> Void)? = nil
+    var useMetric: Bool = true
 
     @State private var exerciseName: String = ""
     @State private var imageURL: URL?
@@ -394,12 +492,49 @@ private struct ActiveExerciseCard: View {
 
             Divider().background(Color.white.opacity(0.08))
 
+            // Superset strip
+            HStack(spacing: 8) {
+                if let label = supersetLabel {
+                    Text(label)
+                        .font(.system(size: 10, design: .monospaced).weight(.black))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.cyan))
+                    Text("SUPERSET")
+                        .font(.system(size: 9, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(.cyan.opacity(0.8))
+                }
+                Spacer()
+                if canLinkSuperset {
+                    Button {
+                        onLinkSuperset?()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "link")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("LINK SUPERSET")
+                                .font(.system(size: 9, design: .monospaced).weight(.semibold))
+                        }
+                        .foregroundStyle(.cyan.opacity(0.8))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule().stroke(Color.cyan.opacity(0.4), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+
             VStack(spacing: 0) {
                 // Column headers
                 HStack {
                     Text("SET").frame(width: 32, alignment: .center)
                     Spacer()
-                    Text("KG").frame(width: 72, alignment: .center)
+                    Text(useMetric ? "KG" : "LB").frame(width: 72, alignment: .center)
                     Text("REPS").frame(width: 60, alignment: .center)
                     Text("✓").frame(width: 40, alignment: .center)
                 }
@@ -409,7 +544,11 @@ private struct ActiveExerciseCard: View {
                 .padding(.vertical, 8)
 
                 ForEach(sets) { editSet in
-                    ActiveSetRow(editSet: editSet)
+                    ActiveSetRow(
+                        editSet: editSet,
+                        useMetric: useMetric,
+                        onCompleted: { onSetCompleted?() }
+                    )
                     if editSet.id != sets.last?.id {
                         Divider().background(Color.white.opacity(0.06))
                     }
@@ -545,79 +684,182 @@ private struct ActiveExerciseCard: View {
 
 private struct ActiveSetRow: View {
     @Bindable var editSet: WorkoutEditableSet
+    var useMetric: Bool = true
+    var onCompleted: (() -> Void)? = nil
     @FocusState private var focusedField: RowField?
+    @State private var showPlateCalc: Bool = false
 
     enum RowField { case weight, reps }
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Set number badge
-            ZStack {
-                Circle()
-                    .fill(editSet.isComplete ? Color.cyan.opacity(0.2) : Color.white.opacity(0.06))
-                    .frame(width: 28, height: 28)
-                Text("\(editSet.setNumber)")
-                    .font(.system(.caption2, design: .monospaced).weight(.bold))
-                    .foregroundStyle(editSet.isComplete ? .cyan : .gray)
-            }
-
-            Spacer()
-
-            // Weight field
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(editSet.isComplete ? 0.03 : 0.07))
-                    .frame(width: 72, height: 38)
-                TextField("0.0", text: $editSet.weightText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.center)
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(editSet.isComplete ? Color.gray : Color.white)
-                    .frame(width: 64)
-                    .focused($focusedField, equals: .weight)
-                    .disabled(editSet.isComplete)
-            }
-
-            // Reps field
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.white.opacity(editSet.isComplete ? 0.03 : 0.07))
-                    .frame(width: 56, height: 38)
-                TextField("0", text: $editSet.repsText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.center)
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(editSet.isComplete ? Color.gray : Color.white)
-                    .frame(width: 48)
-                    .focused($focusedField, equals: .reps)
-                    .disabled(editSet.isComplete)
-            }
-
-            // Complete toggle
-            Button {
-                guard editSet.hasData || editSet.isComplete else { return }
-                withAnimation(.spring(duration: 0.25)) {
-                    editSet.isComplete.toggle()
-                }
-                if editSet.isComplete {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    focusedField = nil
-                }
-            } label: {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                // Set number badge
                 ZStack {
                     Circle()
-                        .fill(editSet.isComplete ? Color.cyan : Color.white.opacity(0.08))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: editSet.isComplete ? "checkmark" : "circle")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(editSet.isComplete ? Color.black : Color.gray)
+                        .fill(editSet.isComplete ? Color.cyan.opacity(0.2) : Color.white.opacity(0.06))
+                        .frame(width: 28, height: 28)
+                    Text("\(editSet.setNumber)")
+                        .font(.system(.caption2, design: .monospaced).weight(.bold))
+                        .foregroundStyle(editSet.isComplete ? .cyan : .gray)
+                }
+
+                Spacer()
+
+                // Plate calculator button
+                Button {
+                    showPlateCalc = true
+                } label: {
+                    Image(systemName: "circle.grid.2x2.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.cyan.opacity(0.7))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle().fill(Color.white.opacity(0.06))
+                        )
+                }
+                .accessibilityLabel("Plate calculator")
+
+                // Weight field
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(editSet.isComplete ? 0.03 : 0.07))
+                        .frame(width: 72, height: 38)
+                    TextField("0.0", text: $editSet.weightText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.center)
+                        .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(editSet.isComplete ? Color.gray : Color.white)
+                        .frame(width: 64)
+                        .focused($focusedField, equals: .weight)
+                        .disabled(editSet.isComplete)
+                }
+
+                // Reps field
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(editSet.isComplete ? 0.03 : 0.07))
+                        .frame(width: 56, height: 38)
+                    TextField("0", text: $editSet.repsText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.center)
+                        .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(editSet.isComplete ? Color.gray : Color.white)
+                        .frame(width: 48)
+                        .focused($focusedField, equals: .reps)
+                        .disabled(editSet.isComplete)
+                }
+
+                // Complete toggle
+                Button {
+                    guard editSet.hasData || editSet.isComplete else { return }
+                    let wasComplete = editSet.isComplete
+                    withAnimation(.spring(duration: 0.25)) {
+                        editSet.isComplete.toggle()
+                    }
+                    if editSet.isComplete && !wasComplete {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        focusedField = nil
+                        // Auto-start the rest timer
+                        onCompleted?()
+                    }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(editSet.isComplete ? Color.cyan : Color.white.opacity(0.08))
+                            .frame(width: 34, height: 34)
+                        Image(systemName: editSet.isComplete ? "checkmark" : "circle")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(editSet.isComplete ? Color.black : Color.gray)
+                    }
                 }
             }
+
+            // RPE row — tap to disclose, slider 5.0-10.0 in 0.5 steps
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        editSet.showRPE.toggle()
+                    }
+                } label: {
+                    Text("RPE \(editSet.rpe, specifier: "%.1f")")
+                        .font(.system(size: 9, design: .monospaced).weight(.bold))
+                        .foregroundStyle(.cyan.opacity(0.7))
+                }
+                if editSet.showRPE {
+                    Slider(
+                        value: $editSet.rpe,
+                        in: 5.0...10.0,
+                        step: 0.5
+                    )
+                    .tint(.cyan)
+                    .disabled(editSet.isComplete)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 4)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .background(editSet.isComplete ? Color.cyan.opacity(0.05) : Color.clear)
         .animation(.easeInOut(duration: 0.2), value: editSet.isComplete)
+        .sheet(isPresented: $showPlateCalc) {
+            PlateCalculatorView(
+                useMetric: useMetric,
+                initialWeight: Double(editSet.weightText)
+            )
+        }
+    }
+}
+
+// MARK: - ActiveRestTimerBanner
+
+private struct ActiveRestTimerBanner: View {
+    let secondsRemaining: Int
+    let totalSeconds: Int
+    let onCancel: () -> Void
+
+    private var progress: Double {
+        guard totalSeconds > 0 else { return 0 }
+        return Double(totalSeconds - secondsRemaining) / Double(totalSeconds)
+    }
+
+    private var timeString: String {
+        String(format: "%d:%02d", secondsRemaining / 60, secondsRemaining % 60)
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "timer")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("REST")
+                    .font(.system(size: 9, design: .monospaced).weight(.bold))
+                    .foregroundStyle(.gray)
+                Text(timeString)
+                    .font(.system(.title3, design: .monospaced).weight(.black))
+                    .foregroundStyle(.orange)
+                    .monospacedDigit()
+            }
+            ProgressView(value: progress)
+                .tint(.orange)
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.gray)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.black.opacity(0.85))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.orange.opacity(0.5), lineWidth: 1)
+                )
+        )
     }
 }
 
