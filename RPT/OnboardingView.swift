@@ -3,7 +3,7 @@ import SwiftData
 
 // MARK: - OnboardingView
 //
-// Unified 11-step onboarding flow. All collected state lives here; sub-views
+// Unified 12-step onboarding flow. All collected state lives here; sub-views
 // receive only the bindings they need.
 //
 // Steps:
@@ -12,12 +12,13 @@ import SwiftData
 //  2  — Biological Sex
 //  3  — Basics (age + height + weight on one screen)
 //  4  — Fitness Goal
-//  5  — Workout Plan  (anime plans filtered by gender + goal, or Build-my-own)
-//  6  — Goal Survey Gate (only shown if Build-my-own was chosen)
-//  7  — HealthKit          (skippable)
-//  8  — Notifications      (skippable)
-//  9  — ATT Prompt          (skippable)
-//  10 — Ready Screen       (no progress bar)
+//  5  — Diet Preference
+//  6  — Workout Plan  (anime plans filtered by gender + goal, or Build-my-own)
+//  7  — Goal Survey Gate (only shown if Build-my-own was chosen)
+//  8  — HealthKit          (skippable)
+//  9  — Notifications      (skippable)
+//  10 — ATT Prompt          (skippable)
+//  11 — Ready Screen       (no progress bar)
 
 struct OnboardingView: View {
     @Binding var isOnboardingComplete: Bool
@@ -29,6 +30,7 @@ struct OnboardingView: View {
     @State private var profileName         = ""
     @State private var selectedGender: PlayerGender    = .male
     @State private var selectedGoal: FitnessGoal       = .generalHealth
+    @State private var selectedDietType: DietType      = .none
     @State private var ageText             = "25"
     @State private var heightText          = "170"   // always stored in cm internally
     @State private var weightText          = "70"    // always stored in kg internally
@@ -49,9 +51,9 @@ struct OnboardingView: View {
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 10  // logical progress denominator (1–9 visible + Ready)
-    private let skippableSteps: Set<Int> = [7, 8, 9]  // Health, Notifs, ATT are optional
-    private let noProgressBarSteps: Set<Int> = [0, 10]
+    private let totalProgressSteps = 11  // logical progress denominator (1–10 visible + Ready)
+    private let skippableSteps: Set<Int> = [8, 9, 10]  // Health, Notifs, ATT are optional
+    private let noProgressBarSteps: Set<Int> = [0, 11]
 
     var body: some View {
         ZStack {
@@ -153,20 +155,21 @@ struct OnboardingView: View {
                     selectedGoal: selectedGoal
                  )
         case 4:  GoalStepView(selectedGoal: $selectedGoal)
-        case 5:  WorkoutPlanStepView(
+        case 5:  DietPreferenceStepView(selectedDietType: $selectedDietType)
+        case 6:  WorkoutPlanStepView(
                     selectedPlanID: $selectedPlanID,
                     isBuildingCustomPlan: $isBuildingCustomPlan,
                     playerGender: selectedGender,
                     playerGoal: selectedGoal
                  )
-        case 6:  GoalSurveyGateStepView(
+        case 7:  GoalSurveyGateStepView(
                     profileProvider: { ensureProfile() },
                     goalSurveyCompleted: $goalSurveyCompleted
                  )
-        case 7:  HealthStepView(healthManager: healthManager)
-        case 8:  NotificationsStepView(notificationManager: notificationManager)
-        case 9:  ATTPromptStepView()
-        case 10: ReadyStepView(
+        case 8:  HealthStepView(healthManager: healthManager)
+        case 9:  NotificationsStepView(notificationManager: notificationManager)
+        case 10: ATTPromptStepView()
+        case 11: ReadyStepView(
                     name: profileName,
                     goal: selectedGoal,
                     avatarKey: selectedAvatarKey ?? "avatar_default"
@@ -180,14 +183,14 @@ struct OnboardingView: View {
     private var navigationButtons: some View {
         VStack(spacing: 12) {
             // Continue / advance button
-            Button(currentStep == 9 ? "Complete Setup" : "Continue") {
+            Button(currentStep == 10 ? "Complete Setup" : "Continue") {
                 handleAdvance()
             }
             .buttonStyle(OnboardingPrimaryButtonStyle())
             .disabled(!canAdvance)
 
             // Helper text when the goal survey gate blocks progression
-            if currentStep == 6 && !goalSurveyCompleted {
+            if currentStep == 7 && !goalSurveyCompleted {
                 Text("Complete the goal survey to continue.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.white.opacity(0.5))
@@ -211,7 +214,7 @@ struct OnboardingView: View {
     private var canAdvance: Bool {
         switch currentStep {
         case 1: return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
-        case 6: return goalSurveyCompleted
+        case 7: return goalSurveyCompleted
         default: return true
         }
     }
@@ -220,8 +223,8 @@ struct OnboardingView: View {
     /// user didn't pick "Build my own plan".
     private func advanceFrom(_ step: Int) {
         var next = step + 1
-        if next == 6 && !isBuildingCustomPlan {
-            next = 7
+        if next == 7 && !isBuildingCustomPlan {
+            next = 8
         }
         currentStep = next
     }
@@ -232,7 +235,7 @@ struct OnboardingView: View {
             withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
             return
         }
-        if currentStep == 9 {
+        if currentStep == 10 {
             // Final setup step → complete
             completeOnboarding()
             return
@@ -271,6 +274,7 @@ struct OnboardingView: View {
         }
         if !trimmedName.isEmpty { profile.name = trimmedName }
         profile.fitnessGoal        = selectedGoal
+        profile.dietType           = selectedDietType
         profile.gender             = selectedGender
         profile.age                = age
         profile.height             = height   // stored in cm
@@ -560,6 +564,80 @@ private struct GoalCard: View {
                     .overlay(
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(isSelected ? accentColor : Color.white.opacity(0.1), lineWidth: isSelected ? 1.5 : 1)
+                    )
+            )
+            .scaleEffect(isSelected ? 1.01 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Step 5: Diet Preference
+
+private struct DietPreferenceStepView: View {
+    @Binding var selectedDietType: DietType
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "leaf.fill",
+            iconColor: .green,
+            title: "What's your eating style?",
+            subtitle: "Pick the diet that fits you. We'll flag foods that don't match it."
+        ) {
+            VStack(spacing: 10) {
+                ForEach(DietType.allCases, id: \.self) { diet in
+                    DietCard(diet: diet, isSelected: selectedDietType == diet) {
+                        selectedDietType = diet
+                    }
+                }
+                Text("You can change this anytime in Settings.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.top, 6)
+            }
+        }
+    }
+}
+
+private struct DietCard: View {
+    let diet: DietType
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: diet.icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(isSelected ? .cyan : .white.opacity(0.5))
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(diet.displayName)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(diet.tagline)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.cyan)
+                        .font(.system(size: 20))
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isSelected ? Color.cyan.opacity(0.12) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(isSelected ? Color.cyan : Color.white.opacity(0.1), lineWidth: isSelected ? 1.5 : 1)
                     )
             )
             .scaleEffect(isSelected ? 1.01 : 1.0)
