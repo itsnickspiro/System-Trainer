@@ -69,6 +69,10 @@ struct HomeView: View {
                     // for the current week.
                     BossRaidCard()
 
+                    // Rival head-to-head — only renders when the player
+                    // has set a rival from the leaderboard.
+                    RivalBannerView()
+
                     // Weekly AI review briefing — renders only on Mondays
                     // and only until the user taps the dismiss button.
                     WeeklyReviewCard()
