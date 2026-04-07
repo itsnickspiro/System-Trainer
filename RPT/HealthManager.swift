@@ -124,7 +124,17 @@ class HealthManager: ObservableObject {
 
         do {
             let totalSteps = try await queryStatistics(type: stepsType, predicate: predicate, unit: .count())
-            profile.dailySteps = Int(totalSteps)
+            let prevSteps = profile.dailySteps
+            let newSteps = Int(totalSteps)
+            profile.dailySteps = newSteps
+            // Damage the weekly raid boss with the step delta (only the
+            // Sloth Demon archetype consumes this).
+            let delta = newSteps - prevSteps
+            if delta > 0 {
+                await MainActor.run {
+                    BossRaidService.shared.applyDamage(source: .steps, amount: delta)
+                }
+            }
         } catch {
             print("Failed to fetch steps: \(error)")
         }

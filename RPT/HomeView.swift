@@ -65,6 +65,10 @@ struct HomeView: View {
                     }
 
                     // Quests to complete
+                    // Active weekly raid boss — renders if a boss is alive
+                    // for the current week.
+                    BossRaidCard()
+
                     // Weekly AI review briefing — renders only on Mondays
                     // and only until the user taps the dismiss button.
                     WeeklyReviewCard()

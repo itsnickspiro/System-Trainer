@@ -2585,3 +2585,136 @@ extension Profile {
         }
     }
 }
+
+// MARK: - Weekly Boss Raids
+
+@Model
+final class WeeklyBoss {
+    @Attribute(.unique) var id: UUID = UUID()
+    var bossKey: String = ""           // raw enum value of WeeklyBossArchetype
+    var weekStartDate: Date = Date()   // Monday 00:00 of the active week
+    var maxHP: Int = 100
+    var currentHP: Int = 100
+    var damageDealt: Int = 0           // monotonic counter — what we use for progress display
+    var defeatedAt: Date?              // nil = still alive
+    var rewardClaimed: Bool = false
+    var createdAt: Date = Date()
+
+    init(bossKey: String, weekStartDate: Date, maxHP: Int) {
+        self.id = UUID()
+        self.bossKey = bossKey
+        self.weekStartDate = weekStartDate
+        self.maxHP = maxHP
+        self.currentHP = maxHP
+        self.damageDealt = 0
+        self.defeatedAt = nil
+        self.rewardClaimed = false
+        self.createdAt = Date()
+    }
+
+    var isDefeated: Bool { currentHP <= 0 }
+    var progress: Double {
+        guard maxHP > 0 else { return 0 }
+        return min(1.0, Double(damageDealt) / Double(maxHP))
+    }
+}
+
+/// The 6 weekly boss themes that rotate. The week-of-year mod 6 picks which
+/// boss spawns on a given Monday — deterministic, so different players don't
+/// face wildly different challenges.
+enum WeeklyBossArchetype: String, CaseIterable {
+    case slothDemon       = "sloth_demon"
+    case gluttonKing      = "glutton_king"
+    case hollowWarrior    = "hollow_warrior"
+    case ironSleeper      = "iron_sleeper"
+    case witheringSpirit  = "withering_spirit"
+    case forsakenDragon   = "forsaken_dragon"
+
+    var displayName: String {
+        switch self {
+        case .slothDemon:      return "The Sloth Demon"
+        case .gluttonKing:     return "The Glutton King"
+        case .hollowWarrior:   return "The Hollow Warrior"
+        case .ironSleeper:     return "The Iron Sleeper"
+        case .witheringSpirit: return "The Withering Spirit"
+        case .forsakenDragon:  return "The Forsaken Dragon"
+        }
+    }
+
+    var flavor: String {
+        switch self {
+        case .slothDemon:      return "He feeds on stillness. Move, and he weakens."
+        case .gluttonKing:     return "He thrives in dietary chaos. Log every meal to drain his power."
+        case .hollowWarrior:   return "An empty husk of a champion. Train hard enough and he crumbles."
+        case .ironSleeper:     return "Bound by inertia. Each completed quest cracks his chains."
+        case .witheringSpirit: return "A drought given form. Hydration is the only blade that cuts him."
+        case .forsakenDragon:  return "The hardest of the rotation. Only sustained effort across the whole week brings him down."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .slothDemon:      return "moon.zzz.fill"
+        case .gluttonKing:     return "fork.knife.circle.fill"
+        case .hollowWarrior:   return "figure.fall"
+        case .ironSleeper:     return "bed.double.fill"
+        case .witheringSpirit: return "drop.degreesign.slash"
+        case .forsakenDragon:  return "flame.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .slothDemon:      return .indigo
+        case .gluttonKing:     return .orange
+        case .hollowWarrior:   return Color(red: 0.6, green: 0.2, blue: 0.4)
+        case .ironSleeper:     return .gray
+        case .witheringSpirit: return .teal
+        case .forsakenDragon:  return .red
+        }
+    }
+
+    var maxHP: Int {
+        switch self {
+        case .slothDemon:      return 50_000   // total steps
+        case .gluttonKing:     return 40       // meal logs
+        case .hollowWarrior:   return 180      // workout minutes
+        case .ironSleeper:     return 50       // quest completions
+        case .witheringSpirit: return 60       // water cups
+        case .forsakenDragon:  return 3000     // XP
+        }
+    }
+
+    var hpUnit: String {
+        switch self {
+        case .slothDemon:      return "steps"
+        case .gluttonKing:     return "meals"
+        case .hollowWarrior:   return "minutes"
+        case .ironSleeper:     return "quests"
+        case .witheringSpirit: return "cups"
+        case .forsakenDragon:  return "XP"
+        }
+    }
+
+    /// GP awarded on defeat
+    var defeatReward: Int {
+        switch self {
+        case .slothDemon, .ironSleeper:    return 100
+        case .gluttonKing, .witheringSpirit: return 120
+        case .hollowWarrior:               return 150
+        case .forsakenDragon:              return 250
+        }
+    }
+
+    /// Unique title awarded on first defeat (cosmetic — display in profile)
+    var defeatTitle: String {
+        switch self {
+        case .slothDemon:      return "Demon Slayer"
+        case .gluttonKing:     return "Tempered Hunger"
+        case .hollowWarrior:   return "Iron Body"
+        case .ironSleeper:     return "Chain Breaker"
+        case .witheringSpirit: return "Wellspring"
+        case .forsakenDragon:  return "Dragonsbane"
+        }
+    }
+}

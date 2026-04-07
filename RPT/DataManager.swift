@@ -103,6 +103,12 @@ final class DataManager: ObservableObject {
 
         // Award daily login GP bonus (once per day)
         Task { await checkDailyLoginBonus() }
+
+        // Wire the boss raid service to this same SwiftData context so it can
+        // spawn / load this week's WeeklyBoss row.
+        if let context = modelContext {
+            BossRaidService.shared.setContext(context)
+        }
     }
 
     /// Remove duplicate quests: for each calendar day, keep only one quest per title.
@@ -220,6 +226,12 @@ final class DataManager: ObservableObject {
         // Check for level up
         if profile.level > oldLevel {
             handleLevelUp(from: oldLevel, to: profile.level)
+        }
+
+        // Damage the active weekly raid boss (only fires for the Forsaken
+        // Dragon archetype — XP-driven boss). Other archetypes ignore this.
+        if scaledXP > 0 {
+            BossRaidService.shared.applyDamage(source: .xpEarned, amount: scaledXP)
         }
 
         saveLocalChanges()
@@ -373,6 +385,9 @@ final class DataManager: ObservableObject {
         if prevQuestCount == 0 {
             SystemNotificationManager.shared.present(SystemNotificationManager.firstQuestComplete)
         }
+
+        // Damage the weekly raid boss (only the Iron Sleeper consumes this).
+        BossRaidService.shared.applyDamage(source: .questComplete, amount: 1)
 
         saveLocalChanges()
         refreshTodaysQuests()
@@ -1109,6 +1124,16 @@ final class DataManager: ObservableObject {
         }
 
         saveLocalChanges()
+
+        // Damage the active weekly raid boss based on the action
+        switch action {
+        case .drinkWater:
+            BossRaidService.shared.applyDamage(source: .waterCup, amount: 1)
+        case .recordWorkout(_, let duration):
+            BossRaidService.shared.applyDamage(source: .workoutMinutes, amount: duration)
+        default:
+            break
+        }
 
         // Check quest auto-completion for water/meditation actions
         switch action {

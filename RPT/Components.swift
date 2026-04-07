@@ -757,6 +757,15 @@ struct QuestRow: View {
             .padding(.top, 4)
             
             VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Image(systemName: quest.suggestedNPC.icon)
+                        .font(.system(size: 9, weight: .bold))
+                    Text(quest.suggestedNPC.tagline)
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .tracking(1)
+                }
+                .foregroundColor(quest.suggestedNPC.color.opacity(0.85))
+
                 HStack {
                     Text(quest.title)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))

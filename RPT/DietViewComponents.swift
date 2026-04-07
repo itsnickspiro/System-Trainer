@@ -1041,6 +1041,8 @@ struct AddFoodView: View {
             profile.recordMeal(healthiness: food.mealHealthiness(for: goal))
         }
         DataManager.shared.autoCompleteNutritionQuests()
+        // Damage the weekly raid boss (only the Glutton King consumes this).
+        BossRaidService.shared.applyDamage(source: .meal, amount: 1)
         // Round-trip to Apple Health so macros + micros show up in the
         // Nutrition screen alongside data from other apps.
         let servingGrams = unit == .grams ? quantity : quantity * food.servingSize
@@ -1078,6 +1080,8 @@ struct AddFoodView: View {
             }
         }
         DataManager.shared.autoCompleteNutritionQuests()
+        // Damage the weekly raid boss (only the Glutton King consumes this).
+        BossRaidService.shared.applyDamage(source: .meal, amount: 1)
         dismiss()
     }
 }
@@ -1689,6 +1693,8 @@ struct QuickAddView: View {
             profile.recordMeal(healthiness: foodItem.mealHealthiness(for: goal))
         }
         DataManager.shared.autoCompleteNutritionQuests()
+        // Damage the weekly raid boss (only the Glutton King consumes this).
+        BossRaidService.shared.applyDamage(source: .meal, amount: 1)
         dismiss()
     }
 }
