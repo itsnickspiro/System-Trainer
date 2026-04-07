@@ -21,6 +21,7 @@ struct SettingsView: View {
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
     @State private var copiedPlayerID = false
     @State private var showingDietInfo = false
+    @State private var showingGuildView = false
 
     private var dietBinding: Binding<DietType> {
         Binding(
@@ -264,6 +265,35 @@ struct SettingsView: View {
                     Text("Logged foods that don't match your diet will show a warning before being added to your diary.")
                 }
 
+                // Guild Section
+                Section {
+                    Button {
+                        showingGuildView = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "shield.lefthalf.filled")
+                                .foregroundColor(.cyan)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(profiles.first?.guildName.isEmpty == false ? "Your Guild" : "Find or Create a Guild")
+                                if let name = profiles.first?.guildName, !name.isEmpty {
+                                    Text(name)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                } header: {
+                    Text("Guild")
+                } footer: {
+                    Text("Join a guild to fight weekly raid bosses with up to 11 other adventurers and split the rewards.")
+                }
+
                 // Health Integration Section
                 Section("Health Integration") {
                     HStack {
@@ -426,6 +456,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingCreditHistory) {
                 CreditHistoryView()
+            }
+            .sheet(isPresented: $showingGuildView) {
+                GuildView()
             }
             .sheet(isPresented: $showingDietInfo) {
                 DietInfoView()

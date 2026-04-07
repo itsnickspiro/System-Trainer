@@ -88,6 +88,10 @@ final class BossRaidService: ObservableObject {
             // Defer reward until the user explicitly claims it via the UI button.
         }
         try? modelContext?.save()
+
+        // Mirror the same damage to the guild raid (no-op if not in a guild).
+        // Guild raids accept any source — they aggregate everything.
+        Task { await GuildService.shared.contributeDamage(amount) }
     }
 
     /// User tapped Claim on a defeated boss.

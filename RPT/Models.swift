@@ -19,6 +19,16 @@ final class Profile {
     var lastCompletionDate: Date?
     var hardcoreResetDeadline: Date?
 
+    // MARK: - Guild membership cache
+    //
+    // Cached locally so the Home banner and the guild tab can render
+    // instantly without waiting on a network round-trip. The authoritative
+    // state lives in the Supabase guild-proxy / guild_members table — these
+    // fields are repopulated on every successful get_my_guild call.
+    var guildID: String = ""
+    var guildName: String = ""
+    var guildRole: String = ""   // "owner" | "officer" | "member" | ""
+
     // RPG Stats
     var health: Double = 80.0
     var energy: Double = 75.0
