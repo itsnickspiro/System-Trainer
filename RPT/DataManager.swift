@@ -109,6 +109,11 @@ final class DataManager: ObservableObject {
         if let context = modelContext {
             BossRaidService.shared.setContext(context)
         }
+
+        // Sync the player's guild membership + active guild raid from the
+        // backend on launch. The cached Profile.guildID / guildName fields
+        // get repopulated automatically.
+        Task { await GuildService.shared.refresh() }
     }
 
     /// Remove duplicate quests: for each calendar day, keep only one quest per title.

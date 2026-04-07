@@ -69,6 +69,10 @@ struct HomeView: View {
                     // for the current week.
                     BossRaidCard()
 
+                    // Guild raid summary — only renders if the player is in
+                    // a guild AND that guild has an active weekly raid.
+                    GuildBannerView()
+
                     // Rival head-to-head — only renders when the player
                     // has set a rival from the leaderboard.
                     RivalBannerView()
