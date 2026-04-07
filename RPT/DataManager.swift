@@ -188,13 +188,31 @@ final class DataManager: ObservableObject {
         saveLocalChanges()
     }
     
-    func addXPToProfile(_ xp: Int, source: String = "General") {
+    func addXPToProfile(_ xp: Int, source: String = "General", statTarget: String? = nil) {
         guard let profile = currentProfile else { return }
 
         // Apply active XP multipliers from equipped items and events
         let storeMultiplier = StoreService.shared.activeXPMultiplier
         let eventMultiplier = EventsService.shared.activeXPMultiplier
-        let scaledXP = xp > 0 ? Int(Double(xp) * storeMultiplier * eventMultiplier) : xp
+
+        // Class / archetype bonus: +10% XP on quests whose statTarget matches
+        // the player's chosen class. Warriors get a bonus on strength quests,
+        // Rangers on endurance, Monks on discipline, Sages on focus.
+        // Only applies to positive XP gains (penalties use no bonus).
+        let classBonus: Double
+        if xp > 0,
+           let target = statTarget,
+           !target.isEmpty,
+           profile.playerClass != .unselected,
+           profile.playerClass.bonusStatTarget == target.lowercased() {
+            classBonus = 1.10
+        } else {
+            classBonus = 1.0
+        }
+
+        let scaledXP = xp > 0
+            ? Int(Double(xp) * storeMultiplier * eventMultiplier * classBonus)
+            : xp
 
         let oldLevel = profile.level
         profile.addXP(scaledXP)
@@ -310,7 +328,7 @@ final class DataManager: ObservableObject {
         // Award XP (through multipliers) and register completion
         if let profile = currentProfile {
             let prevPassCount = profile.exemptionPassCount
-            addXPToProfile(quest.xpReward, source: "Quest")
+            addXPToProfile(quest.xpReward, source: "Quest", statTarget: quest.statTarget)
             profile.registerCompletion()
 
             // If registerCompletion awarded a streak pass, mirror it to InventoryItem

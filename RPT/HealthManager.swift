@@ -60,13 +60,27 @@ class HealthManager: ObservableObject {
         }
         
         do {
-            // Write types we log from the app
+            // Write types we log from the app — full nutrition coverage so
+            // logged meals round-trip into Apple Health's Nutrition screen.
             let writeTypes: Set<HKSampleType> = [
                 HKObjectType.workoutType(),
                 HKQuantityType(.bodyMass),
                 HKQuantityType(.dietaryWater),
                 HKQuantityType(.dietaryEnergyConsumed),
-                HKQuantityType(.dietaryProtein)
+                HKQuantityType(.dietaryProtein),
+                HKQuantityType(.dietaryCarbohydrates),
+                HKQuantityType(.dietaryFatTotal),
+                HKQuantityType(.dietaryFatSaturated),
+                HKQuantityType(.dietaryFiber),
+                HKQuantityType(.dietarySugar),
+                HKQuantityType(.dietarySodium),
+                HKQuantityType(.dietaryCholesterol),
+                HKQuantityType(.dietaryPotassium),
+                HKQuantityType(.dietaryCalcium),
+                HKQuantityType(.dietaryIron),
+                HKQuantityType(.dietaryVitaminC),
+                HKQuantityType(.dietaryVitaminD),
+                HKCategoryType(.mindfulSession)
             ]
             try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
             // requestAuthorization succeeds even when user denies all types.
@@ -346,6 +360,48 @@ extension HealthManager {
         let qty = HKQuantity(unit: .kilocalorie(), doubleValue: kcal)
         let sample = HKQuantitySample(type: type, quantity: qty, start: date, end: date)
         try? await healthStore.save(sample)
+    }
+
+    /// Save a full nutrition sample for a single logged food item to Apple
+    /// Health. Writes every macro and micro the FoodItem has non-zero data
+    /// for, scaled by the actual serving weight. Call this from any meal
+    /// logging site so entries show up in Apple Health's Nutrition screen
+    /// alongside data from other apps.
+    func saveMealSample(foodItem: FoodItem, servingGrams: Double, date: Date = Date()) async {
+        guard isAuthorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard servingGrams > 0 else { return }
+        let factor = servingGrams / 100.0
+
+        // (HealthKit type, value, unit) tuples. Only non-zero values are written.
+        let entries: [(HKQuantityType, Double, HKUnit)] = [
+            (HKQuantityType(.dietaryEnergyConsumed),  foodItem.caloriesPer100g * factor, .kilocalorie()),
+            (HKQuantityType(.dietaryProtein),         foodItem.protein * factor,          .gram()),
+            (HKQuantityType(.dietaryCarbohydrates),   foodItem.carbohydrates * factor,    .gram()),
+            (HKQuantityType(.dietaryFatTotal),        foodItem.fat * factor,              .gram()),
+            (HKQuantityType(.dietaryFiber),           foodItem.fiber * factor,            .gram()),
+            (HKQuantityType(.dietarySugar),           foodItem.sugar * factor,            .gram()),
+            (HKQuantityType(.dietaryFatSaturated),    foodItem.saturatedFatG * factor,    .gram()),
+            (HKQuantityType(.dietaryCholesterol),     foodItem.cholesterolMg * factor,    .gramUnit(with: .milli)),
+            (HKQuantityType(.dietarySodium),          foodItem.sodium * factor,           .gramUnit(with: .milli)),
+            (HKQuantityType(.dietaryPotassium),       foodItem.potassiumMg * factor,      .gramUnit(with: .milli)),
+            (HKQuantityType(.dietaryCalcium),         foodItem.calciumMg * factor,        .gramUnit(with: .milli)),
+            (HKQuantityType(.dietaryIron),            foodItem.ironMg * factor,           .gramUnit(with: .milli)),
+            (HKQuantityType(.dietaryVitaminC),        foodItem.vitaminCMg * factor,       .gramUnit(with: .milli)),
+            (HKQuantityType(.dietaryVitaminD),        foodItem.vitaminDMcg * factor,      .gramUnit(with: .micro))
+        ]
+
+        let samples: [HKQuantitySample] = entries.compactMap { (type, value, unit) in
+            guard value > 0 else { return nil }
+            return HKQuantitySample(
+                type: type,
+                quantity: HKQuantity(unit: unit, doubleValue: value),
+                start: date,
+                end: date
+            )
+        }
+
+        guard !samples.isEmpty else { return }
+        try? await healthStore.save(samples)
     }
 
     private func hkActivityType(for type: WorkoutType) -> HKWorkoutActivityType {
