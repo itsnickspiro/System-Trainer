@@ -227,6 +227,20 @@ final class DataManager: ObservableObject {
 
     private func handleLevelUp(from oldLevel: Int, to newLevel: Int) {
         print("Level up! \(oldLevel) -> \(newLevel)")
+
+        // Isekai-style milestone notifications at key levels. The manager
+        // queues them if multiple fire at once, so crossing levels 5 → 10 in
+        // one batch shows both in sequence.
+        if oldLevel < 5 && newLevel >= 5 {
+            SystemNotificationManager.shared.present(SystemNotificationManager.level5)
+        }
+        if oldLevel < 10 && newLevel >= 10 {
+            SystemNotificationManager.shared.present(SystemNotificationManager.level10)
+        }
+        if oldLevel < 25 && newLevel >= 25 {
+            SystemNotificationManager.shared.present(SystemNotificationManager.level25)
+        }
+
         // Sync progress to cloud, award level-up GP, evaluate achievements, and update leaderboard
         Task {
             await PlayerProfileService.shared.syncProfile()
@@ -289,6 +303,13 @@ final class DataManager: ObservableObject {
                 }
                 UserDefaults.standard.set(true, forKey: "\(m.key)_\(streak)")
             }
+
+            // Isekai-style system notification at streak milestones
+            if m.threshold == 7 {
+                SystemNotificationManager.shared.present(SystemNotificationManager.firstSevenDayStreak)
+            } else if m.threshold == 30 {
+                SystemNotificationManager.shared.present(SystemNotificationManager.firstThirtyDayStreak)
+            }
         }
     }
 
@@ -344,8 +365,14 @@ final class DataManager: ObservableObject {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
 
         // Increment the aggregate quests-completed counter for achievement evaluation
-        let questCount = UserDefaults.standard.integer(forKey: "rpt_total_quests_completed") + 1
+        let prevQuestCount = UserDefaults.standard.integer(forKey: "rpt_total_quests_completed")
+        let questCount = prevQuestCount + 1
         UserDefaults.standard.set(questCount, forKey: "rpt_total_quests_completed")
+
+        // First quest ever — fire an isekai-style system notification
+        if prevQuestCount == 0 {
+            SystemNotificationManager.shared.present(SystemNotificationManager.firstQuestComplete)
+        }
 
         saveLocalChanges()
         refreshTodaysQuests()

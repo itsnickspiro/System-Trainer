@@ -65,8 +65,12 @@ struct HomeView: View {
                     }
 
                     // Quests to complete
+                    // Weekly AI review briefing — renders only on Mondays
+                    // and only until the user taps the dismiss button.
+                    WeeklyReviewCard()
+
                     questSummaryCard
-                    
+
                     Spacer(minLength: 50)
                 }
                 .padding()
@@ -93,6 +97,19 @@ struct HomeView: View {
                 .transition(.opacity)
                 .zIndex(200)
             }
+        }
+        // Isekai-style system notification overlay (fires on milestones:
+        // first quest, first workout, level 5/10/25, first 7-day streak, etc.)
+        .overlay { SystemSkillBannerView() }
+        // First-run coach-mark tour — renders only if the user has never
+        // completed it, starts automatically when Home first appears.
+        .overlay { CoachMarkOverlay() }
+        .task {
+            // Kick off the weekly AI review generation and the first-run tour
+            // check once the view mounts. Both are idempotent and safe to
+            // re-run on every appearance.
+            CoachMarkTourManager.shared.startIfNeeded()
+            await WeeklyReviewService.shared.refreshIfNeeded(context: context)
         }
         .onReceive(timer) { t in
             now = t
