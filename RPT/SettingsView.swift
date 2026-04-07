@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var copiedPlayerID = false
     @State private var showingDietInfo = false
     @State private var showingGuildView = false
+    @State private var showingBugReport = false
 
     private var dietBinding: Binding<DietType> {
         Binding(
@@ -394,6 +395,28 @@ struct SettingsView: View {
                     }
                 }
                 
+                // Help & Feedback Section
+                Section {
+                    Button {
+                        showingBugReport = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "ant.circle.fill")
+                                .foregroundColor(.cyan)
+                            Text("Report a Bug")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                } header: {
+                    Text("Help & Feedback")
+                } footer: {
+                    Text("Reports go straight to the System Trainer team and are reviewed automatically every few hours.")
+                }
+
                 // About Section
                 Section("About") {
                     HStack {
@@ -459,6 +482,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingGuildView) {
                 GuildView()
+            }
+            .sheet(isPresented: $showingBugReport) {
+                BugReportView()
             }
             .sheet(isPresented: $showingDietInfo) {
                 DietInfoView()
