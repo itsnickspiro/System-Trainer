@@ -204,18 +204,39 @@ final class PlayerProfileService: ObservableObject {
     /// Delete Account (App Store Guideline 5.1.1(v)). Callers should pass
     /// `AppleAuthService.shared.currentAuthorizationCode` — nil on re-sign-ins
     /// where the credential came from Keychain instead of a fresh flow.
+    /// Result of a SIWA link attempt. Distinguishes "fully recovered an
+    /// existing player who has finished onboarding" from "linked but the
+    /// remote profile is empty / unfinished" from "the call failed entirely".
+    /// Onboarding navigation must use this signal — NOT the local SwiftData
+    /// Profile, which always has hardcoded defaults (age=25, height=170,
+    /// weight=70) the moment ensureProfileExists() runs and therefore
+    /// always looks "complete" to a naive > 0 check.
+    enum LinkAppleIDOutcome {
+        /// Server returned a profile that has finished onboarding before
+        /// (onboarding_completed == true). Caller should skip onboarding.
+        case recoveredCompleted
+        /// Server linked successfully but the remote profile is brand new
+        /// or partially filled. Caller should run the full onboarding flow.
+        case linkedNewOrIncomplete
+        /// The link attempt failed (CloudKit id not resolved, network error,
+        /// server rejected the request). Caller should still allow onboarding
+        /// to proceed — the SIWA credential is valid in Keychain and
+        /// PlayerProfileService.refresh() will retry on the next launch.
+        case failed
+    }
+
     func linkAppleID(
         appleUserID: String,
         displayName: String?,
         authorizationCode: String? = nil
-    ) async -> Bool {
+    ) async -> LinkAppleIDOutcome {
         guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else {
             print("[PlayerProfileService] linkAppleID skipped — CloudKit user id not yet resolved")
-            return false
+            return .failed
         }
         guard !appleUserID.isEmpty else {
             print("[PlayerProfileService] linkAppleID skipped — empty appleUserID")
-            return false
+            return .failed
         }
 
         var body: [String: Any] = [
@@ -244,7 +265,7 @@ final class PlayerProfileService: ObservableObject {
             }
             let response = try JSONDecoder().decode(LinkResponse.self, from: data)
             guard response.success == true, let payload = response.profile else {
-                return false
+                return .failed
             }
 
             // Apply the returned profile to the local SwiftData Profile so the
@@ -255,10 +276,18 @@ final class PlayerProfileService: ObservableObject {
             // user is signed in even before AppleAuthService re-checks.
             UserDefaults.standard.set(appleUserID, forKey: "rpt_linked_apple_user_id")
 
-            return true
+            // The server is the only authoritative source for "has this
+            // player finished onboarding before". The local Profile model has
+            // CloudKit-required defaults that make every fresh row look like
+            // a complete profile, so we MUST gate onboarding-skip on the
+            // server flag, never on local SwiftData state.
+            if payload.onboarding_completed == true {
+                return .recoveredCompleted
+            }
+            return .linkedNewOrIncomplete
         } catch {
             print("[PlayerProfileService] linkAppleID failed: \(error.localizedDescription)")
-            return false
+            return .failed
         }
     }
 
