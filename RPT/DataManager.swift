@@ -46,6 +46,49 @@ final class DataManager: ObservableObject {
         startPeriodicSync()
     }
     
+    // MARK: - Destructive
+    /// Wipes every SwiftData model instance the app knows about. Used by the
+    /// "Delete Account" flow in Settings. Cloud (Supabase) deletion is handled
+    /// separately by the player-proxy `delete_account` action; CloudKit data
+    /// will replicate the local deletes through the private database sync.
+    @MainActor
+    func deleteEverything() {
+        guard let context = modelContext else { return }
+        let typesToDelete: [any PersistentModel.Type] = [
+            Profile.self,
+            Quest.self,
+            FoodItem.self,
+            FoodEntry.self,
+            CustomMeal.self,
+            CustomMealItem.self,
+            ExerciseItem.self,
+            WorkoutSession.self,
+            ExerciseSet.self,
+            ActiveRoutine.self,
+            PersonalRecord.self,
+            PatrolRoute.self,
+            InventoryItem.self,
+            CustomWorkoutPlan.self,
+            Achievement.self,
+            BodyMeasurement.self,
+            PlannedMeal.self
+        ]
+        for type in typesToDelete {
+            do {
+                try context.delete(model: type)
+            } catch {
+                print("[DataManager] Failed to delete all \(type): \(error.localizedDescription)")
+            }
+        }
+        do {
+            try context.save()
+        } catch {
+            print("[DataManager] Failed to save after deleteEverything: \(error.localizedDescription)")
+        }
+        currentProfile = nil
+        todaysQuests = []
+    }
+
     // MARK: - Setup
     func configure(with context: ModelContext) {
         self.modelContext = context

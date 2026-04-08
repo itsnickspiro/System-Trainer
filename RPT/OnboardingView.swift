@@ -53,9 +53,9 @@ struct OnboardingView: View {
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 12  // logical progress denominator (1–11 visible + Ready)
-    private let skippableSteps: Set<Int> = [9, 10, 11]  // Health, Notifs, ATT are optional
-    private let noProgressBarSteps: Set<Int> = [0, 12]
+    private let totalProgressSteps = 13  // logical progress denominator (1–12 visible + Ready)
+    private let skippableSteps: Set<Int> = [11, 12]  // Notifs + ATT are optional; HealthKit (10) and Avatar (9) are required
+    private let noProgressBarSteps: Set<Int> = [0, 13]
 
     var body: some View {
         ZStack {
@@ -188,10 +188,11 @@ struct OnboardingView: View {
                     profileProvider: { ensureProfile() },
                     goalSurveyCompleted: $goalSurveyCompleted
                  )
-        case 9:  HealthStepView(healthManager: healthManager)
-        case 10: NotificationsStepView(notificationManager: notificationManager)
-        case 11: ATTPromptStepView()
-        case 12: ReadyStepView(
+        case 9:  AvatarPickerStepView(selectedAvatarKey: $selectedAvatarKey)
+        case 10: HealthStepView(healthManager: healthManager)
+        case 11: NotificationsStepView(notificationManager: notificationManager)
+        case 12: ATTPromptStepView()
+        case 13: ReadyStepView(
                     name: profileName,
                     goal: selectedGoal,
                     avatarKey: selectedAvatarKey ?? "avatar_default"
@@ -205,7 +206,7 @@ struct OnboardingView: View {
     private var navigationButtons: some View {
         VStack(spacing: 12) {
             // Continue / advance button
-            Button(currentStep == 11 ? "Complete Setup" : "Continue") {
+            Button(currentStep == 12 ? "Complete Setup" : "Continue") {
                 handleAdvance()
             }
             .buttonStyle(OnboardingPrimaryButtonStyle())
@@ -237,6 +238,7 @@ struct OnboardingView: View {
         switch currentStep {
         case 1: return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
         case 8: return goalSurveyCompleted
+        case 9: return selectedAvatarKey != nil
         default: return true
         }
     }
@@ -257,11 +259,46 @@ struct OnboardingView: View {
             withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
             return
         }
-        if currentStep == 11 {
-            // Final setup step → complete
-            completeOnboarding()
+
+        // Permission steps: fire the system prompt before advancing so the
+        // user always sees the standard iOS dialog when they tap Continue.
+        // Each request is a no-op if the status has already been determined.
+        switch currentStep {
+        case 9:
+            // Avatar picker (required). Persist selection before advancing.
+            if let key = selectedAvatarKey {
+                Task { await AvatarService.shared.setAvatar(key: key) }
+            }
+            withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(9) }
             return
+        case 10:
+            // HealthKit (required). If the user denies, we still advance —
+            // they'll see the inline "Open Settings" path on next entry.
+            Task { @MainActor in
+                if !healthManager.isAuthorized {
+                    await healthManager.requestAuthorization()
+                }
+                withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(10) }
+            }
+            return
+        case 11:
+            Task { @MainActor in
+                if notificationManager.authorizationStatus == .notDetermined {
+                    await notificationManager.requestAuthorization()
+                }
+                withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(11) }
+            }
+            return
+        case 12:
+            Task { @MainActor in
+                await AppTrackingHelper.requestIfNeeded()
+                completeOnboarding()
+            }
+            return
+        default:
+            break
         }
+
         withAnimation(.easeInOut(duration: 0.35)) {
             advanceFrom(currentStep)
         }
@@ -1050,7 +1087,66 @@ private struct StatField: View {
     }
 }
 
-// MARK: - Step 5: Avatar Selection
+// MARK: - Step 9: Avatar Picker (Onboarding)
+
+private struct AvatarPickerStepView: View {
+    @Binding var selectedAvatarKey: String?
+    @ObservedObject private var avatarService = AvatarService.shared
+
+    private var avatars: [AvatarTemplate] {
+        avatarService.catalog
+    }
+
+    var body: some View {
+        OnboardingStepShell(
+            icon: "person.crop.circle.badge.checkmark",
+            iconColor: .cyan,
+            title: "Choose your avatar",
+            subtitle: "This represents you across the app — on Home, in guilds, on the leaderboard.",
+            isSkippable: false
+        ) {
+            VStack(spacing: 16) {
+                if avatars.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()),
+                                        GridItem(.flexible()), GridItem(.flexible())],
+                              spacing: 12) {
+                        ForEach(0..<8, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color.white.opacity(0.06))
+                                .frame(height: 70)
+                        }
+                    }
+                    Text("Loading avatars…")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .tracking(1)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()),
+                                        GridItem(.flexible()), GridItem(.flexible())],
+                              spacing: 12) {
+                        ForEach(avatars) { avatar in
+                            AvatarCell(avatar: avatar,
+                                       isSelected: selectedAvatarKey == avatar.key) {
+                                selectedAvatarKey = avatar.key
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            // Pre-fill if already equipped
+            if selectedAvatarKey == nil, let current = avatarService.current {
+                selectedAvatarKey = current.key
+            }
+            if avatars.isEmpty {
+                Task { await avatarService.refresh() }
+            }
+        }
+    }
+}
+
+// MARK: - Step 5: Avatar Selection (legacy unused)
 
 private struct AvatarStepView: View {
     @Binding var selectedAvatarKey: String?
@@ -1516,29 +1612,48 @@ private struct GPExplainerStepView: View {
 
 private struct HealthStepView: View {
     @ObservedObject var healthManager: HealthManager
+    @State private var showDeniedHint = false
+
+    private let readItems: [String] = [
+        "Steps",
+        "Sleep",
+        "Heart rate",
+        "Workouts",
+        "Body weight",
+        "Body fat percentage",
+        "Mindful sessions"
+    ]
+
+    private let writeItems: [String] = [
+        "Meals you log in the app",
+        "Workouts you complete in the app",
+        "Water intake",
+        "Body weight changes"
+    ]
 
     var body: some View {
         OnboardingStepShell(
-            icon: "sensor.tag.radiowaves.forward.fill",
+            icon: "heart.text.square.fill",
             iconColor: .red,
             title: "Connect Apple Health",
-            subtitle: "Every step, rep, and hour of sleep earns real XP. Quests auto-complete when your body does the work.",
-            isSkippable: true
+            subtitle: "Required to power your stats and personalize daily quests.",
+            isSkippable: false
         ) {
-            VStack(spacing: 14) {
+            VStack(spacing: 18) {
                 if healthManager.isAuthorized {
                     HStack(spacing: 10) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                             .font(.title3)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Training Grid Online")
+                            Text("Apple Health Connected")
                                 .font(.system(size: 15, weight: .bold))
                                 .foregroundColor(.green)
-                            Text("Your biometrics are feeding live data into the quest engine.")
+                            Text("Your biometrics are feeding the quest engine.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
+                        Spacer()
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1548,37 +1663,82 @@ private struct HealthStepView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.green.opacity(0.3), lineWidth: 1))
                     )
                 } else {
-                    VStack(spacing: 10) {
-                        ForEach([
-                            ("bolt.fill",        "yellow",  "Unlock passive XP gains"),
-                            ("figure.walk",      "cyan",    "Auto-complete step & sleep quests"),
-                            ("flame.fill",       "orange",  "Real calorie burn drives real rewards")
-                        ], id: \.2) { icon, _, label in
-                            HStack(spacing: 10) {
-                                Image(systemName: icon)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.yellow)
-                                    .frame(width: 20)
-                                Text(label)
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.white)
-                                Spacer()
+                    healthSection(header: "【WHAT WE READ】", items: readItems, accent: .cyan)
+                    healthSection(header: "【WHAT WE WRITE】", items: writeItems, accent: .orange)
+
+                    Button {
+                        Task { @MainActor in
+                            await healthManager.requestAuthorization()
+                            if !healthManager.isAuthorized {
+                                showDeniedHint = true
                             }
                         }
-                    }
-
-                    Text("Your data stays private — System Trainer only reads, never writes to Apple Health.")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.4))
-                        .multilineTextAlignment(.center)
-
-                    Button("Sync the Grid") {
-                        Task { await healthManager.requestAuthorization() }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "heart.fill")
+                            Text("Connect Apple Health")
+                        }
                     }
                     .buttonStyle(OnboardingPrimaryButtonStyle())
                     .padding(.top, 4)
+
+                    if showDeniedHint {
+                        VStack(spacing: 8) {
+                            Text("Permission denied — open Settings to enable.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("Open Settings") {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundColor(.cyan)
+                        }
+                    }
+
+                    Text("We never share your health data. Everything stays on your device or in your private CloudKit container.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 4)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func healthSection(header: String, items: [String], accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(header)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(accent.opacity(0.8))
+                .tracking(2)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(items, id: \.self) { item in
+                    HStack(spacing: 10) {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 5))
+                            .foregroundColor(accent.opacity(0.7))
+                        Text(item)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white.opacity(0.85))
+                        Spacer()
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(accent.opacity(0.25), lineWidth: 1)
+                    )
+            )
         }
     }
 }
@@ -1772,7 +1932,7 @@ private struct ReadyStepView: View {
             //  through the "Enter the System" button below.)
             VStack {
                 Spacer()
-                // This step is step 11, which is in noProgressBarSteps,
+                // This step is step 13, which is in noProgressBarSteps,
                 // so we render the button inline here.
                 EmptyView()
                     .padding(.bottom, 40)

@@ -226,6 +226,77 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, linked: true, created: true, profile: created }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // DELETE ACCOUNT — irreversibly wipes the user's data from every table
+    // that has a cloudkit_user_id column. Optionally also nukes rows keyed
+    // by apple_user_id for defense in depth. Requires service role (already
+    // in use above) so it bypasses RLS.
+    if (action === "delete_account") {
+      const appleUserId: string = body.apple_user_id ?? "";
+      const deletedFrom: string[] = [];
+
+      // Tables that have a cloudkit_user_id column.
+      const ckTables = [
+        "player_profiles",
+        "leaderboard",
+        "player_inventory",
+        "credit_transactions",
+        "player_backups",
+        "event_participants",
+        "guild_members",
+        "guild_raid_contributions",
+      ];
+
+      for (const table of ckTables) {
+        const { data, error } = await supabase
+          .from(table)
+          .delete({ count: "exact" })
+          .eq("cloudkit_user_id", cloudkitUserId)
+          .select("cloudkit_user_id");
+        if (error) {
+          console.error(`delete_account: failed to delete from ${table}:`, error);
+          continue;
+        }
+        if (data && data.length > 0) deletedFrom.push(table);
+      }
+
+      // friend_connections has TWO columns referencing the user
+      try {
+        const { data: f1 } = await supabase
+          .from("friend_connections")
+          .delete()
+          .eq("cloudkit_user_id", cloudkitUserId)
+          .select("cloudkit_user_id");
+        const { data: f2 } = await supabase
+          .from("friend_connections")
+          .delete()
+          .eq("friend_cloudkit_user_id", cloudkitUserId)
+          .select("cloudkit_user_id");
+        if ((f1 && f1.length > 0) || (f2 && f2.length > 0)) {
+          deletedFrom.push("friend_connections");
+        }
+      } catch (e) {
+        console.error("delete_account: friend_connections delete failed:", e);
+      }
+
+      // Defense in depth: also wipe by apple_user_id if provided
+      if (appleUserId) {
+        try {
+          const { data: appleRows } = await supabase
+            .from("player_profiles")
+            .delete()
+            .eq("apple_user_id", appleUserId)
+            .select("apple_user_id");
+          if (appleRows && appleRows.length > 0 && !deletedFrom.includes("player_profiles")) {
+            deletedFrom.push("player_profiles");
+          }
+        } catch (e) {
+          console.error("delete_account: apple_user_id wipe failed:", e);
+        }
+      }
+
+      return new Response(JSON.stringify({ success: true, deleted_from: deletedFrom }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err) {

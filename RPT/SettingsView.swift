@@ -8,7 +8,6 @@ struct SettingsView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @State private var showingHealthSettings = false
     @State private var showingProfileEditor = false
-    @State private var showingResetConfirmation = false
     @State private var showingBodyMetrics = false
     @State private var showingAchievements = false
     @State private var showingStore = false
@@ -23,6 +22,13 @@ struct SettingsView: View {
     @State private var showingDietInfo = false
     @State private var showingGuildView = false
     @State private var showingBugReport = false
+    @ObservedObject private var avatarService = AvatarService.shared
+    @State private var showingSignOutConfirm = false
+    @State private var showingDeleteAccountConfirm = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountError: String?
+    @State private var showingDeleteAccountError = false
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     private var dietBinding: Binding<DietType> {
         Binding(
@@ -46,26 +52,42 @@ struct SettingsView: View {
                 // Account Section (Sign in with Apple)
                 Section {
                     if appleAuth.isSignedIn {
-                        HStack(spacing: 12) {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(.cyan)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(appleAuth.currentDisplayName ?? "Signed in with Apple")
-                                    .font(.subheadline.weight(.semibold))
-                                if let email = appleAuth.currentEmail {
+                        HStack(spacing: 14) {
+                            // Avatar circle — show the in-app avatar the user picked
+                            // during onboarding. Falls back to an SF Symbol if the
+                            // avatar catalog hasn't loaded yet.
+                            if let template = avatarService.current {
+                                AvatarImageView(key: template.key, size: 60)
+                                    .overlay(
+                                        Circle().stroke(template.color, lineWidth: 2)
+                                    )
+                            } else {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.cyan)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(appleAuth.currentDisplayName
+                                     ?? dataManager.currentProfile?.name
+                                     ?? "Adventurer")
+                                    .font(.title3.weight(.bold))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                if let email = appleAuth.currentEmail, !email.isEmpty {
                                     Text(email)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                } else {
+                                    Text("Apple ID linked")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
                             }
                             Spacer()
                         }
-                        Button(role: .destructive) {
-                            appleAuth.signOut()
-                        } label: {
-                            Label("Sign out of Apple", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
+                        .padding(.vertical, 6)
                     } else {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Sign in with Apple to back up your profile and recover it on any other device.")
@@ -376,15 +398,6 @@ struct SettingsView: View {
                     }
                     
                     Button(role: .destructive) {
-                        showingResetConfirmation = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "trash")
-                            Text("Reset All Data")
-                        }
-                    }
-
-                    Button(role: .destructive) {
                         UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
                         showingRestartOnboardingAlert = true
                     } label: {
@@ -457,6 +470,41 @@ struct SettingsView: View {
                         .foregroundColor(.primary)
                     }
                 }
+
+                // Danger Zone — Sign Out + Delete Account
+                Section {
+                    if appleAuth.isSignedIn {
+                        Button(role: .destructive) {
+                            showingSignOutConfirm = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                Text("Sign Out")
+                            }
+                        }
+                        .disabled(isDeletingAccount)
+                    }
+
+                    Button(role: .destructive) {
+                        showingDeleteAccountConfirm = true
+                    } label: {
+                        HStack {
+                            if isDeletingAccount {
+                                ProgressView()
+                                    .padding(.trailing, 4)
+                                Text("Deleting account…")
+                            } else {
+                                Image(systemName: "trash.fill")
+                                Text("Delete Account")
+                            }
+                        }
+                    }
+                    .disabled(isDeletingAccount)
+                } header: {
+                    Text("Danger Zone")
+                } footer: {
+                    Text("Sign Out leaves your data safely backed up so you can sign back in later. Delete Account permanently wipes all of your progress from the cloud and this device — this cannot be undone.")
+                }
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showingProfileEditor) {
@@ -489,17 +537,29 @@ struct SettingsView: View {
             .sheet(isPresented: $showingDietInfo) {
                 DietInfoView()
             }
-            .confirmationDialog(
-                "Reset All Data",
-                isPresented: $showingResetConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Reset Everything", role: .destructive) {
-                    resetAllData()
+            .alert("Sign out of Apple?", isPresented: $showingSignOutConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Sign Out", role: .destructive) {
+                    appleAuth.signOut()
+                }
+            } message: {
+                Text("Your data stays safe and you can sign back in any time on this or any other device.")
+            }
+            .alert("Delete your account?", isPresented: $showingDeleteAccountConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete Account", role: .destructive) {
+                    Task { await performDeleteAccount() }
+                }
+            } message: {
+                Text("This wipes ALL of your progress from the cloud AND this device. This cannot be undone.")
+            }
+            .alert("Delete Failed", isPresented: $showingDeleteAccountError) {
+                Button("Retry") {
+                    Task { await performDeleteAccount() }
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will permanently delete all your progress, quests, and settings. This action cannot be undone.")
+                Text(deleteAccountError ?? "Something went wrong while deleting your account. Please try again.")
             }
             .alert("Onboarding Reset", isPresented: $showingRestartOnboardingAlert) {
                 Button("OK", role: .cancel) { }
@@ -515,33 +575,77 @@ struct SettingsView: View {
         }
     }
     
-    private func resetAllData() {
-        do {
-            // Delete all SwiftData model instances
-            try context.delete(model: Profile.self)
-            try context.delete(model: Quest.self)
-            try context.delete(model: FoodEntry.self)
-            try context.delete(model: FoodItem.self)
-            try context.delete(model: CustomMeal.self)
-            try context.delete(model: CustomMealItem.self)
-            try context.delete(model: WorkoutSession.self)
-            try context.delete(model: ExerciseSet.self)
-            try context.delete(model: ExerciseItem.self)
-            try context.delete(model: ActiveRoutine.self)
-            try context.delete(model: PersonalRecord.self)
-            try context.delete(model: PatrolRoute.self)
-            try context.delete(model: InventoryItem.self)
-            try context.delete(model: Achievement.self)
-            try context.delete(model: BodyMeasurement.self)
-            try context.delete(model: PlannedMeal.self)
-            try context.delete(model: CustomWorkoutPlan.self)
-            try context.save()
+    // MARK: - Delete Account flow
+    /// Calls the player-proxy `delete_account` action to wipe Supabase rows,
+    /// then nukes the local SwiftData store, signs out of Apple, clears the
+    /// onboarding flag, and routes the user back to onboarding.
+    @MainActor
+    private func performDeleteAccount() async {
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
 
-            // Clear onboarding flag so the user is sent back to setup
-            UserDefaults.standard.removeObject(forKey: "hasCompletedOnboarding")
+        let cloudkitUserID = LeaderboardService.shared.currentUserID ?? ""
+        let appleUserID = AppleAuthService.shared.currentAppleUserID ?? ""
+
+        guard !cloudkitUserID.isEmpty else {
+            deleteAccountError = "Could not resolve your CloudKit identity. Please try again in a moment."
+            showingDeleteAccountError = true
+            return
+        }
+
+        // Build the same kind of request the rest of the app uses against
+        // Supabase Edge Functions: anon key as Bearer + apikey, plus the
+        // shared app secret header.
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/player-proxy") else {
+            deleteAccountError = "Invalid backend URL."
+            showingDeleteAccountError = true
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(Secrets.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue(Secrets.appSecret, forHTTPHeaderField: "x-app-secret")
+
+        let body: [String: Any] = [
+            "action": "delete_account",
+            "cloudkit_user_id": cloudkitUserID,
+            "apple_user_id": appleUserID
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                let serverMsg = String(data: data, encoding: .utf8) ?? "Unknown server error"
+                deleteAccountError = "Server refused the delete request: \(serverMsg)"
+                showingDeleteAccountError = true
+                return
+            }
+
+            // Optional sanity check on the JSON envelope
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let success = json["success"] as? Bool, !success {
+                let msg = json["error"] as? String ?? "Unknown error"
+                deleteAccountError = "Delete failed: \(msg)"
+                showingDeleteAccountError = true
+                return
+            }
+
+            // Cloud delete succeeded — nuke local state in order:
+            //  1. Local SwiftData (everything the user has on this device)
+            //  2. Apple Keychain credential
+            //  3. Onboarding flag (sends app back to welcome screen)
+            DataManager.shared.deleteEverything()
+            AppleAuthService.shared.signOut()
+            UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
             UserDefaults.standard.removeObject(forKey: "userProfileName")
+            hasCompletedOnboarding = false
         } catch {
-            print("Failed to reset all data: \(error)")
+            deleteAccountError = error.localizedDescription
+            showingDeleteAccountError = true
         }
     }
 }
