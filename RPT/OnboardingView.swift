@@ -58,6 +58,14 @@ struct OnboardingView: View {
     /// two concurrent permission requests / step advances.
     @State private var isAdvancing: Bool = false
 
+    /// Direction of the most recent step transition. Drives the slide
+    /// animation so the back button visually moves backward (new step
+    /// enters from the leading edge) instead of looking like a forward
+    /// advance. Must be set BEFORE mutating currentStep inside the same
+    /// withAnimation block so SwiftUI captures the correct edges when it
+    /// computes the transition.
+    @State private var navigatingBackward: Bool = false
+
     // ── Services ──────────────────────────────────────────────────────────────
     @StateObject private var healthManager       = HealthManager()
     @StateObject private var notificationManager = NotificationManager.shared
@@ -81,11 +89,14 @@ struct OnboardingView: View {
                         .transition(.opacity)
                 }
 
-                // Step content
+                // Step content. The slide direction flips based on
+                // navigatingBackward so the back button feels like going
+                // backward (new content enters from the left) and Continue
+                // feels like going forward (new content enters from the right).
                 stepContent
                     .transition(.asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
+                        insertion: .move(edge: navigatingBackward ? .leading : .trailing).combined(with: .opacity),
+                        removal: .move(edge: navigatingBackward ? .trailing : .leading).combined(with: .opacity)
                     ))
                     .id(currentStep)
 
@@ -108,7 +119,11 @@ struct OnboardingView: View {
             HStack {
                 // Back chevron
                 Button {
+                    // Flag MUST be set inside the same withAnimation block
+                    // (and before currentStep mutates) so SwiftUI captures
+                    // the reversed transition edges for this animation.
                     withAnimation(.easeInOut(duration: 0.35)) {
+                        navigatingBackward = true
                         currentStep = max(1, currentStep - 1)
                     }
                 } label: {
@@ -172,7 +187,10 @@ struct OnboardingView: View {
                              selectedGender = p.gender
                              selectedGoal   = p.fitnessGoal
                          }
-                         withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
+                         withAnimation(.easeInOut(duration: 0.35)) {
+                             navigatingBackward = false
+                             currentStep = 1
+                         }
                      }
                  )
         case 1:  NameStepView(profileName: $profileName)
@@ -264,6 +282,11 @@ struct OnboardingView: View {
         if next == 8 && !isBuildingCustomPlan {
             next = 9
         }
+        // Reset the back-flag so the slide animation runs forward.
+        // All forward-advance paths funnel through here OR through the
+        // two BootStep→Name handoffs (currentStep = 1) which set this
+        // explicitly themselves.
+        navigatingBackward = false
         currentStep = next
     }
 
@@ -275,7 +298,10 @@ struct OnboardingView: View {
 
         if currentStep == 0 {
             // Boot → Name
-            withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
+            withAnimation(.easeInOut(duration: 0.35)) {
+                navigatingBackward = false
+                currentStep = 1
+            }
             return
         }
 
