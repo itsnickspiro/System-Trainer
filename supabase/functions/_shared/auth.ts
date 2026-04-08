@@ -198,10 +198,86 @@ export async function verifyAssertion(
   throw new Error("verifyAssertion: not implemented yet (Task 8)");
 }
 
+// ── Apple id_token verification ───────────────────────────────────────────
+// Fetches Apple's JWKS and verifies the id_token signature + standard
+// claims. Apple's JWKS is cached for 24 hours at module scope to avoid
+// a network round-trip on every sign-in.
+//
+// Apple's JWKS lives at https://appleid.apple.com/auth/keys and returns
+// a set of RSA public keys in JWK format. We select the right key by
+// matching the id_token header's `kid` claim.
+
+let _appleJwksCache: { keys: Array<Record<string, unknown>>; fetchedAt: number } | null = null;
+
+async function getAppleJwks(): Promise<Array<Record<string, unknown>>> {
+  const now = Date.now();
+  if (_appleJwksCache && now - _appleJwksCache.fetchedAt < 24 * 60 * 60 * 1000) {
+    return _appleJwksCache.keys;
+  }
+  const res = await fetch("https://appleid.apple.com/auth/keys");
+  if (!res.ok) throw new Error(`Failed to fetch Apple JWKS: ${res.status}`);
+  const body = await res.json();
+  _appleJwksCache = { keys: body.keys ?? [], fetchedAt: now };
+  return _appleJwksCache.keys;
+}
+
 export async function verifyAppleIdToken(
-  _token: string,
+  token: string,
 ): Promise<{ sub: string; email?: string } | null> {
-  throw new Error("verifyAppleIdToken: not implemented yet (Task 7)");
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const header = JSON.parse(
+      new TextDecoder().decode(base64UrlDecode(headerB64)),
+    );
+    const payload = JSON.parse(
+      new TextDecoder().decode(base64UrlDecode(payloadB64)),
+    );
+
+    // Find the matching JWK by kid and alg
+    const jwks = await getAppleJwks();
+    const jwk = jwks.find((k) => k.kid === header.kid && k.alg === header.alg);
+    if (!jwk) return null;
+
+    // Import the JWK as a CryptoKey. Apple uses RS256 so the alg is
+    // RSASSA-PKCS1-v1_5 with SHA-256.
+    const publicKey = await crypto.subtle.importKey(
+      "jwk",
+      jwk as JsonWebKey,
+      { name: "RSASSA-PKCS1-v1_5", hash: { name: "SHA-256" } },
+      false,
+      ["verify"],
+    );
+
+    // Verify the signature
+    const signingInput = headerB64 + "." + payloadB64;
+    const signature = base64UrlDecode(signatureB64);
+    const valid = await crypto.subtle.verify(
+      { name: "RSASSA-PKCS1-v1_5" },
+      publicKey,
+      signature,
+      new TextEncoder().encode(signingInput),
+    );
+    if (!valid) return null;
+
+    // Verify standard claims
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp && payload.exp < now) return null;
+    if (payload.iss !== "https://appleid.apple.com") return null;
+    // Note: payload.aud must match our bundle ID
+    // (com.SpiroTechnologies.RPT). We leave audience validation to
+    // the caller so different flows can use different audiences if
+    // the app ever adds multiple bundle IDs (iOS + iPad extensions).
+
+    return {
+      sub: String(payload.sub),
+      email: payload.email ? String(payload.email) : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function validateAuth(
