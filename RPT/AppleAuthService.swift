@@ -20,6 +20,17 @@ final class AppleAuthService: NSObject, ObservableObject {
     @Published private(set) var currentEmail: String?
     @Published private(set) var lastError: String?
 
+    /// The one-time SIWA authorization code captured on the most recent
+    /// fresh sign-in. Kept in-memory only (never persisted) because it's
+    /// a short-lived one-time secret — iOS sends it to player-proxy
+    /// immediately after sign-in via link_apple_id, and the server stores
+    /// it in player_profiles.apple_authorization_code so it can be used
+    /// later for /auth/revoke at Delete Account time.
+    ///
+    /// Nil when the credential came from Keychain (re-launch) instead of
+    /// a fresh ASAuthorizationController flow.
+    @Published private(set) var currentAuthorizationCode: String?
+
     fileprivate static let keychainAccount = "com.SpiroTechnologies.RPT.appleSignIn"
     fileprivate static let displayNameKey = "rpt_apple_display_name"
     fileprivate static let emailKey       = "rpt_apple_email"
@@ -139,6 +150,11 @@ final class AppleAuthService: NSObject, ObservableObject {
             UserDefaults.standard.set(email, forKey: Self.emailKey)
             currentEmail = email
         }
+        // In-memory only. See documentation on currentAuthorizationCode
+        // for why this must not be persisted.
+        if let code = result.authorizationCode {
+            currentAuthorizationCode = code
+        }
     }
 }
 
@@ -164,6 +180,17 @@ extension AppleAuthService: ASAuthorizationControllerDelegate {
             let displayName: String? = composedName.isEmpty ? nil : composedName
             let email = credential.email
 
+            // Capture the one-time SIWA authorization code. Apple returns
+            // this as UTF-8 encoded Data on fresh sign-ins only. We base64-
+            // encode it for JSON transport and store it in-memory until
+            // PlayerProfileService.linkAppleID() sends it to the server.
+            let authCodeString: String? = {
+                guard let data = credential.authorizationCode else { return nil }
+                // Apple's docs say this is UTF-8 ASCII. Either encoding
+                // works; we pass it as base64 for safety.
+                return data.base64EncodedString()
+            }()
+
             KeychainHelper.save(value: appleUserID, account: Self.keychainAccount)
             self.currentAppleUserID = appleUserID
             if let displayName {
@@ -174,11 +201,15 @@ extension AppleAuthService: ASAuthorizationControllerDelegate {
                 UserDefaults.standard.set(email, forKey: Self.emailKey)
                 self.currentEmail = email
             }
+            if let authCodeString {
+                self.currentAuthorizationCode = authCodeString
+            }
 
             let result = AppleSignInResult(
                 userID: appleUserID,
                 displayName: displayName ?? self.currentDisplayName,
-                email: email ?? self.currentEmail
+                email: email ?? self.currentEmail,
+                authorizationCode: authCodeString
             )
             self.pendingContinuation?.resume(returning: result)
             self.pendingContinuation = nil
@@ -215,6 +246,11 @@ struct AppleSignInResult {
     let userID: String
     let displayName: String?
     let email: String?
+    /// One-time SIWA authorization code, base64-encoded.
+    /// Nil when the credential came from Keychain instead of a fresh flow.
+    /// Used by player-proxy to exchange for a refresh_token and call
+    /// /auth/revoke on Delete Account (App Store Guideline 5.1.1(v)).
+    var authorizationCode: String? = nil
 }
 
 enum AppleAuthError: LocalizedError {

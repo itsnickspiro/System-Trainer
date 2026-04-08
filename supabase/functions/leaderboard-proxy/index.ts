@@ -6,6 +6,54 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
+// ── Rate limiting ──────────────────────────────────────────────────────────
+// Same pattern as player-proxy. Leaderboard reads are generous (Home tab
+// can refresh often); writes and social actions are tighter.
+const RATE_BUDGETS: Record<string, [number, number]> = {
+  get_global:    [60, 60],   // 60 reads/min
+  get_weekly:    [60, 60],
+  get_friends:   [60, 60],
+  upsert_entry:  [60, 60],   // upserts on every level-up + app background
+  add_friend:    [20, 60],   // 20 friend adds/min — abuse protection
+  remove_friend: [20, 60],
+};
+
+async function checkRateLimit(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  action: string,
+): Promise<{ allowed: boolean }> {
+  const budget = RATE_BUDGETS[action];
+  if (!budget || !userId) return { allowed: true };
+  const [max, windowSec] = budget;
+  try {
+    const { data, error } = await supabase.rpc("rate_limit_check", {
+      p_user_id: userId,
+      p_action: action,
+      p_max_per_window: max,
+      p_window_seconds: windowSec,
+    });
+    if (error) {
+      console.error(`rate_limit_check RPC failed for ${userId}:${action}:`, error);
+      return { allowed: true }; // fail-open
+    }
+    return { allowed: data !== false };
+  } catch (e) {
+    console.error(`rate_limit_check threw for ${userId}:${action}:`, e);
+    return { allowed: true };
+  }
+}
+
+function rateLimitedResponse(action: string) {
+  return new Response(
+    JSON.stringify({ error: "Too many requests", action, retry_after_seconds: 60 }),
+    {
+      status: 429,
+      headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "60" },
+    }
+  );
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const appSecret = Deno.env.get("RPT_APP_SECRET");
@@ -23,6 +71,12 @@ serve(async (req) => {
     const offset = (page - 1) * pageSize;
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("DB_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+
+    // ── Rate limit check ──────────────────────────────────────────────────
+    if (cloudkitUserId) {
+      const rl = await checkRateLimit(supabase, cloudkitUserId, action);
+      if (!rl.allowed) return rateLimitedResponse(action);
+    }
 
     // GET GLOBAL LEADERBOARD
     if (action === "get_global") {

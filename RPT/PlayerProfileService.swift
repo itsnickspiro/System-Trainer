@@ -197,7 +197,18 @@ final class PlayerProfileService: ObservableObject {
     /// Handles all three response cases from the player-proxy `link_apple_id`
     /// action, including cross-device matches where another device's profile is
     /// returned and adopted locally.
-    func linkAppleID(appleUserID: String, displayName: String?) async -> Bool {
+    ///
+    /// `authorizationCode` is the one-time SIWA code captured from the original
+    /// ASAuthorizationAppleIDCredential. When present, it's stored server-side
+    /// so player-proxy can later call Apple's /auth/revoke REST API on
+    /// Delete Account (App Store Guideline 5.1.1(v)). Callers should pass
+    /// `AppleAuthService.shared.currentAuthorizationCode` — nil on re-sign-ins
+    /// where the credential came from Keychain instead of a fresh flow.
+    func linkAppleID(
+        appleUserID: String,
+        displayName: String?,
+        authorizationCode: String? = nil
+    ) async -> Bool {
         guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else {
             print("[PlayerProfileService] linkAppleID skipped — CloudKit user id not yet resolved")
             return false
@@ -214,6 +225,12 @@ final class PlayerProfileService: ObservableObject {
         ]
         if let displayName, !displayName.isEmpty {
             body["display_name"] = displayName
+        }
+        // Pipe the one-time auth code through to the server on fresh
+        // sign-ins. The proxy writes it to player_profiles.apple_authorization_code
+        // so delete_account → revoke_siwa can use it later.
+        if let authorizationCode, !authorizationCode.isEmpty {
+            body["authorization_code"] = authorizationCode
         }
 
         do {

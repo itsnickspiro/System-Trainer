@@ -505,7 +505,8 @@ private struct BootStepView: View {
 
         let success = await PlayerProfileService.shared.linkAppleID(
             appleUserID: result.userID,
-            displayName: result.displayName
+            displayName: result.displayName,
+            authorizationCode: result.authorizationCode
         )
         guard success else {
             authError = "Couldn't sign in with Apple. Check your connection and try again."
