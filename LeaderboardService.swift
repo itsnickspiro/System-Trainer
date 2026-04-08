@@ -93,10 +93,16 @@ final class LeaderboardService: ObservableObject {
             return
         }
 
-        // Send both the canonical column names (total_xp, current_streak) and
-        // the legacy short names the proxy may also still accept. The DB
-        // columns are `total_xp` and `current_streak`; sending `xp` / `streak`
-        // alone resulted in zero values being persisted.
+        // Total workout count lives in UserDefaults (incremented by
+        // DataManager.completeQuest for workout quests). Sending it lets
+        // the leaderboard-proxy compute weekly_workouts as a server-side
+        // delta the same way it now computes weekly_xp.
+        let totalWorkouts = UserDefaults.standard.integer(forKey: "rpt_total_workouts_logged")
+
+        // The DB columns are `total_xp` and `current_streak`; sending `xp`
+        // / `streak` alone resulted in zero values being persisted.
+        // weekly_xp, weekly_workouts, and week_start_date are computed
+        // server-side by leaderboard-proxy — do NOT send them from here.
         let body: [String: Any] = [
             "action":           "upsert_entry",
             "cloudkit_user_id": cloudKitID,
@@ -104,6 +110,7 @@ final class LeaderboardService: ObservableObject {
             "level":            profile.level,
             "total_xp":         profile.totalXPEarned,
             "current_streak":   profile.currentStreak,
+            "total_workouts":   totalWorkouts,
             "player_id":        PlayerProfileService.shared.playerId
         ]
 
