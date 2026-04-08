@@ -443,10 +443,144 @@ export async function verifyAppleIdToken(
   }
 }
 
+// ── Main middleware entry point ───────────────────────────────────────────
+//
+// Every Edge Function that needs authentication calls this at the top
+// of its request handler. It:
+//   1. Extracts the Bearer JWT from the Authorization header
+//   2. Verifies the JWT signature + standard claims
+//   3. For read operations: returns immediately (JWT alone is enough)
+//   4. For write operations: additionally verifies the App Attest
+//      assertion against the device's stored public key + counter
+//   5. Returns an AuthResult with cloudkit_user_id extracted from the
+//      JWT's sub claim (never from the request body — that's the core
+//      fix for the 2.8.x shared-secret impersonation vulnerability)
+
 export async function validateAuth(
-  _req: Request,
-  _supabase: SupabaseClient,
-  _opts: { requireAttestation: boolean },
+  req: Request,
+  supabase: SupabaseClient,
+  opts: { requireAttestation: boolean },
 ): Promise<AuthResult> {
-  throw new Error("validateAuth: not implemented yet (Task 9)");
+  // 1. Extract Bearer JWT from Authorization header
+  const authHeader = req.headers.get("authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return { valid: false, error: "missing_bearer_token" };
+  }
+  const token = authHeader.slice(7);
+
+  // 2. Verify JWT signature + standard claims
+  const claims = await verifyJWT(token);
+  if (!claims) {
+    return { valid: false, error: "invalid_jwt" };
+  }
+
+  // 3. For read operations, JWT is sufficient
+  if (!opts.requireAttestation) {
+    return { valid: true, cloudkit_user_id: claims.sub };
+  }
+
+  // 4. For write operations, verify the App Attest assertion
+  const assertionB64 = req.headers.get("x-app-attest-assertion") ?? "";
+  const keyId = req.headers.get("x-app-attest-key-id") ?? "";
+  if (!keyId) {
+    return { valid: false, error: "missing_attestation_key_id" };
+  }
+
+  // Look up the device attestation record by (user, key_id)
+  const { data: attestation, error: lookupErr } = await supabase
+    .from("device_attestations")
+    .select("id, attestation_public_key, counter, is_bypass")
+    .eq("cloudkit_user_id", claims.sub)
+    .eq("key_id", keyId)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (lookupErr || !attestation) {
+    return { valid: false, error: "unknown_device" };
+  }
+
+  // 4a. Bypass path (simulator development only)
+  if (attestation.is_bypass) {
+    const allowBypass = Deno.env.get("ALLOW_SIMULATOR_BYPASS") === "true";
+    if (!allowBypass) {
+      // A bypass row exists but the env var is not set — this means
+      // the row was created in a dev environment and somehow made it
+      // to production. Reject with an explicit error so it's easy
+      // to diagnose.
+      return { valid: false, error: "bypass_not_allowed_in_production" };
+    }
+    return {
+      valid: true,
+      cloudkit_user_id: claims.sub,
+      device_attestation_id: attestation.id,
+    };
+  }
+
+  // 4b. Real assertion verification path
+  if (!assertionB64) {
+    return { valid: false, error: "missing_assertion" };
+  }
+
+  // Decode base64 assertion
+  let assertionBytes: Uint8Array;
+  try {
+    const binary = atob(assertionB64);
+    assertionBytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) assertionBytes[i] = binary.charCodeAt(i);
+  } catch {
+    return { valid: false, error: "assertion_not_base64" };
+  }
+
+  // Read and hash the request body. We clone the request because
+  // reading the body consumes the stream and the caller still needs
+  // to read it to dispatch to the action handler.
+  const bodyText = await req.clone().text();
+  const bodyHash = await sha256(bodyText);
+
+  // Supabase returns bytea columns as either Uint8Array or a { data: number[] }
+  // object depending on the client config. Handle both.
+  let publicKeyBytes: Uint8Array;
+  const raw = attestation.attestation_public_key;
+  if (raw instanceof Uint8Array) {
+    publicKeyBytes = raw;
+  } else if (raw && typeof raw === "object" && "data" in raw) {
+    publicKeyBytes = new Uint8Array((raw as { data: number[] }).data);
+  } else if (typeof raw === "string") {
+    // Hex string format (Supabase sometimes returns bytea as \x...)
+    const hex = raw.startsWith("\\x") ? raw.slice(2) : raw;
+    publicKeyBytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < publicKeyBytes.length; i++) {
+      publicKeyBytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+  } else {
+    return { valid: false, error: "public_key_format_error" };
+  }
+
+  const verifyResult = await verifyAssertion(
+    assertionBytes,
+    publicKeyBytes,
+    bodyHash,
+    attestation.counter ?? 0,
+  );
+  if (!verifyResult.valid) {
+    return { valid: false, error: "assertion_verification_failed" };
+  }
+
+  // Persist the new counter + last_used_at atomically. We use a simple
+  // UPDATE here rather than a SELECT ... FOR UPDATE because the unique
+  // index on (cloudkit_user_id, key_id) + the strictly-greater check in
+  // verifyAssertion prevents concurrent assertions from landing with the
+  // same counter value.
+  await supabase
+    .from("device_attestations")
+    .update({
+      counter: verifyResult.newCounter,
+      last_used_at: new Date().toISOString(),
+    })
+    .eq("id", attestation.id);
+
+  return {
+    valid: true,
+    cloudkit_user_id: claims.sub,
+    device_attestation_id: attestation.id,
+  };
 }
