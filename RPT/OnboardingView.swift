@@ -117,14 +117,19 @@ struct OnboardingView: View {
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
-                Button("Done") {
+                Button {
                     UIApplication.shared.sendAction(
                         #selector(UIResponder.resignFirstResponder),
                         to: nil, from: nil, for: nil
                     )
+                } label: {
+                    Text("Done")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.cyan)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
                 }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.cyan)
+                .padding(.trailing, 8)
             }
         }
     }
