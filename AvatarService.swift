@@ -59,10 +59,27 @@ final class AvatarService: ObservableObject {
         do {
             let data = try await postToProxy(body: body)
             guard !data.isEmpty else { return }
-            let templates = try JSONDecoder().decode([AvatarTemplate].self, from: data)
-            catalog = templates
-            current = templates.first { $0.isEquipped }
-            try? JSONEncoder().encode(templates).write(to: Self.cacheURL, options: .atomic)
+            // The avatars-proxy returns:
+            //   { "avatars": [ { ... }, ... ], "current_avatar_key": "avatar_xxx" }
+            // Previously this code decoded `data` as a bare [AvatarTemplate],
+            // which fails on the wrapper, gets caught silently, and leaves
+            // catalog empty — so the picker has been showing the placeholder
+            // grid forever. Decode the wrapper, then extract avatars.
+            struct CatalogResponse: Decodable {
+                let avatars: [AvatarTemplate]
+                let current_avatar_key: String?
+            }
+            let response = try JSONDecoder().decode(CatalogResponse.self, from: data)
+            catalog = response.avatars
+            // Prefer the explicit current_avatar_key the server returned;
+            // fall back to the isEquipped flag inside the array.
+            if let key = response.current_avatar_key,
+               let match = response.avatars.first(where: { $0.key == key }) {
+                current = match
+            } else {
+                current = response.avatars.first { $0.isEquipped }
+            }
+            try? JSONEncoder().encode(response.avatars).write(to: Self.cacheURL, options: .atomic)
         } catch {
             lastError = error.localizedDescription
         }
@@ -167,16 +184,13 @@ struct AvatarTemplate: Codable, Identifiable {
     var isUnlocked:             Bool
     var isEquipped:             Bool
 
-    enum CodingKeys: String, CodingKey {
-        case key, name, description, category, rarity
-        case unlockType             = "unlock_type"
-        case unlockLevel            = "unlock_level"
-        case unlockAchievementKey   = "unlock_achievement_key"
-        case gpPrice                = "gp_price"
-        case accentColor            = "accent_color"
-        case isUnlocked             = "is_unlocked"
-        case isEquipped             = "is_equipped"
-    }
+    // The avatars-proxy emits these in camelCase already (see
+    // supabase/functions/avatars-proxy/index.ts:53-68 — it explicitly
+    // remaps the snake_case DB columns to camelCase JSON keys before
+    // returning). The Swift property names below match exactly, so the
+    // default (synthesized) CodingKeys are correct and no explicit
+    // mapping is needed. The previous explicit snake_case CodingKeys
+    // caused every avatar decode to fail, leaving the catalog empty.
 
     /// SwiftUI Color parsed from the hex accent_color string.
     var color: Color {
