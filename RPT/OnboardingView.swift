@@ -110,6 +110,23 @@ struct OnboardingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(.dark)
+        // Universal keyboard dismiss affordance for any text-input step
+        // (Name, Body Stats, etc). The system places this in the keyboard
+        // accessory bar, so it's only visible while a TextField is focused
+        // and disappears the moment the keyboard goes down.
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.cyan)
+            }
+        }
     }
 
     // MARK: - Progress Bar
@@ -124,7 +141,7 @@ struct OnboardingView: View {
                     // the reversed transition edges for this animation.
                     withAnimation(.easeInOut(duration: 0.35)) {
                         navigatingBackward = true
-                        currentStep = max(1, currentStep - 1)
+                        currentStep = previousStep(from: currentStep)
                     }
                 } label: {
                     Image(systemName: "chevron.left")
@@ -288,6 +305,19 @@ struct OnboardingView: View {
         // explicitly themselves.
         navigatingBackward = false
         currentStep = next
+    }
+
+    /// Inverse of `advanceFrom` for the back button. Mirrors the same
+    /// step-skipping rules so we never land on a step the forward path
+    /// would have skipped — most importantly the Goal Survey Gate (step
+    /// 8) when the user didn't pick "Build my own plan", which is
+    /// otherwise stranded as an invalid back-target from step 9.
+    private func previousStep(from step: Int) -> Int {
+        var prev = step - 1
+        if prev == 8 && !isBuildingCustomPlan {
+            prev = 7
+        }
+        return max(1, prev)
     }
 
     private func handleAdvance() {

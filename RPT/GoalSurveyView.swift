@@ -37,8 +37,38 @@ struct GoalSurveyView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                // Top bar with a close affordance. Without this the user
+                // is trapped inside the fullScreenCover until they finish
+                // all 7 pages — there's no swipe-to-dismiss on
+                // fullScreenCover, no navigation bar, no Cancel button.
+                // Tapping X calls onComplete which dismisses the cover
+                // without flipping profile.goalSurveyCompleted, so the
+                // gate step still sees the unfinished state and the user
+                // is free to either retry or back out to step 7 and
+                // choose a different workout plan.
+                HStack {
+                    Spacer()
+                    Button {
+                        onComplete()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white.opacity(0.8))
+                            .frame(width: 36, height: 36)
+                            .background(
+                                Circle().fill(Color.white.opacity(0.08))
+                            )
+                            .overlay(
+                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 1)
+                            )
+                    }
+                    .accessibilityLabel("Close survey")
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+
                 progressDots
-                    .padding(.top, 24)
+                    .padding(.top, 12)
                     .padding(.bottom, 12)
 
                 TabView(selection: $currentPage) {
