@@ -234,7 +234,10 @@ struct OnboardingView: View {
                     profileProvider: { ensureProfile() },
                     goalSurveyCompleted: $goalSurveyCompleted
                  )
-        case 9:  AvatarPickerStepView(selectedAvatarKey: $selectedAvatarKey)
+        case 9:  AvatarPickerStepView(
+                    selectedAvatarKey: $selectedAvatarKey,
+                    playerGender: selectedGender
+                 )
         case 10: HealthStepView(healthManager: healthManager)
         case 11: NotificationsStepView(notificationManager: notificationManager)
         case 12: ReadyStepView(
@@ -1187,10 +1190,23 @@ private struct StatField: View {
 
 private struct AvatarPickerStepView: View {
     @Binding var selectedAvatarKey: String?
+    let playerGender: PlayerGender
     @ObservedObject private var avatarService = AvatarService.shared
 
+    /// Filtered catalog: same-gender only, and only avatars whose image
+    /// is actually bundled in Assets.xcassets. The image filter eliminates
+    /// blank/SF-symbol cells the user was seeing — any avatar whose
+    /// UIImage(named: key) returns nil is silently skipped instead of
+    /// rendering a placeholder.
     private var avatars: [AvatarTemplate] {
-        avatarService.catalog
+        let suffix: String
+        switch playerGender {
+        case .female: suffix = "_f"
+        default:      suffix = "_m"
+        }
+        return avatarService.catalog.filter { tmpl in
+            tmpl.key.hasSuffix(suffix) && UIImage(named: tmpl.key) != nil
+        }
     }
 
     var body: some View {

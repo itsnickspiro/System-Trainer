@@ -71,22 +71,40 @@ struct GoalSurveyView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 12)
 
-                TabView(selection: $currentPage) {
-                    daysPage.tag(0)
-                    splitPage.tag(1)
-                    sessionLengthPage.tag(2)
-                    intensityPage.tag(3)
-                    focusAreasPage.tag(4)
-                    equipmentPage.tag(5)
-                    cardioPage.tag(6)
+                // The previous implementation used TabView with
+                // .tabViewStyle(.page(indexDisplayMode: .never)) which
+                // collapsed to zero height once a sibling HStack (the close
+                // button bar) was added above it inside the parent VStack —
+                // SwiftUI's page-style TabView is greedy *only* if it has
+                // an explicit infinite frame, otherwise it shrinks. The
+                // result was a fully black survey with progress dots and
+                // nav buttons floating against the gradient and no
+                // visible question content. Switching to a direct
+                // page-by-page Group + explicit .frame(maxHeight: .infinity)
+                // is more reliable on every iOS version and matches the
+                // pattern OnboardingView itself uses.
+                Group {
+                    switch currentPage {
+                    case 0: daysPage
+                    case 1: splitPage
+                    case 2: sessionLengthPage
+                    case 3: intensityPage
+                    case 4: focusAreasPage
+                    case 5: equipmentPage
+                    case 6: cardioPage
+                    default: daysPage
+                    }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut, value: currentPage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .id(currentPage)
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                .animation(.easeInOut(duration: 0.25), value: currentPage)
 
                 navigationButtons
                     .padding(.horizontal, 24)
                     .padding(.bottom, 24)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: loadExistingAnswers)
