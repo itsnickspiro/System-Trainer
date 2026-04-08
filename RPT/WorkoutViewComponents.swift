@@ -947,6 +947,27 @@ struct WorkoutLoggerView: View {
         dataManager.updateProfile { profile in
             profile.recordWorkout(type: workoutType, duration: resolvedDuration)
         }
+        // Grant the player the XP that we computed and stored on the
+        // session above. Previously session.xpAwarded was calculated and
+        // persisted but the player's actual xp/level was never incremented,
+        // so workouts looked like they earned XP without ever increasing
+        // the player's progression. Routes through addXPToProfile so the
+        // store/event multipliers, class bonus, level-up cascade, and
+        // boss raid damage all fire correctly.
+        if session.xpAwarded > 0 {
+            let workoutStatTarget: String?
+            switch workoutType {
+            case .strength:    workoutStatTarget = "strength"
+            case .cardio:      workoutStatTarget = "endurance"
+            case .flexibility: workoutStatTarget = "focus"
+            case .mixed:       workoutStatTarget = "endurance"
+            }
+            dataManager.addXPToProfile(
+                session.xpAwarded,
+                source: "Workout",
+                statTarget: workoutStatTarget
+            )
+        }
         dataManager.autoCompleteWorkoutQuests(for: workoutType)
 
         // ── 5. Write workout to Apple Health in the background ───────────────

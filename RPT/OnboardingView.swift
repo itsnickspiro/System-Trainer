@@ -4,22 +4,28 @@ import AuthenticationServices
 
 // MARK: - OnboardingView
 //
-// Unified 12-step onboarding flow. All collected state lives here; sub-views
+// Unified onboarding flow. All collected state lives here; sub-views
 // receive only the bindings they need.
 //
-// Steps:
-//  0  — Boot / Welcome     (no progress bar)
+// Steps (current — 13 logical positions, 12 user-visible):
+//  0  — Boot / Welcome     (no progress bar — own SIWA button)
 //  1  — Name
 //  2  — Biological Sex
 //  3  — Basics (age + height + weight on one screen)
 //  4  — Fitness Goal
-//  5  — Diet Preference
-//  6  — Workout Plan  (anime plans filtered by gender + goal, or Build-my-own)
-//  7  — Goal Survey Gate (only shown if Build-my-own was chosen)
-//  8  — HealthKit          (skippable)
-//  9  — Notifications      (skippable)
-//  10 — ATT Prompt          (skippable)
-//  11 — Ready Screen       (no progress bar)
+//  5  — Player Class
+//  6  — Diet Preference
+//  7  — Workout Plan  (anime plans filtered by gender + goal, or Build-my-own)
+//  8  — Goal Survey Gate (only shown if Build-my-own was chosen)
+//  9  — Avatar Picker  (required)
+//  10 — HealthKit          (required)
+//  11 — Notifications      (skippable)
+//  12 — Ready Screen       (no progress bar — own "Enter the System" button)
+//
+// ATT (App Tracking Transparency) was previously at step 12 but is removed
+// because the codebase doesn't use the IDFA — requesting tracking permission
+// without consuming it is grounds for App Review rejection per
+// Guideline 5.1.2.
 
 struct OnboardingView: View {
     @Binding var isOnboardingComplete: Bool
@@ -47,15 +53,20 @@ struct OnboardingView: View {
     /// Bound against the actual Profile model so step 6 Continue can enable.
     @State private var goalSurveyCompleted: Bool = false
 
+    /// True while a permission-fetching Task is in flight on the current step.
+    /// Used to disable the Continue button so a fast double-tap can't spawn
+    /// two concurrent permission requests / step advances.
+    @State private var isAdvancing: Bool = false
+
     // ── Services ──────────────────────────────────────────────────────────────
     @StateObject private var healthManager       = HealthManager()
     @StateObject private var notificationManager = NotificationManager.shared
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 13  // logical progress denominator (1–12 visible + Ready)
-    private let skippableSteps: Set<Int> = [11, 12]  // Notifs + ATT are optional; HealthKit (10) and Avatar (9) are required
-    private let noProgressBarSteps: Set<Int> = [0, 13]
+    private let totalProgressSteps = 12  // logical progress denominator (1–11 visible + Ready)
+    private let skippableSteps: Set<Int> = [11]  // Only Notifications is optional; HealthKit (10) and Avatar (9) are required
+    private let noProgressBarSteps: Set<Int> = [0, 12]
 
     var body: some View {
         ZStack {
@@ -191,11 +202,11 @@ struct OnboardingView: View {
         case 9:  AvatarPickerStepView(selectedAvatarKey: $selectedAvatarKey)
         case 10: HealthStepView(healthManager: healthManager)
         case 11: NotificationsStepView(notificationManager: notificationManager)
-        case 12: ATTPromptStepView()
-        case 13: ReadyStepView(
+        case 12: ReadyStepView(
                     name: profileName,
                     goal: selectedGoal,
-                    avatarKey: selectedAvatarKey ?? "avatar_default"
+                    avatarKey: selectedAvatarKey ?? "avatar_default",
+                    onContinue: { completeOnboarding() }
                  )
         default: EmptyView()
         }
@@ -205,12 +216,15 @@ struct OnboardingView: View {
 
     private var navigationButtons: some View {
         VStack(spacing: 12) {
-            // Continue / advance button
-            Button(currentStep == 12 ? "Complete Setup" : "Continue") {
+            // Continue / advance button. Notifications (step 11) is the
+            // last step where the user taps Continue — the Ready screen
+            // (step 12) is in noProgressBarSteps so its button is rendered
+            // inline by ReadyStepView itself.
+            Button(currentStep == 11 ? "Almost done" : "Continue") {
                 handleAdvance()
             }
             .buttonStyle(OnboardingPrimaryButtonStyle())
-            .disabled(!canAdvance)
+            .disabled(!canAdvance || isAdvancing)
 
             // Helper text when the goal survey gate blocks progression
             if currentStep == 8 && !goalSurveyCompleted {
@@ -254,6 +268,11 @@ struct OnboardingView: View {
     }
 
     private func handleAdvance() {
+        // Guard against double-tap on permission steps. Without this, a fast
+        // double-tap on Continue can spawn two concurrent permission Tasks
+        // and double-advance currentStep.
+        guard !isAdvancing else { return }
+
         if currentStep == 0 {
             // Boot → Name
             withAnimation(.easeInOut(duration: 0.35)) { currentStep = 1 }
@@ -274,25 +293,23 @@ struct OnboardingView: View {
         case 10:
             // HealthKit (required). If the user denies, we still advance —
             // they'll see the inline "Open Settings" path on next entry.
+            isAdvancing = true
             Task { @MainActor in
                 if !healthManager.isAuthorized {
                     await healthManager.requestAuthorization()
                 }
+                isAdvancing = false
                 withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(10) }
             }
             return
         case 11:
+            isAdvancing = true
             Task { @MainActor in
                 if notificationManager.authorizationStatus == .notDetermined {
                     await notificationManager.requestAuthorization()
                 }
+                isAdvancing = false
                 withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(11) }
-            }
-            return
-        case 12:
-            Task { @MainActor in
-                await AppTrackingHelper.requestIfNeeded()
-                completeOnboarding()
             }
             return
         default:
@@ -1839,6 +1856,10 @@ private struct ReadyStepView: View {
     let name: String
     let goal: FitnessGoal
     let avatarKey: String
+    /// Called when the user taps "Enter the System". The parent
+    /// OnboardingView wires this to completeOnboarding(), which writes
+    /// hasCompletedOnboarding=true and routes the user to ContentView.
+    var onContinue: () -> Void
 
     @State private var checkmarkScale: CGFloat = 0
     @State private var appeared = false
@@ -1921,22 +1942,32 @@ private struct ReadyStepView: View {
                 .animation(.easeOut(duration: 0.4).delay(0.5), value: appeared)
 
                 Spacer()
-                Spacer()
+
+                // "Enter the System" — final commit button. Lives inline
+                // because the Ready step is in noProgressBarSteps so the
+                // parent's nav-button row is suppressed.
+                Button(action: onContinue) {
+                    HStack(spacing: 10) {
+                        Text("Enter the System")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.cyan)
+                            .shadow(color: .cyan.opacity(0.5), radius: 14)
+                    )
+                }
+                .buttonStyle(.plain)
+                .opacity(appeared ? 1 : 0)
+                .animation(.easeOut(duration: 0.4).delay(0.7), value: appeared)
+                .padding(.bottom, 24)
             }
             .padding(.horizontal, 24)
-
-            // "Enter the System" button pinned at bottom
-            // (Handled by OnboardingView's navigationButtons for step 10,
-            //  but step 11 is the ready screen which has no nav area — it
-            //  passes completion up via the parent's isOnboardingComplete binding
-            //  through the "Enter the System" button below.)
-            VStack {
-                Spacer()
-                // This step is step 13, which is in noProgressBarSteps,
-                // so we render the button inline here.
-                EmptyView()
-                    .padding(.bottom, 40)
-            }
         }
         .onAppear { appeared = true }
     }
@@ -2114,45 +2145,11 @@ private struct GoalSurveyGateStepView: View {
 // prompt via AppTrackingHelper. Both buttons advance the step — the Skip link
 // just advances without requesting.
 
-private struct ATTPromptStepView: View {
-    var body: some View {
-        OnboardingStepShell(
-            icon: "hand.raised.fill",
-            iconColor: .cyan,
-            title: "Analytics Permission",
-            subtitle: "We use the advertising identifier only for anonymous analytics about which features you use most. We never share or sell your data.",
-            isSkippable: true
-        ) {
-            VStack(spacing: 14) {
-                Button {
-                    Task { await AppTrackingHelper.requestIfNeeded() }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark.shield.fill")
-                        Text("OK, ask me")
-                            .font(.system(size: 15, weight: .bold))
-                    }
-                    .foregroundColor(.cyan)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color.cyan.opacity(0.12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Color.cyan.opacity(0.4), lineWidth: 1)
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Text("You can change this later in Settings → Privacy.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
-            }
-        }
-    }
-}
+// ATTPromptStepView removed in 2.8.4 — the codebase doesn't consume
+// the IDFA, so requesting tracking permission was both pointless and an
+// App Review hazard per Guideline 5.1.2. The NSUserTrackingUsageDescription
+// key was also removed from Info.plist + project.pbxproj, and
+// AppTrackingHelper.swift was deleted entirely.
 
 #Preview {
     OnboardingView(isOnboardingComplete: .constant(false))

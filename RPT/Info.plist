@@ -47,9 +47,7 @@
 	<string>System Trainer uses your location to track outdoor cardio routes (Patrol mode) so you can see distance, pace, and the path you ran or walked.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>System Trainer needs continued location access to keep recording your route while the screen is locked during outdoor cardio sessions.</string>
-	<key>NSMotionUsageDescription</key>
-	<string>System Trainer uses motion data to detect workouts and steps when Apple Health is unavailable.</string>
-	<key>NSUserTrackingUsageDescription</key>
-	<string>System Trainer uses the advertising identifier only for anonymous analytics about which features players use most. We never share or sell your data.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>System Trainer uses your photo library so you can attach screenshots to bug reports and add photos to your meal log.</string>
 </dict>
 </plist>

@@ -295,6 +295,15 @@ final class Profile {
         }
         // Floor at 0 XP on level 1
         xp = max(0, xp)
+        // Also decrement totalXPEarned so it stays consistent with the
+        // refunded total. Previously this was left untouched on the theory
+        // that totalXPEarned should be monotonic for CloudKit conflict
+        // resolution — but reconcileAfterCloudSync re-derives level from
+        // totalXPEarned, which silently undid every refund on the next sync.
+        // CloudKit's max-wins behavior is preserved at the network layer:
+        // if another device hasn't seen the refund yet, its higher value
+        // will win on import (which is the correct outcome).
+        totalXPEarned = max(0, totalXPEarned - max(0, amount))
     }
 
     func levelXPThreshold(level: Int) -> Int {

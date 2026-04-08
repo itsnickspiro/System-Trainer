@@ -327,6 +327,12 @@ final class DataManager: ObservableObject {
             SystemNotificationManager.shared.present(SystemNotificationManager.level25)
         }
 
+        // Local push notification for the new level. Honors the
+        // levelUpNotifications user preference (default true).
+        if UserDefaults.standard.bool(forKey: "levelUpNotifications") {
+            NotificationManager.shared.scheduleLevelUpNotification(newLevel: newLevel)
+        }
+
         // Sync progress to cloud, award level-up GP, evaluate achievements, and update leaderboard
         Task {
             await PlayerProfileService.shared.syncProfile()
@@ -335,15 +341,22 @@ final class DataManager: ObservableObject {
             )
             AchievementsService.shared.evaluate()
 
-            // Award GP for level-up
+            // Award GP for EVERY level gained, not just one. Previously a
+            // multi-level skip (e.g. completing a long quest that pushes
+            // level 5 → 8) only awarded a single level-up bonus, robbing
+            // the player of two levels' worth of GP. Award once per level
+            // with a unique reference_key so the credit history shows each
+            // level individually and idempotency is preserved per-level.
             let rc = RemoteConfigService.shared
             let levelUpBonus = rc.int("credits_per_level_up", default: 50)
             if levelUpBonus > 0 {
-                await PlayerProfileService.shared.addCredits(
-                    amount: levelUpBonus,
-                    type: "level_up_bonus",
-                    referenceKey: "level_\(newLevel)"
-                )
+                for level in (oldLevel + 1)...newLevel {
+                    await PlayerProfileService.shared.addCredits(
+                        amount: levelUpBonus,
+                        type: "level_up_bonus",
+                        referenceKey: "level_\(level)"
+                    )
+                }
             }
 
             // Update leaderboard with new level/XP
