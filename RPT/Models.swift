@@ -2283,7 +2283,8 @@ final class PlannedMeal {
 
 @Model
 final class GroceryListItem {
-    @Attribute(.unique) var id: UUID = UUID()
+    // CloudKit-backed SwiftData does not support unique constraints; app-level uniqueness only.
+    var id: UUID = UUID()
     var foodItemID: UUID?      // nil for free-text items added manually
     var name: String = ""
     var quantity: Double = 1.0
@@ -2663,7 +2664,8 @@ extension Profile {
 
 @Model
 final class WeeklyBoss {
-    @Attribute(.unique) var id: UUID = UUID()
+    // CloudKit-backed SwiftData does not support unique constraints; app-level uniqueness only.
+    var id: UUID = UUID()
     var bossKey: String = ""           // raw enum value of WeeklyBossArchetype
     var weekStartDate: Date = Date()   // Monday 00:00 of the active week
     var maxHP: Int = 100
