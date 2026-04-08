@@ -15,6 +15,7 @@ System Trainer (RPT) is a gamified iOS fitness app built with SwiftUI and SwiftD
   - `APP_SECRET` — shared secret matching `RPT_APP_SECRET` in Supabase Vault
   - These flow into Info.plist and are read by `Secrets.swift` at runtime
 - **CloudKit:** Uses private CloudKit database (`iCloud.com.SpiroTechnologies.RPT`). Falls back to local-only SwiftData store in Simulator or when entitlement is missing.
+- **Xcode Cloud:** Auto-builds and uploads to TestFlight on every push to `main`. Configured to run `ci_scripts/ci_post_clone.sh`, which generates `Secrets.xcconfig` from the `SUPABASE_ANON_KEY` and `APP_SECRET` Secret Environment Variables set in the workflow.
 - **No test suite currently exists.**
 
 ## Supabase Backend
