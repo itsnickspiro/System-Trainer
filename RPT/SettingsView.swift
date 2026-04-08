@@ -581,6 +581,10 @@ struct SettingsView: View {
     /// onboarding flag, and routes the user back to onboarding.
     @MainActor
     private func performDeleteAccount() async {
+        // Guard against double-invocation. The Retry path in the failure
+        // alert spawns a new Task which could otherwise run concurrently
+        // with a previous in-flight delete.
+        guard !isDeletingAccount else { return }
         isDeletingAccount = true
         defer { isDeletingAccount = false }
 
@@ -636,12 +640,32 @@ struct SettingsView: View {
 
             // Cloud delete succeeded — nuke local state in order:
             //  1. Local SwiftData (everything the user has on this device)
-            //  2. Apple Keychain credential
-            //  3. Onboarding flag (sends app back to welcome screen)
+            //  2. Best-effort Sign in with Apple credential revocation (Apple
+            //     Guideline 5.1.1(v) — full server-side revocation requires
+            //     the auth_code from the original sign-in, which we don't
+            //     persist; revokeCredential() checks the state and clears
+            //     local credentials. Tell users they can also fully revoke
+            //     via Settings → Apple ID → Sign In With Apple.)
+            //  3. Apple Keychain credential + linked-id UserDefaults cache
+            //  4. Onboarding flag (sends app back to welcome screen via
+            //     RPTApp.isOnboardingComplete @AppStorage binding)
             DataManager.shared.deleteEverything()
+            await AppleAuthService.shared.revokeCredential()
             AppleAuthService.shared.signOut()
+
+            // Clear every published in-memory copy of identity that survives
+            // signOut so the rendered Settings sheet doesn't briefly show
+            // stale data before unwinding to onboarding.
             UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
             UserDefaults.standard.removeObject(forKey: "userProfileName")
+            UserDefaults.standard.removeObject(forKey: "rpt_player_id")
+            UserDefaults.standard.removeObject(forKey: "rpt_system_credits")
+            UserDefaults.standard.removeObject(forKey: "cloudKitUserRecordID")
+            UserDefaults.standard.removeObject(forKey: "rpt_player_profile_last_sync_date")
+            UserDefaults.standard.removeObject(forKey: "rpt_last_daily_login_credit_date")
+            UserDefaults.standard.removeObject(forKey: "rpt_unlocked_achievement_keys")
+            UserDefaults.standard.removeObject(forKey: "questsGeneratedDate")
+
             hasCompletedOnboarding = false
         } catch {
             deleteAccountError = error.localizedDescription

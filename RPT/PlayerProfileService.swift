@@ -175,7 +175,16 @@ final class PlayerProfileService: ObservableObject {
 
         do {
             let data = try await postToProxy(body: body)
-            return (try? JSONDecoder().decode([CreditTransaction].self, from: data)) ?? []
+            // Proxy returns `{ transactions: [...] }` — the previous decode
+            // tried to read the response as a bare array which silently
+            // failed, so the credit history screen always appeared empty.
+            struct CreditHistoryResponse: Decodable {
+                let transactions: [CreditTransaction]
+            }
+            if let response = try? JSONDecoder().decode(CreditHistoryResponse.self, from: data) {
+                return response.transactions
+            }
+            return []
         } catch {
             lastError = error.localizedDescription
             return []
@@ -452,7 +461,17 @@ final class PlayerProfileService: ObservableObject {
 
         do {
             let data = try await postToProxy(body: body)
-            if let result = try? JSONDecoder().decode(PlayerProfilePayload.self, from: data) {
+            // The proxy wraps the upserted row in `{ success, profile }` —
+            // previously we tried to decode the entire response as a flat
+            // PlayerProfilePayload, which silently failed and meant playerId
+            // and systemCredits were never updated after an upsert. Decode
+            // through the wrapper struct instead.
+            struct UpsertResponse: Decodable {
+                let success: Bool?
+                let profile: PlayerProfilePayload?
+            }
+            if let response = try? JSONDecoder().decode(UpsertResponse.self, from: data),
+               let result = response.profile {
                 if let pid = result.player_id, !pid.isEmpty {
                     playerId = pid
                     UserDefaults.standard.set(pid, forKey: "rpt_player_id")

@@ -555,19 +555,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RPT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = System;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSCameraUsageDescription = "System Trainer uses your camera to scan food barcodes so you can quickly log meals by scanning the package.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "System Trainer reads your steps, heart rate, sleep, active energy, and workouts to power your quests, stats, and coaching insights.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "System Trainer logs your workouts and water intake to HealthKit so your activity is tracked across Apple Health.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "System Trainer uses your location for patrol routes. Enabling 'Always' allows background distance tracking during active workouts.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "System Trainer uses your location during patrol routes to track outdoor workout distance and adapt your quest objectives.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to let users select, import, and use existing images or videos from their device. This enables functions such as editing, uploading, or sharing media within the app. Access is only used when you choose to pick files; no photos or videos are accessed automatically.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -581,7 +575,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.8.3;
+				MARKETING_VERSION = 2.8.4;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -607,19 +601,13 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = RPT/RPT.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RPT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = System;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSCameraUsageDescription = "System Trainer uses your camera to scan food barcodes so you can quickly log meals by scanning the package.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "System Trainer reads your steps, heart rate, sleep, active energy, and workouts to power your quests, stats, and coaching insights.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "System Trainer logs your workouts and water intake to HealthKit so your activity is tracked across Apple Health.";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "System Trainer uses your location for patrol routes. Enabling 'Always' allows background distance tracking during active workouts.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "System Trainer uses your location during patrol routes to track outdoor workout distance and adapt your quest objectives.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to let users select, import, and use existing images or videos from their device. This enables functions such as editing, uploading, or sharing media within the app. Access is only used when you choose to pick files; no photos or videos are accessed automatically.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -633,7 +621,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.8.3;
+				MARKETING_VERSION = 2.8.4;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -656,7 +644,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -683,7 +671,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -709,7 +697,7 @@
 			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -734,7 +722,7 @@
 			baseConfigurationReference = 01A16F852F7335CD003503E8 /* Secrets.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 23;
+				CURRENT_PROJECT_VERSION = 24;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;

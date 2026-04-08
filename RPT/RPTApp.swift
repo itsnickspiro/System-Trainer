@@ -12,7 +12,12 @@ extension Notification.Name {
 @MainActor
 struct RPTApp: App {
     @AppStorage("colorScheme") private var colorScheme = "dark"
-    @State private var isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+    // Backed by UserDefaults("hasCompletedOnboarding") so when Settings →
+    // Delete Account writes that key to false, this view automatically
+    // re-renders and routes the user back to OnboardingView. Previously
+    // declared as @State (read once at launch) which made Delete Account a
+    // visual no-op until app restart.
+    @AppStorage("hasCompletedOnboarding") private var isOnboardingComplete = false
     @State private var hasBootedUp = false
     private let notificationManager = NotificationManager.shared
 
@@ -38,6 +43,11 @@ struct RPTApp: App {
             Achievement.self,
             BodyMeasurement.self,
             PlannedMeal.self,
+            // Models that were declared @Model in Models.swift but missing
+            // from the schema. Without these the SwiftData store silently
+            // fails to persist them, breaking Boss Raid + Grocery List.
+            WeeklyBoss.self,
+            GroceryListItem.self,
         ])
 
         // CloudKit private database sync is enabled by passing a cloudKitDatabase
@@ -73,7 +83,23 @@ struct RPTApp: App {
             do {
                 return try ModelContainer(for: schema, configurations: [localConfig])
             } catch {
-                fatalError("Could not create ModelContainer: \(error)")
+                // Last-ditch fallback: an in-memory store. This means the
+                // user will lose data on quit, but the app remains usable
+                // instead of crashing on launch in unusual sandbox conditions
+                // (App Review test environments, profile-corrupted devices).
+                print("[SwiftData] Local store also failed (\(error)). Falling back to in-memory store.")
+                let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+                // If even an in-memory ModelContainer can't be built, the
+                // SwiftData runtime is broken and there is genuinely nothing
+                // we can do — but try? avoids a hard crash and lets the
+                // SwiftUI hierarchy show a degraded mode rather than the
+                // black-screen fatalError.
+                if let memContainer = try? ModelContainer(for: schema, configurations: [memoryConfig]) {
+                    return memContainer
+                }
+                // Truly unrecoverable. Empty schema as a last resort so the
+                // app can render an error UI instead of dying at launch.
+                return try! ModelContainer(for: Schema([]), configurations: [memoryConfig])
             }
         }
     }()
@@ -132,6 +158,15 @@ struct RPTApp: App {
             //  3. PlayerProfile — needs CloudKit ID, must come after step 1.
             //  4–10. All other services in dependency order.
             .task {
+                // Step 0: Configure DataManager with the SwiftData context BEFORE
+                // any service that touches Profile data — including the SIWA
+                // recovery flow that runs in PlayerProfileService.refresh().
+                // Previously this was only called from ContentView.onAppear,
+                // which meant the entire onboarding flow ran with no model
+                // context — silently breaking applyRemoteProfile and
+                // ensureProfileExists for returning users on a fresh install.
+                DataManager.shared.configure(with: sharedModelContainer.mainContext)
+
                 // Step 1: Resolve CloudKit identity first (10-second timeout, non-fatal)
                 await LeaderboardService.shared.resolveCloudKitUserIDIfNeeded()
 

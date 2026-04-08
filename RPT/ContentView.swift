@@ -95,6 +95,13 @@ struct ContentView: View {
                 Task { await PlayerProfileService.shared.syncProfile() }
             }
         }
+        // Refresh quests when iOS reports a significant time change
+        // (midnight, time-zone change, daylight savings). Without this,
+        // an app left open across midnight stays on yesterday's quests
+        // until the user backgrounds and foregrounds it manually.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            dataManager.refreshHealthOnForeground()
+        }
         // Notification deep-link routing
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selectedTab = 0

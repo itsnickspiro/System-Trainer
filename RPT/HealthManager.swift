@@ -83,10 +83,17 @@ class HealthManager: ObservableObject {
                 HKCategoryType(.mindfulSession)
             ]
             try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
-            // requestAuthorization succeeds even when user denies all types.
-            // Check at least one read type to determine if we have meaningful access.
-            let stepStatus = healthStore.authorizationStatus(for: HKQuantityType(.stepCount))
-            isAuthorized = stepStatus != .notDetermined
+            // requestAuthorization succeeds even when the user denies all
+            // types. Apple does not expose read-permission status (privacy),
+            // so we use the *write* status of bodyMass (which we always
+            // request) as a proxy: if the user authorized writes, they
+            // overwhelmingly also authorized reads, and the prompt was at
+            // least dismissed by tapping Allow. The previous check
+            // (`!= .notDetermined`) was a false-positive that treated
+            // explicit denial as success and made every fetch silently fail
+            // against zero-default Profile fields.
+            let writeStatus = healthStore.authorizationStatus(for: HKQuantityType(.bodyMass))
+            isAuthorized = (writeStatus == .sharingAuthorized)
         } catch {
             print("HealthKit authorization failed: \(error)")
             isAuthorized = false
@@ -154,10 +161,16 @@ class HealthManager: ObservableObject {
     
     private func fetchSleepData(for profile: Profile) async {
         let sleepType = HKCategoryType(.sleepAnalysis)
-        // Query the last 24 hours (previous night's sleep window)
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
-        let startOfYesterday = Calendar.current.startOfDay(for: yesterday)
-        let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!
+        // Query the last 24 hours (previous night's sleep window).
+        // Calendar.date(byAdding:) is documented as returning Optional<Date>
+        // (overflow / extreme range protection), so use safe defaults rather
+        // than force-unwrap — a nil here previously crashed the background
+        // delivery handler whenever it fired.
+        let now = Date()
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday.addingTimeInterval(-86400)
+        let endOfToday = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? startOfToday.addingTimeInterval(86400)
         let predicate = HKQuery.predicateForSamples(withStart: startOfYesterday, end: endOfToday)
 
         do {

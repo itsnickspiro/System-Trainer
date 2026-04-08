@@ -117,10 +117,34 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, profile: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // SAVE BACKUP
+    // SAVE BACKUP — accepts flat top-level progression fields. Previously
+    // this read body.backup which iOS never sends, so every backup row was
+    // inserted with only cloudkit_user_id and zero progression data.
     if (action === "save_backup") {
-      const backup = body.backup ?? {};
-      const { error } = await supabase.from("player_backups").insert({ ...backup, cloudkit_user_id: cloudkitUserId });
+      // Whitelist the columns we accept for backups so the client can't
+      // inject arbitrary fields.
+      const BACKUP_ALLOWED_COLUMNS = [
+        "level",
+        "total_xp",
+        "current_streak",
+        "longest_streak",
+        "system_credits",
+        "lifetime_credits_earned",
+      ];
+      const backupRow: Record<string, unknown> = {
+        cloudkit_user_id: cloudkitUserId,
+        backed_up_at: new Date().toISOString(),
+      };
+      // Backwards-compat: still accept body.backup if a future client sends it
+      const nestedBackup = (body.backup ?? {}) as Record<string, unknown>;
+      for (const key of BACKUP_ALLOWED_COLUMNS) {
+        if (body[key] !== undefined && body[key] !== null) {
+          backupRow[key] = body[key];
+        } else if (nestedBackup[key] !== undefined && nestedBackup[key] !== null) {
+          backupRow[key] = nestedBackup[key];
+        }
+      }
+      const { error } = await supabase.from("player_backups").insert(backupRow);
       if (error) throw error;
       return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -157,7 +181,16 @@ serve(async (req) => {
       // Log transaction
       await supabase.from("credit_transactions").insert({ cloudkit_user_id: cloudkitUserId, amount, balance_after: newBalance, transaction_type: txType, reference_key: refKey, notes });
 
-      return new Response(JSON.stringify({ success: true, new_balance: newBalance }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      // Return both the new balance AND the lifetime total in the keys
+      // the iOS CreditUpdatePayload struct expects (system_credits +
+      // lifetime_credits_earned). new_balance is kept for backwards
+      // compatibility with any older client that decodes that field.
+      return new Response(JSON.stringify({
+        success: true,
+        new_balance: newBalance,
+        system_credits: newBalance,
+        lifetime_credits_earned: newLifetime,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // GET CREDIT HISTORY
@@ -233,10 +266,31 @@ serve(async (req) => {
     if (action === "delete_account") {
       const appleUserId: string = body.apple_user_id ?? "";
       const deletedFrom: string[] = [];
+      const failedTables: string[] = [];
 
-      // Tables that have a cloudkit_user_id column.
-      const ckTables = [
-        "player_profiles",
+      // CRITICAL: player_profiles must succeed for the delete to be honored.
+      // If it fails (RLS blocked, network glitch, foreign-key constraint),
+      // return a non-200 so the client does NOT proceed to wipe local
+      // state and leave the user half-deleted with orphaned cloud rows.
+      const { data: profileDeleted, error: profileErr } = await supabase
+        .from("player_profiles")
+        .delete({ count: "exact" })
+        .eq("cloudkit_user_id", cloudkitUserId)
+        .select("cloudkit_user_id");
+      if (profileErr) {
+        console.error("delete_account: CRITICAL — player_profiles delete failed:", profileErr);
+        return new Response(JSON.stringify({
+          success: false,
+          error: `player_profiles delete failed: ${profileErr.message ?? "unknown error"}`,
+        }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (profileDeleted && profileDeleted.length > 0) deletedFrom.push("player_profiles");
+
+      // Secondary tables — we tolerate per-table failures here because the
+      // primary record (player_profiles) is already gone, and the secondary
+      // tables are FK-cascaded or self-cleaning. Failures are logged so we
+      // can spot them in the function logs.
+      const secondaryTables = [
         "leaderboard",
         "player_inventory",
         "credit_transactions",
@@ -246,7 +300,7 @@ serve(async (req) => {
         "guild_raid_contributions",
       ];
 
-      for (const table of ckTables) {
+      for (const table of secondaryTables) {
         const { data, error } = await supabase
           .from(table)
           .delete({ count: "exact" })
@@ -254,6 +308,7 @@ serve(async (req) => {
           .select("cloudkit_user_id");
         if (error) {
           console.error(`delete_account: failed to delete from ${table}:`, error);
+          failedTables.push(table);
           continue;
         }
         if (data && data.length > 0) deletedFrom.push(table);
@@ -294,7 +349,11 @@ serve(async (req) => {
         }
       }
 
-      return new Response(JSON.stringify({ success: true, deleted_from: deletedFrom }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({
+        success: true,
+        deleted_from: deletedFrom,
+        failed_tables: failedTables,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });

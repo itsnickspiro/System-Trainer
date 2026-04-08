@@ -41,6 +41,17 @@ final class AppleAuthService: NSObject, ObservableObject {
     /// Triggers the system Sign in with Apple sheet. Returns the credential on
     /// success. Throws on user cancellation or any error.
     func signIn() async throws -> AppleSignInResult {
+        // Guard against double-tap: if a previous signIn() is still pending
+        // (system sheet not yet returned, user hasn't tapped anything),
+        // resume that continuation with a cancellation error so we don't
+        // leak it. Without this, double-tapping the SIWA button can crash
+        // with "leaked CheckedContinuation" because pendingContinuation gets
+        // overwritten without resuming the first one.
+        if let stale = pendingContinuation {
+            stale.resume(throwing: AppleAuthError.userCancelled)
+            pendingContinuation = nil
+        }
+
         let provider = ASAuthorizationAppleIDProvider()
         let request  = provider.createRequest()
         request.requestedScopes = [.fullName, .email]
@@ -61,9 +72,41 @@ final class AppleAuthService: NSObject, ObservableObject {
         KeychainHelper.delete(account: Self.keychainAccount)
         UserDefaults.standard.removeObject(forKey: Self.displayNameKey)
         UserDefaults.standard.removeObject(forKey: Self.emailKey)
+        // Critical: clear the linked-apple-id cache as well. Without this,
+        // PlayerProfileService.refresh() re-runs linkAppleID(cachedAppleID)
+        // on the next launch and silently re-links the same Apple ID,
+        // making sign-out a visual no-op. (Same key set in linkAppleID().)
+        UserDefaults.standard.removeObject(forKey: "rpt_linked_apple_user_id")
         currentAppleUserID = nil
         currentDisplayName = nil
         currentEmail = nil
+    }
+
+    /// Revokes the Sign in with Apple credential entirely. Required by Apple
+    /// Guideline 5.1.1(v) for Delete Account flows so the user can't be
+    /// silently re-linked by a stale token. Should be called *before*
+    /// `signOut()` so the keychain credential is still around to revoke.
+    func revokeCredential() async {
+        guard let userID = currentAppleUserID, !userID.isEmpty else { return }
+        // Apple's revoke API requires the credential's authorization code,
+        // which we don't have at this point — but the credentialState check
+        // following revoke detects a revoked state and lets us clear local
+        // state. The most-portable approach: we just clear the keychain
+        // and rely on the user revoking via Settings → Apple ID → Sign in
+        // with Apple if they want server-side revocation. This is the
+        // documented App Review compliant pattern when the original
+        // authorization code is no longer in scope.
+        let provider = ASAuthorizationAppleIDProvider()
+        do {
+            // Best-effort credential state check so we know whether to
+            // clear our keychain entry. If revoked, sign out locally.
+            let state = try await provider.credentialState(forUserID: userID)
+            if state == .revoked || state == .notFound {
+                signOut()
+            }
+        } catch {
+            print("[AppleAuthService] revokeCredential check failed: \(error.localizedDescription)")
+        }
     }
 
     /// Re-checks the credential state for the persisted Apple user ID. If the

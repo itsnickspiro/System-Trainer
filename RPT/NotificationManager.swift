@@ -21,8 +21,14 @@ class NotificationManager: NSObject, ObservableObject {
     // MARK: - Authorization
     func requestAuthorization() async {
         do {
+            // .provisional was previously included alongside [.alert, .badge, .sound],
+            // which caused iOS to silently grant authorization for "quiet"
+            // notifications without ever showing the system prompt to the user.
+            // The user-facing onboarding step would request permission, get
+            // back granted=true, and the dialog would never appear. Removed
+            // so the system prompt fires properly.
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(
-                options: [.alert, .badge, .sound, .provisional]
+                options: [.alert, .badge, .sound]
             )
             await MainActor.run {
                 self.isAuthorized = granted
@@ -37,12 +43,15 @@ class NotificationManager: NSObject, ObservableObject {
             }
         }
     }
-    
+
     func checkAuthorizationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             DispatchQueue.main.async {
                 self.authorizationStatus = settings.authorizationStatus
-                self.isAuthorized = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+                // Treat only .authorized as "really" authorized. .provisional
+                // is the iOS quiet-grant state that should not unlock features
+                // gated on real notification permission.
+                self.isAuthorized = settings.authorizationStatus == .authorized
             }
         }
     }
