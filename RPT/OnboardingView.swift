@@ -503,17 +503,29 @@ private struct BootStepView: View {
         authError = nil
         defer { isAuthenticating = false }
 
-        let success = await PlayerProfileService.shared.linkAppleID(
+        // Try to link the Apple ID with the cloud profile. This can fail
+        // for reasons that are NOT user-facing problems:
+        //   • CloudKit user id not yet resolved (race with the launch chain)
+        //   • Device has no iCloud account (Simulator, signed-out device)
+        //   • Transient network blip on the player-proxy round-trip
+        // In all of these cases the SIWA credential itself is valid and
+        // already persisted in Keychain by SignInWithAppleButtonView, so the
+        // user IS authenticated locally. Onboarding must still advance —
+        // PlayerProfileService.refresh() retries the link on every launch
+        // and will quietly heal it on the next session that has CloudKit.
+        // Previously this method hard-failed and stranded the user on the
+        // welcome screen with "Couldn't sign in with Apple", which presented
+        // as "onboarding doesn't trigger after SIWA".
+        let linked = await PlayerProfileService.shared.linkAppleID(
             appleUserID: result.userID,
             displayName: result.displayName,
             authorizationCode: result.authorizationCode
         )
-        guard success else {
-            authError = "Couldn't sign in with Apple. Check your connection and try again."
-            return
+        if !linked {
+            print("[Onboarding] linkAppleID server-side link failed; advancing onboarding anyway — credential is valid in Keychain and refresh() will retry on next launch")
         }
 
-        // Give the hydration a beat to settle
+        // Give the hydration a beat to settle (only meaningful when linked==true)
         try? await Task.sleep(for: .seconds(0.5))
 
         if let profile = DataManager.shared.currentProfile,
