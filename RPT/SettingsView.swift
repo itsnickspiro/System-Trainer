@@ -99,7 +99,8 @@ struct SettingsView: View {
                                 Task {
                                     _ = await PlayerProfileService.shared.linkAppleID(
                                         appleUserID: result.userID,
-                                        displayName: result.displayName
+                                        displayName: result.displayName,
+                                        authorizationCode: result.authorizationCode
                                     )
                                 }
                             }

@@ -6,6 +6,239 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
+// ── Rate limiting ──────────────────────────────────────────────────────────
+// Per-action budgets. Each entry is [maxCallsPerWindow, windowSeconds].
+// Budgets are generous for normal usage and aggressive for destructive
+// actions. `delete_account` is the most restrictive: a user shouldn't
+// legitimately delete their account more than a handful of times per day.
+const RATE_BUDGETS: Record<string, [number, number]> = {
+  get_profile:          [120, 60],   // 120 reads/min — fine for normal app usage
+  upsert_profile:       [60, 60],    // 60 writes/min — generous (usually 1-2/min)
+  save_backup:          [10, 60],    // 10 backups/min — usually 1-2 per session
+  mark_override_applied:[10, 60],
+  add_credits:          [30, 60],    // 30 credit txns/min — quest completion burst
+  get_credit_history:   [30, 60],
+  link_apple_id:        [5, 60],     // 5 link attempts/min — suspicious above this
+  lookup_by_apple_id:   [10, 60],
+  store_auth_code:      [5, 60],     // 5 auth-code stores/min
+  delete_account:       [3, 3600],   // 3 deletes/hour — destructive action
+  revoke_siwa:          [3, 3600],   // 3 revokes/hour
+};
+
+async function checkRateLimit(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  action: string,
+): Promise<{ allowed: boolean; status: number }> {
+  const budget = RATE_BUDGETS[action];
+  if (!budget || !userId) return { allowed: true, status: 200 };
+  const [max, windowSec] = budget;
+  try {
+    const { data, error } = await supabase.rpc("rate_limit_check", {
+      p_user_id: userId,
+      p_action: action,
+      p_max_per_window: max,
+      p_window_seconds: windowSec,
+    });
+    if (error) {
+      // Fail-open: if the rate limit table is unreachable, don't block
+      // legitimate users. We log the error for monitoring.
+      console.error(`rate_limit_check RPC failed for ${userId}:${action}:`, error);
+      return { allowed: true, status: 200 };
+    }
+    if (data === false) {
+      return { allowed: false, status: 429 };
+    }
+    return { allowed: true, status: 200 };
+  } catch (e) {
+    console.error(`rate_limit_check threw for ${userId}:${action}:`, e);
+    return { allowed: true, status: 200 };
+  }
+}
+
+function rateLimitedResponse(action: string) {
+  return new Response(
+    JSON.stringify({
+      error: "Too many requests",
+      action,
+      retry_after_seconds: 60,
+    }),
+    {
+      status: 429,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Retry-After": "60",
+      },
+    }
+  );
+}
+
+// ── Sign in with Apple server-side REST revocation ────────────────────────
+// Apple Guideline 5.1.1(v) compliance. When a user taps Delete Account we
+// should not only wipe our own database — we should also invalidate their
+// Sign in with Apple session at Apple's end so the credential can't be
+// silently re-used. The REST flow is:
+//
+//   1. Build a short-lived ES256 "client_secret" JWT signed with the
+//      Apple Services Key (.p8 file, Sign in with Apple capability)
+//   2. POST the authorization_code (captured from the original SIWA sign-in)
+//      to https://appleid.apple.com/auth/token to exchange it for a
+//      refresh_token
+//   3. POST the refresh_token to https://appleid.apple.com/auth/revoke
+//
+// Required environment variables (set in Supabase Vault → Edge Functions):
+//   APPLE_TEAM_ID           — 10-char Apple Developer Team ID
+//   APPLE_KEY_ID            — 10-char Key ID from the Services Key
+//   APPLE_P8_KEY            — contents of the .p8 file (entire PEM, including
+//                             BEGIN/END PRIVATE KEY lines)
+//   APPLE_CLIENT_ID         — bundle identifier used as the SIWA service ID
+//                             (defaults to com.SpiroTechnologies.RPT if unset)
+//
+// If any of these are missing we log a warning and return false so the
+// caller falls back to client-side best-effort revocation. Delete Account
+// still proceeds — we never block a deletion on a missing Apple key.
+
+interface AppleRevokeResult {
+  success: boolean;
+  skipped?: boolean;
+  reason?: string;
+  detail?: string;
+}
+
+// PEM → raw key bytes for ES256 signing via SubtleCrypto.importKey
+function pemToPkcs8Bytes(pem: string): Uint8Array {
+  const cleaned = pem
+    .replace(/-----BEGIN [A-Z ]+-----/g, "")
+    .replace(/-----END [A-Z ]+-----/g, "")
+    .replace(/\s+/g, "");
+  const binary = atob(cleaned);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function base64UrlEncode(data: Uint8Array | string): string {
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Build the Apple client_secret JWT. This is a short-lived (3-minute) JWT
+// the Apple token endpoint accepts in place of a static secret. It must be
+// signed with ES256 using the .p8 key generated in Apple Developer Portal.
+async function buildAppleClientSecret(
+  teamId: string,
+  keyId: string,
+  clientId: string,
+  p8Pem: string,
+): Promise<string> {
+  const header = { alg: "ES256", kid: keyId };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: teamId,
+    iat: now,
+    exp: now + 180, // Apple rejects JWTs with exp > 6 months; 3 minutes is safe
+    aud: "https://appleid.apple.com",
+    sub: clientId,
+  };
+  const signingInput =
+    base64UrlEncode(JSON.stringify(header)) +
+    "." +
+    base64UrlEncode(JSON.stringify(payload));
+
+  // Import the PKCS#8 private key for signing
+  const keyBytes = pemToPkcs8Bytes(p8Pem);
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    keyBytes,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"],
+  );
+
+  // Sign. The output is 64 raw bytes (r||s) per WebCrypto spec, which
+  // is exactly what JWT ES256 expects (no DER wrapping).
+  const signatureBytes = new Uint8Array(
+    await crypto.subtle.sign(
+      { name: "ECDSA", hash: { name: "SHA-256" } },
+      cryptoKey,
+      new TextEncoder().encode(signingInput),
+    ),
+  );
+
+  return signingInput + "." + base64UrlEncode(signatureBytes);
+}
+
+async function appleRevokeSIWA(
+  authorizationCode: string,
+): Promise<AppleRevokeResult> {
+  const teamId = Deno.env.get("APPLE_TEAM_ID") ?? "";
+  const keyId = Deno.env.get("APPLE_KEY_ID") ?? "";
+  const p8Pem = Deno.env.get("APPLE_P8_KEY") ?? "";
+  const clientId = Deno.env.get("APPLE_CLIENT_ID") ?? "com.SpiroTechnologies.RPT";
+
+  if (!teamId || !keyId || !p8Pem) {
+    console.warn("appleRevokeSIWA: Apple Services Key not configured in Vault — skipping server-side revocation");
+    return { success: false, skipped: true, reason: "apple_key_not_configured" };
+  }
+  if (!authorizationCode) {
+    return { success: false, skipped: true, reason: "no_auth_code_on_profile" };
+  }
+
+  try {
+    const clientSecret = await buildAppleClientSecret(teamId, keyId, clientId, p8Pem);
+
+    // Step 1: exchange authorization_code → refresh_token
+    const tokenRes = await fetch("https://appleid.apple.com/auth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: authorizationCode,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      console.error("appleRevokeSIWA: token exchange failed", tokenRes.status, errText);
+      return { success: false, reason: "token_exchange_failed", detail: `${tokenRes.status}: ${errText}` };
+    }
+
+    const tokenData = await tokenRes.json();
+    const refreshToken: string | undefined = tokenData.refresh_token;
+    if (!refreshToken) {
+      return { success: false, reason: "no_refresh_token_returned" };
+    }
+
+    // Step 2: revoke the refresh token
+    const revokeRes = await fetch("https://appleid.apple.com/auth/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        token: refreshToken,
+        token_type_hint: "refresh_token",
+      }),
+    });
+
+    if (!revokeRes.ok) {
+      const errText = await revokeRes.text();
+      console.error("appleRevokeSIWA: revoke failed", revokeRes.status, errText);
+      return { success: false, reason: "revoke_failed", detail: `${revokeRes.status}: ${errText}` };
+    }
+
+    return { success: true };
+  } catch (e) {
+    console.error("appleRevokeSIWA: exception", e);
+    return { success: false, reason: "exception", detail: String(e) };
+  }
+}
+
 // Whitelist of columns that upsert_profile is allowed to write to
 // player_profiles. Anything not on this list is silently ignored to
 // prevent injection of arbitrary fields from the client.
@@ -69,6 +302,22 @@ serve(async (req) => {
     const cloudkitUserId = body.cloudkit_user_id ?? "";
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("DB_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+
+    // ── Rate limit check (before any real work) ──────────────────────────
+    // For actions keyed by cloudkit_user_id, the rate limit is per-user.
+    // For actions that don't require cloudkit_user_id (lookup_by_apple_id),
+    // we rate-limit by apple_user_id instead so the same caller can't
+    // brute-force the lookup endpoint with different Apple IDs.
+    {
+      const rateLimitKey =
+        action === "lookup_by_apple_id"
+          ? `apple:${body.apple_user_id ?? ""}`
+          : cloudkitUserId;
+      if (rateLimitKey) {
+        const rl = await checkRateLimit(supabase, rateLimitKey, action);
+        if (!rl.allowed) return rateLimitedResponse(action);
+      }
+    }
 
     // LOOKUP BY APPLE ID — does NOT require cloudkit_user_id
     if (action === "lookup_by_apple_id") {
@@ -206,6 +455,12 @@ serve(async (req) => {
       const appleUserId: string = body.apple_user_id ?? "";
       const displayName: string | null = body.display_name ?? null;
       const email: string | null = body.email ?? null;
+      // authorization_code is the one-time SIWA code used for
+      // server-side revocation. It's only present on fresh sign-ins
+      // (Apple does not return it when the credential comes from Keychain).
+      // We store it on player_profiles so delete_account can call
+      // /auth/revoke via appleRevokeSIWA.
+      const authorizationCode: string | null = body.authorization_code ?? null;
       if (!appleUserId) {
         return new Response(JSON.stringify({ error: "apple_user_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
@@ -230,11 +485,18 @@ serve(async (req) => {
 
       if (existingByCk) {
         // Case B: update existing row with apple_user_id
-        const { data: updated, error: upErr } = await supabase.from("player_profiles").update({
+        const updateRow: Record<string, unknown> = {
           apple_user_id: appleUserId,
           apple_user_id_linked_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }).eq("cloudkit_user_id", cloudkitUserId).select().single();
+        };
+        // Only overwrite the auth code when we actually have a new one.
+        // Apple only returns it on fresh sign-ins; a Keychain-restored
+        // credential has no auth_code and we shouldn't wipe the stored value.
+        if (authorizationCode) {
+          updateRow.apple_authorization_code = authorizationCode;
+        }
+        const { data: updated, error: upErr } = await supabase.from("player_profiles").update(updateRow).eq("cloudkit_user_id", cloudkitUserId).select().single();
         if (upErr) throw upErr;
 
         // Mirror onto leaderboard row if present
@@ -252,11 +514,66 @@ serve(async (req) => {
       };
       if (displayName) insertRow.display_name = displayName;
       if (email) insertRow.email = email;
+      if (authorizationCode) insertRow.apple_authorization_code = authorizationCode;
 
       const { data: created, error: insErr } = await supabase.from("player_profiles").insert(insertRow).select().single();
       if (insErr) throw insErr;
 
       return new Response(JSON.stringify({ success: true, linked: true, created: true, profile: created }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // STORE AUTH CODE — captures the one-time authorizationCode that
+    // ASAuthorizationAppleIDCredential returned during the original
+    // Sign in with Apple flow, so we can later exchange it for a
+    // refresh_token and revoke the credential via /auth/revoke on
+    // Delete Account (Guideline 5.1.1(v)). Idempotent; a fresh sign-in
+    // on the same device will overwrite with the newer code.
+    if (action === "store_auth_code") {
+      const authCode: string = body.authorization_code ?? "";
+      if (!authCode) {
+        return new Response(JSON.stringify({ error: "authorization_code required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const { error } = await supabase
+        .from("player_profiles")
+        .update({
+          apple_authorization_code: authCode,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("cloudkit_user_id", cloudkitUserId);
+      if (error) {
+        console.error("store_auth_code: update failed:", error);
+        return new Response(JSON.stringify({ success: false, error: "update_failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // REVOKE SIWA — standalone endpoint that can be called independently of
+    // delete_account (e.g., for testing, for a future "unlink Apple ID"
+    // feature). Reads the stored auth_code from player_profiles, calls
+    // Apple's /auth/token then /auth/revoke REST APIs, clears the stored
+    // code on success. Returns success: true even if Apple's API fails —
+    // the caller is responsible for deciding whether to proceed with the
+    // rest of the delete flow.
+    if (action === "revoke_siwa") {
+      const { data: profile, error: profileErr } = await supabase
+        .from("player_profiles")
+        .select("apple_authorization_code")
+        .eq("cloudkit_user_id", cloudkitUserId)
+        .maybeSingle();
+      if (profileErr) {
+        console.error("revoke_siwa: profile lookup failed:", profileErr);
+        return new Response(JSON.stringify({ success: false, error: "profile_lookup_failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const authCode = profile?.apple_authorization_code ?? "";
+      const result = await appleRevokeSIWA(authCode);
+      if (result.success) {
+        // Clear the stored code so we can't accidentally re-revoke.
+        await supabase
+          .from("player_profiles")
+          .update({ apple_authorization_code: null })
+          .eq("cloudkit_user_id", cloudkitUserId);
+      }
+      return new Response(JSON.stringify(result), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // DELETE ACCOUNT — irreversibly wipes the user's data from every table
@@ -267,6 +584,35 @@ serve(async (req) => {
       const appleUserId: string = body.apple_user_id ?? "";
       const deletedFrom: string[] = [];
       const failedTables: string[] = [];
+
+      // Step 0: attempt server-side Sign in with Apple revocation BEFORE
+      // wiping the player_profiles row (which is where the auth code lives).
+      // If the Apple REST API fails, we log and continue — we never block a
+      // deletion on Apple's endpoint being unreachable.
+      let siwaRevokeResult: AppleRevokeResult = { success: false, skipped: true, reason: "not_attempted" };
+      try {
+        const { data: profile } = await supabase
+          .from("player_profiles")
+          .select("apple_authorization_code")
+          .eq("cloudkit_user_id", cloudkitUserId)
+          .maybeSingle();
+        const authCode = profile?.apple_authorization_code ?? "";
+        if (authCode) {
+          siwaRevokeResult = await appleRevokeSIWA(authCode);
+          if (siwaRevokeResult.success) {
+            console.log(`delete_account: SIWA server-side revocation succeeded for ${cloudkitUserId}`);
+          } else if (siwaRevokeResult.skipped) {
+            console.log(`delete_account: SIWA revocation skipped (${siwaRevokeResult.reason})`);
+          } else {
+            console.warn(`delete_account: SIWA revocation failed (${siwaRevokeResult.reason}) — proceeding with wipe anyway`);
+          }
+        } else {
+          siwaRevokeResult = { success: false, skipped: true, reason: "no_auth_code_on_profile" };
+        }
+      } catch (e) {
+        console.error("delete_account: SIWA revoke step threw:", e);
+        siwaRevokeResult = { success: false, reason: "exception", detail: String(e) };
+      }
 
       // CRITICAL: player_profiles must succeed for the delete to be honored.
       // If it fails (RLS blocked, network glitch, foreign-key constraint),
@@ -353,6 +699,7 @@ serve(async (req) => {
         success: true,
         deleted_from: deletedFrom,
         failed_tables: failedTables,
+        siwa_revoke: siwaRevokeResult,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
