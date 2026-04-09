@@ -28,6 +28,15 @@
 //       prints the exact command you'd run to actually expire them.
 //       Never expires anything without an explicit follow-up.
 //
+//   node tools/appstoreconnect.js expire-intermediates <marketingVersion>
+//       Scoped to a single marketing version (e.g. "2.8.12"). Keeps
+//       the newest live build of that version, expires all older
+//       live builds of the SAME version, and does NOT touch any
+//       other version. This is the subcommand wired into the
+//       post-upload step of the release pipeline — it's safe to
+//       run repeatedly and a no-op if there's only one live build.
+//       Pass --dry-run to preview without expiring.
+//
 // Config via environment variables (with sensible defaults):
 //   APP_STORE_CONNECT_KEY_ID    default: 2Y773SS5ZG
 //   APP_STORE_CONNECT_ISSUER_ID default: afd36895-c825-4ae2-b576-0c259f6b49ca
@@ -267,6 +276,79 @@ async function cmdExpireCleanup() {
   console.log(`   node tools/appstoreconnect.js expire ${toExpire.join(' ')}`);
 }
 
+// Scoped to a single marketing version. Keeps the newest live build,
+// expires older live builds of the SAME version, leaves every other
+// version alone. Used as the auto-cleanup step at the tail of the
+// release pipeline. Safe to call on a version with only one live
+// build (no-op) or zero live builds (no-op).
+async function cmdExpireIntermediates(args) {
+  const dryRun = args.includes('--dry-run');
+  const version = args.find((a) => !a.startsWith('--'));
+  if (!version) {
+    console.error('Usage: expire-intermediates <marketingVersion> [--dry-run]');
+    process.exit(1);
+  }
+
+  const jwtToken = makeJWT();
+  const appId = await resolveAppId(jwtToken);
+  const res = await apiRequest(
+    'GET',
+    `/v1/builds?filter[app]=${appId}&filter[expired]=false&sort=-uploadedDate&limit=200`,
+    jwtToken
+  );
+
+  // Fetch marketing version for each build (relationship fetch).
+  const matching = [];
+  for (const b of res.data || []) {
+    const full = await apiRequest(
+      'GET',
+      `/v1/builds/${b.id}?include=preReleaseVersion`,
+      jwtToken
+    );
+    const preReleaseVersionId = full.data.relationships.preReleaseVersion.data.id;
+    const included = (full.included || []).find((i) => i.id === preReleaseVersionId);
+    const marketingVersion = included ? included.attributes.version : null;
+    if (marketingVersion === version) {
+      matching.push({
+        id: b.id,
+        buildNumber: b.attributes.version,
+        uploadedDate: b.attributes.uploadedDate,
+      });
+    }
+  }
+
+  if (matching.length <= 1) {
+    console.log(`${version}: ${matching.length} live build(s) — nothing to expire.`);
+    return;
+  }
+
+  matching.sort((a, b) => (b.uploadedDate || '').localeCompare(a.uploadedDate || ''));
+  const keep = matching[0];
+  const toExpire = matching.slice(1);
+
+  console.log(`${version}: ${matching.length} live builds`);
+  console.log(`   KEEP    ${keep.id}  build ${keep.buildNumber}  ${keep.uploadedDate}`);
+  for (const b of toExpire) {
+    console.log(`   ${dryRun ? 'WOULD-EXPIRE' : 'EXPIRE     '}  ${b.id}  build ${b.buildNumber}  ${b.uploadedDate}`);
+  }
+
+  if (dryRun) {
+    console.log(`(dry run — ${toExpire.length} build(s) would be expired)`);
+    return;
+  }
+
+  for (const b of toExpire) {
+    try {
+      await apiRequest('PATCH', `/v1/builds/${b.id}`, jwtToken, {
+        data: { type: 'builds', id: b.id, attributes: { expired: true } },
+      });
+      console.log(`✓ Expired ${b.id}`);
+    } catch (e) {
+      console.error(`✗ Failed to expire ${b.id}: ${e.message}`);
+    }
+  }
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -281,12 +363,16 @@ async function main() {
     case 'expire-cleanup':
       await cmdExpireCleanup();
       break;
+    case 'expire-intermediates':
+      await cmdExpireIntermediates(args);
+      break;
     default:
       console.log('Usage: node tools/appstoreconnect.js <command>');
       console.log('Commands:');
-      console.log('  list [--all]           List current TestFlight builds');
-      console.log('  expire-cleanup         Propose a cleanup plan (dry run)');
-      console.log('  expire <id> [<id>...]  Expire specific build IDs');
+      console.log('  list [--all]                      List current TestFlight builds');
+      console.log('  expire-cleanup                    Propose a global cleanup plan (dry run)');
+      console.log('  expire-intermediates <version>    Keep newest of one marketing version, expire the rest');
+      console.log('  expire <id> [<id>...]             Expire specific build IDs');
       process.exit(1);
   }
 }
