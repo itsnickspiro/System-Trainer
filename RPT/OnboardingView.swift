@@ -65,6 +65,13 @@ struct OnboardingView: View {
     /// computes the transition.
     @State private var navigatingBackward: Bool = false
 
+    /// Driven by UIResponder.keyboardWillShow/Hide notifications. When true,
+    /// a custom Done overlay is rendered via safeAreaInset(.bottom) so we
+    /// have full layout control over the dismiss button — bypassing the
+    /// system .toolbar(.keyboard) accessory bar which has been ignoring
+    /// padding modifiers across three different attempts in builds 32-34.
+    @State private var isKeyboardVisible: Bool = false
+
     // ── Services ──────────────────────────────────────────────────────────────
     @StateObject private var healthManager       = HealthManager()
     @StateObject private var notificationManager = NotificationManager.shared
@@ -99,14 +106,13 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            // Tap-anywhere-on-background dismisses the keyboard. This is
-            // the primary keyboard-dismissal affordance now — the system
-            // accessory bar Done button is a backup. The .contentShape
-            // makes the otherwise-hit-test-empty Color register taps.
-            Color.black
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { dismissKeyboard() }
+            // Background — no tap gesture here. The previous build attached
+            // .onTapGesture for keyboard dismiss directly to Color.black
+            // and it was racing/winning over the back chevron Button (which
+            // has only a 16pt SF-symbol hit area), preventing back navigation
+            // entirely. Tap-to-dismiss is now a simultaneousGesture on the
+            // inner VStack so Buttons inside it always win first.
+            Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Progress bar (hidden on boot and ready screens)
@@ -138,6 +144,14 @@ struct OnboardingView: View {
                         .padding(.bottom, 40)
                 }
             }
+            // Tap-anywhere-to-dismiss-keyboard. simultaneousGesture means
+            // child Buttons (like the back chevron) still receive their
+            // taps first — only empty-space taps fall through to dismiss
+            // the keyboard. Replaces the previous Color.black.onTapGesture
+            // which was racing/winning over the back button.
+            .simultaneousGesture(
+                TapGesture().onEnded { dismissKeyboard() }
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(.dark)
@@ -145,21 +159,44 @@ struct OnboardingView: View {
         // (Name, Body Stats, etc). The system places this in the keyboard
         // accessory bar, so it's only visible while a TextField is focused
         // and disappears the moment the keyboard goes down.
-        // Keyboard accessory bar: a Spacer pushes the Done button to the
-        // trailing edge with the system's natural padding. This is the
-        // backup dismiss path; the primary one is tap-anywhere on the
-        // black background (handled above by the .onTapGesture on
-        // Color.black). Past attempts to add explicit cyan-capsule
-        // styling here were ignored by the system accessory bar's
-        // layout, so this version uses the simplest native shape and
-        // lets iOS handle the spacing.
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done", action: dismissKeyboard)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.cyan)
+        // Custom keyboard accessory: full SwiftUI control of layout via
+        // safeAreaInset, instead of fighting the system .toolbar(.keyboard)
+        // bar which has been ignoring padding/styling modifiers across
+        // three previous build attempts. The view appears whenever any
+        // TextField in onboarding becomes first responder (driven by
+        // UIResponder keyboard notifications below) and disappears
+        // synchronously with the keyboard. We control the spacing,
+        // padding, capsule styling, and trailing margin completely.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isKeyboardVisible {
+                HStack {
+                    Spacer()
+                    Button(action: dismissKeyboard) {
+                        Text("Done")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule().fill(Color.cyan)
+                                    .shadow(color: .cyan.opacity(0.5), radius: 10)
+                            )
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 12)
+                    .padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Color.black.opacity(0.85))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isKeyboardVisible)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
         }
     }
 
@@ -168,7 +205,14 @@ struct OnboardingView: View {
     private var progressBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                // Back chevron
+                // Back chevron. Hit area is expanded to the 44×44 pt HIG
+                // minimum via .frame + .contentShape(Rectangle()) — without
+                // those, the SF symbol's 16pt glyph hit area was so small
+                // that taps near the chevron fell through to whatever
+                // gesture was watching the parent (most recently the
+                // .onTapGesture on Color.black, which broke back navigation
+                // entirely in build 34). buttonStyle(.plain) prevents the
+                // system from inserting its own padding around the label.
                 Button {
                     // Flag MUST be set inside the same withAnimation block
                     // (and before currentStep mutates) so SwiftUI captures
@@ -181,7 +225,10 @@ struct OnboardingView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(currentStep <= 1 ? .clear : .white.opacity(0.7))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .disabled(currentStep <= 1)
 
                 GeometryReader { geo in
@@ -943,7 +990,7 @@ private struct ClassSelectionStepView: View {
                         .padding(.top, 6)
                         .transition(.opacity)
                 } else {
-                    Text("Optional — pick one for a 10% XP bonus on matching quests.")
+                    Text("Pick a class to continue — you'll get a 10% XP bonus on matching quests.")
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.4))
                         .multilineTextAlignment(.center)
@@ -1102,14 +1149,22 @@ private struct BodyStatsStepView: View {
                         StatField(label: "WEIGHT", placeholder: "70", unit: "kg", text: $weightText)
                     }
                 } else {
-                    HStack(spacing: 12) {
-                        StatField(label: "AGE", placeholder: "25", unit: "yrs", text: $ageText)
-                        StatField(label: "FT", placeholder: "5", unit: "ft", text: $ftText)
-                            .onChange(of: ftText) { _, _ in commitImperialToMetric() }
-                        StatField(label: "IN", placeholder: "7", unit: "in", text: $inText)
-                            .onChange(of: inText) { _, _ in commitImperialToMetric() }
-                        StatField(label: "WEIGHT", placeholder: "154", unit: "lbs", text: $lbsText)
-                            .onChange(of: lbsText) { _, _ in commitImperialToMetric() }
+                    // Imperial: split into two rows so 4 fields don't try
+                    // to fit in one HStack (overflows on iPhone SE 375pt
+                    // wide). Age gets its own row, Height (FT/IN) and
+                    // Weight share the second row.
+                    VStack(spacing: 10) {
+                        HStack(spacing: 12) {
+                            StatField(label: "AGE", placeholder: "25", unit: "yrs", text: $ageText)
+                        }
+                        HStack(spacing: 10) {
+                            StatField(label: "FT", placeholder: "5", unit: "ft", text: $ftText)
+                                .onChange(of: ftText) { _, _ in commitImperialToMetric() }
+                            StatField(label: "IN", placeholder: "7", unit: "in", text: $inText)
+                                .onChange(of: inText) { _, _ in commitImperialToMetric() }
+                            StatField(label: "WEIGHT", placeholder: "154", unit: "lbs", text: $lbsText)
+                                .onChange(of: lbsText) { _, _ in commitImperialToMetric() }
+                        }
                     }
                 }
 
@@ -1178,6 +1233,7 @@ private struct BodyStatsStepView: View {
                         )
                 )
                 .animation(.easeInOut(duration: 0.2), value: estimatedCalories)
+                .padding(.bottom, 20)  // breathing room above the nav buttons on iPhone SE
             }
         }
     }
@@ -1256,7 +1312,7 @@ private struct AvatarPickerStepView: View {
                         ForEach(0..<8, id: \.self) { _ in
                             RoundedRectangle(cornerRadius: 14)
                                 .fill(Color.white.opacity(0.06))
-                                .frame(height: 70)
+                                .frame(height: 88)
                         }
                     }
                     Text("Loading avatars…")
@@ -1316,7 +1372,7 @@ private struct AvatarStepView: View {
                         ForEach(0..<8, id: \.self) { _ in
                             RoundedRectangle(cornerRadius: 14)
                                 .fill(Color.white.opacity(0.06))
-                                .frame(height: 70)
+                                .frame(height: 88)
                         }
                     }
                 } else {
@@ -1442,6 +1498,22 @@ private struct WorkoutPlanStepView: View {
                     }
                 }
 
+                // Loading state when the AnimeWorkoutPlanService catalog
+                // hasn't fetched yet — without this, the user sees only
+                // a single "Choose your plan" card with no popular-plan
+                // strip and no indication that more plans are loading.
+                if planService.all.isEmpty {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .tint(.orange)
+                        Text("Loading workout plans…")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                            .tracking(1)
+                    }
+                    .padding(.top, 6)
+                }
+
                 // Mini anime plan preview strip — quick picks of the
                 // most popular plans without opening the full picker.
                 if !previewPlans.isEmpty {
@@ -1470,6 +1542,13 @@ private struct WorkoutPlanStepView: View {
                 plans: visiblePlans,
                 selectedPlanID: $selectedPlanID
             )
+        }
+        .onAppear {
+            // Trigger a refresh if the launch chain hasn't finished
+            // hydrating the plan catalog yet (mirrors AvatarPickerStepView).
+            if planService.all.isEmpty {
+                Task { await planService.refresh() }
+            }
         }
     }
 }
