@@ -648,9 +648,18 @@ final class DataManager: ObservableObject {
         }
 
         if completed > 0 {
-            // Increment workout counter for achievement evaluation
+            NotificationInboxManager.shared.add(
+                title: "Quest\(completed > 1 ? "s" : "") Auto-Completed!",
+                body: "\(completed) workout quest\(completed > 1 ? "s" : "") completed automatically.",
+                category: "quest"
+            )
+            // Increment workout counters for achievement + weekly goal evaluation
             let workoutCount = UserDefaults.standard.integer(forKey: "rpt_total_workouts_logged") + 1
             UserDefaults.standard.set(workoutCount, forKey: "rpt_total_workouts_logged")
+            let weeklyCount = UserDefaults.standard.integer(forKey: "rpt_weekly_workouts") + 1
+            UserDefaults.standard.set(weeklyCount, forKey: "rpt_weekly_workouts")
+            // Check weekly quest completion
+            autoCompleteWeeklyQuests()
             // Evaluate achievements and report to events after workout
             AchievementsService.shared.evaluate()
             Task { await EventsService.shared.updateAllEventProgress() }
@@ -696,6 +705,13 @@ final class DataManager: ObservableObject {
                 completeQuest(quest)
                 completed += 1
             }
+        }
+        if completed > 0 {
+            NotificationInboxManager.shared.add(
+                title: "Health Quest\(completed > 1 ? "s" : "") Complete!",
+                body: "\(completed) health quest\(completed > 1 ? "s" : "") auto-completed from HealthKit data.",
+                category: "quest"
+            )
         }
         return completed
     }
@@ -786,20 +802,25 @@ final class DataManager: ObservableObject {
         // so the player can see what they missed. QuestsView locks
         // interaction for any day that isn't today.
 
-        // ── Check if yesterday's quests were all completed ────────────────────
-        // If any were left incomplete, set the hardcore reset deadline to now
-        // so applyHardcoreResetIfNeeded() can trigger the penalty.
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today.addingTimeInterval(-86400)
-        let yesterdayDescriptor = FetchDescriptor<Quest>(
-            predicate: #Predicate<Quest> { q in q.dateTag >= yesterday && q.dateTag < today }
-        )
-        if let yesterdayQuests = try? context.fetch(yesterdayDescriptor), !yesterdayQuests.isEmpty {
-            let allComplete = yesterdayQuests.allSatisfy { $0.isCompleted }
-            if !allComplete && profile.hardcoreResetDeadline == nil {
-                // Missed quests — arm the reset deadline for end of today,
-                // giving the player time to use an Exemption Pass before the penalty fires.
-                let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86400)
-                profile.hardcoreResetDeadline = endOfToday
+        // ── Check if last week's WEEKLY quests were all completed ─────────────
+        // Only weekly quests trigger punishment. Daily quests reward XP but
+        // missing them has no penalty — keeps the system encouraging, not punishing.
+        let calendar = Calendar.current
+        let weekday = calendar.component(.weekday, from: today)
+        let isMonday = weekday == 2
+        if isMonday {
+            // Look back at last week's quests (Monday to Sunday)
+            let lastMonday = calendar.date(byAdding: .day, value: -7, to: today)!
+            let weeklyDescriptor = FetchDescriptor<Quest>(
+                predicate: #Predicate<Quest> { q in q.dateTag >= lastMonday && q.dateTag < today }
+            )
+            if let lastWeekQuests = try? context.fetch(weeklyDescriptor) {
+                let weeklyOnly = lastWeekQuests.filter { $0.type == .weekly }
+                let anyIncomplete = weeklyOnly.contains { !$0.isCompleted }
+                if anyIncomplete && !weeklyOnly.isEmpty && profile.hardcoreResetDeadline == nil {
+                    let endOfToday = calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86400)
+                    profile.hardcoreResetDeadline = endOfToday
+                }
             }
         }
 
@@ -837,7 +858,96 @@ final class DataManager: ObservableObject {
         let quests = buildHealthDrivenQuests(for: profile, on: today)
         quests.forEach { addQuest($0) }
 
+        // Generate weekly quests on Mondays (or first launch of the week)
+        generateWeeklyQuestsIfNeeded(for: profile, on: today)
+
         UserDefaults.standard.set(today, forKey: key)
+    }
+
+    // MARK: - Weekly Quest Generation
+
+    /// Generates weekly quests once per week (Monday). Weekly quests are the ONLY
+    /// quests that trigger punishment for non-completion.
+    private func generateWeeklyQuestsIfNeeded(for profile: Profile, on date: Date) {
+        let weekKey = "weeklyQuestsGeneratedWeek"
+        let calendar = Calendar.current
+
+        // Compute this week's Monday
+        let weekday = calendar.component(.weekday, from: date)
+        let daysFromMonday = weekday == 1 ? 6 : weekday - 2 // Sun=6, Mon=0, Tue=1...
+        let thisMonday = calendar.date(byAdding: .day, value: -daysFromMonday, to: calendar.startOfDay(for: date))!
+
+        // Skip if already generated for this week
+        let lastWeekGenerated = UserDefaults.standard.object(forKey: weekKey) as? Date ?? .distantPast
+        guard !calendar.isDate(lastWeekGenerated, inSameDayAs: thisMonday) else { return }
+
+        // Reset weekly workout counter
+        UserDefaults.standard.set(0, forKey: "rpt_weekly_workouts")
+
+        // Due date: next Monday at midnight
+        let nextMonday = calendar.date(byAdding: .day, value: 7, to: thisMonday)!
+
+        let rc = RemoteConfigService.shared
+        let workoutGoal = rc.int("weekly_workout_goal", default: 4)
+        let weeklyXP = rc.int("xp_weekly_workout_goal", default: 200)
+
+        addQuest(Quest(
+            title: "Weekly Training Goal",
+            details: "Complete \(workoutGoal) workouts this week. Any type counts — strength, cardio, flexibility, or mixed. Log each workout to track progress.",
+            type: .weekly,
+            createdAt: Date(),
+            dueDate: nextMonday,
+            xpReward: weeklyXP,
+            creditReward: 50,
+            statTarget: "discipline",
+            completionCondition: "weekly_workouts:\(workoutGoal)",
+            dateTag: thisMonday
+        ))
+
+        UserDefaults.standard.set(thisMonday, forKey: weekKey)
+    }
+
+    /// Checks weekly quests and auto-completes them when targets are met.
+    /// Called after each workout is logged.
+    @discardableResult
+    func autoCompleteWeeklyQuests() -> Int {
+        guard let context = modelContext else { return 0 }
+
+        // Find incomplete weekly quests
+        let calendar = Calendar.current
+        let weekday = calendar.component(.weekday, from: Date())
+        let daysFromMonday = weekday == 1 ? 6 : weekday - 2
+        let thisMonday = calendar.date(byAdding: .day, value: -daysFromMonday, to: calendar.startOfDay(for: Date()))!
+        let nextMonday = calendar.date(byAdding: .day, value: 7, to: thisMonday)!
+
+        let descriptor = FetchDescriptor<Quest>(
+            predicate: #Predicate<Quest> { q in
+                q.dateTag >= thisMonday && q.dateTag < nextMonday && !q.isCompleted
+            }
+        )
+        guard let weeklyQuests = try? context.fetch(descriptor) else { return 0 }
+
+        let weeklyWorkouts = UserDefaults.standard.integer(forKey: "rpt_weekly_workouts")
+        var completed = 0
+
+        for quest in weeklyQuests {
+            guard quest.type == .weekly,
+                  let condition = quest.completionCondition else { continue }
+
+            if condition.hasPrefix("weekly_workouts:") {
+                let target = Int(condition.dropFirst("weekly_workouts:".count)) ?? 4
+                if weeklyWorkouts >= target {
+                    completeQuest(quest)
+                    completed += 1
+                    NotificationInboxManager.shared.add(
+                        title: "Weekly Goal Complete!",
+                        body: "You hit your weekly workout target of \(target). Great discipline!",
+                        category: "quest"
+                    )
+                }
+            }
+        }
+        return completed
     }
 
     /// Rehabilitation Arc quests — 50% XP, gentler targets, 3 days post-reset.
@@ -846,13 +956,16 @@ final class DataManager: ObservableObject {
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: date)
         let dayNum = 4 - max(0, profile.recoveryDaysRemaining) // Day 1, 2, or 3
 
-        // ── Recovery Arc Header Quest ─────────────────────────────────────────
-        quests.append(Quest(
+        // ── Recovery Arc Header Quest (auto-completed — it's an info banner, not a task) ──
+        let header = Quest(
             title: "[REHABILITATION ARC] Day \(dayNum) of 3",
             details: "System detected a critical failure. Reduced difficulty protocols active. Complete all quests to rebuild your foundation. 50% XP penalty lifted after 3 days.",
             type: .daily, createdAt: Date(), dueDate: tomorrow,
             xpReward: 25, statTarget: "discipline", dateTag: date
-        ))
+        )
+        header.isCompleted = true
+        header.completedAt = Date()
+        quests.append(header)
 
         // ── Light Movement — 5,000 steps (half of normal) ────────────────────
         quests.append(Quest(
@@ -1220,14 +1333,19 @@ final class DataManager: ObservableObject {
         switch action {
         case .drinkWater:
             profile.recordWaterIntake()
+            ActivityLogManager.shared.log(.health, "Drank water (+1 cup)", detail: "Total: \(profile.waterIntake) cups today")
         case .recordMeal(let healthiness):
             profile.recordMeal(healthiness: healthiness)
+            ActivityLogManager.shared.log(.health, "Logged meal (\(healthiness))")
         case .recordWorkout(let type, let duration):
             profile.recordWorkout(type: type, duration: duration)
+            ActivityLogManager.shared.log(.health, "Logged \(type.displayName) workout", detail: "\(duration) minutes")
         case .recordSleep(let hours):
             profile.recordSleep(hours: hours)
+            ActivityLogManager.shared.log(.health, "Logged \(String(format: "%.1f", hours))h sleep")
         case .recordMeditation(let minutes):
             profile.recordMeditation(minutes: minutes)
+            ActivityLogManager.shared.log(.health, "Meditation session", detail: "\(minutes) minutes")
         }
 
         saveLocalChanges()

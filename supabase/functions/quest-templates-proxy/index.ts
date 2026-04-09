@@ -34,11 +34,12 @@ serve(async (req) => {
       supabase
         .from("quest_templates")
         .select(
-          "template_key, arc_key, title, details, quest_type, stat_target, " +
-          "xp_base, min_level, max_level, condition, is_enabled"
+          "key, requires_arc, title, subtitle, quest_type, category, " +
+          "condition_type, condition_target, xp_reward, credit_reward, " +
+          "difficulty, sort_order, is_active"
         )
-        .eq("is_enabled", true)
-        .order("min_level", { ascending: true }),
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true }),
 
       supabase
         .from("quest_arcs")
@@ -64,20 +65,46 @@ serve(async (req) => {
       );
     }
 
+    // Map DB condition_type → client completionCondition format
+    const conditionTypeMap: Record<string, string> = {
+      steps: "steps",
+      calories_burned: "calories",
+      workout_logged: "workout",
+      food_logged: "meals",
+      water_logged: "water",
+      sleep_hours: "sleep",
+      streak_days: "streak",
+      weight_logged: "weight",
+      coach_interaction: "coach",
+      manual: "manual",
+      custom: "custom",
+    };
+
     // Map snake_case DB columns → camelCase to match Swift Codable structs
-    const templates = (templatesResult.data ?? []).map((row: Record<string, unknown>) => ({
-      templateKey: row.template_key,
-      arcKey:      row.arc_key      ?? null,
-      title:       row.title,
-      details:     row.details,
-      questType:   row.quest_type,
-      statTarget:  row.stat_target  ?? null,
-      xpBase:      row.xp_base,
-      minLevel:    row.min_level,
-      maxLevel:    row.max_level    ?? null,
-      condition:   row.condition    ?? null,
-      isEnabled:   row.is_enabled,
-    }));
+    const templates = (templatesResult.data ?? []).map((row: Record<string, unknown>) => {
+      // Build completionCondition from condition_type + condition_target
+      const dbType = (row.condition_type as string) ?? "";
+      const clientType = conditionTypeMap[dbType] ?? dbType;
+      const target = row.condition_target as string | null;
+      const condition = clientType && target ? `${clientType}:${target}` : (clientType || null);
+
+      return {
+        key:           row.key,
+        arcKey:        row.requires_arc ?? null,
+        title:         row.title,
+        subtitle:      row.subtitle     ?? null,
+        questType:     row.quest_type,
+        category:      row.category     ?? null,
+        condition,
+        conditionType: row.condition_type,
+        conditionTarget: row.condition_target,
+        xpReward:      row.xp_reward,
+        creditReward:  row.credit_reward ?? 0,
+        difficulty:    row.difficulty    ?? "normal",
+        sortOrder:     row.sort_order   ?? 0,
+        isEnabled:     row.is_active,
+      };
+    });
 
     const arcs = (arcsResult.data ?? []).map((row: Record<string, unknown>) => ({
       arcKey:      row.arc_key,

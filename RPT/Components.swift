@@ -527,7 +527,7 @@ struct StatDetailView: View {
         )
         .sheet(isPresented: $showSleepLog) {
             SleepLogSheet(hours: $sleepHoursInput) { hours in
-                profile.recordSleep(hours: hours)
+                DataManager.shared.recordHealthAction(.recordSleep(hours: hours))
             }
         }
         .sheet(isPresented: $showMeditation) {
@@ -874,36 +874,31 @@ struct QuestRow: View {
                 }
             }
 
-            // Action button
-            Button(action: { if !isLocked { onToggle?() } }) {
-                ZStack {
-                    Circle()
-                        .fill(quest.isCompleted ? .green.opacity(0.2) : isLocked ? .gray.opacity(0.05) : .gray.opacity(0.1))
-                        .frame(width: 44, height: 44)
-                        .overlay(
-                            Circle()
-                                .stroke(quest.isCompleted ? .green : .gray.opacity(isLocked ? 0.3 : 0.5), lineWidth: 2)
-                        )
+            // Status indicator (auto-complete only — no manual toggle)
+            ZStack {
+                Circle()
+                    .fill(quest.isCompleted ? .green.opacity(0.2) : .gray.opacity(0.1))
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Circle()
+                            .stroke(quest.isCompleted ? .green : .gray.opacity(0.5), lineWidth: 2)
+                    )
 
-                    if quest.isCompleted {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.green)
-                    } else if isLocked {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.gray.opacity(0.5))
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.gray)
-                    }
+                if quest.isCompleted {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.green)
+                } else if isLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.gray.opacity(0.5))
+                } else {
+                    Image(systemName: "circle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.gray.opacity(0.4))
                 }
             }
-            .buttonStyle(.plain)
-            .allowsHitTesting(!isLocked)
-            .accessibilityLabel(quest.isCompleted ? "Mark \(quest.title) incomplete" : "Complete \(quest.title)")
-            .accessibilityHint(isLocked ? "Locked — past day" : "Double-tap to toggle")
+            .accessibilityLabel(quest.isCompleted ? "\(quest.title) completed" : "\(quest.title) in progress")
         }
         .padding()
         .background(
@@ -1021,42 +1016,20 @@ struct QuestDetailSheet: View {
                             }
                         }
 
-                        // Complete / Uncomplete button
-                        if isLocked {
-                            HStack(spacing: 10) {
-                                Image(systemName: "lock.fill")
-                                    .font(.system(size: 20))
-                                Text("Locked — past day")
-                                    .font(.system(size: 16, weight: .bold))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color.gray.opacity(0.3))
-                            )
-                            .foregroundColor(.secondary)
-                        } else {
-                            Button(action: {
-                                onToggle?()
-                                dismiss()
-                            }) {
-                                HStack(spacing: 10) {
-                                    Image(systemName: quest.isCompleted ? "arrow.uturn.left.circle.fill" : "checkmark.circle.fill")
-                                        .font(.system(size: 20))
-                                    Text(quest.isCompleted ? "Mark Incomplete" : "Complete Quest")
-                                        .font(.system(size: 16, weight: .bold))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .fill(quest.isCompleted ? Color.orange : Color.green)
-                                )
-                                .foregroundColor(.white)
-                            }
-                            .buttonStyle(.plain)
+                        // Quest status (auto-complete only)
+                        HStack(spacing: 10) {
+                            Image(systemName: quest.isCompleted ? "checkmark.circle.fill" : "circle.dotted")
+                                .font(.system(size: 20))
+                            Text(quest.isCompleted ? "Completed" : "In Progress — completes automatically")
+                                .font(.system(size: 16, weight: .bold))
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(quest.isCompleted ? Color.green.opacity(0.2) : Color.cyan.opacity(0.1))
+                        )
+                        .foregroundColor(quest.isCompleted ? .green : .cyan)
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 30)

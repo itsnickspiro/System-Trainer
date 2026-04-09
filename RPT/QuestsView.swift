@@ -12,7 +12,6 @@ struct QuestsView: View {
     }, sort: \Quest.createdAt, order: .reverse) private var quests: [Quest]
     @ObservedObject private var dataManager = DataManager.shared
     @State private var selectedDay = Date()
-    @State private var showingCreateQuest = false
     @State private var impossibleWarnings: [ImpossibleDayDetector.ImpossibleWarning] = []
 
     /// True when the selected day is not today — quests are view-only, no XP awarded.
@@ -27,9 +26,65 @@ struct QuestsView: View {
     private var activeQuests: [Quest] {
         todaysQuests.filter { !$0.isCompleted }
     }
-    
+
     private var completedQuests: [Quest] {
         todaysQuests.filter { $0.isCompleted }
+    }
+
+    // MARK: - Quest section helpers
+
+    private enum QuestSection: String {
+        case weekly = "WEEKLY"
+        case daily = "DAILY"
+        case special = "SPECIAL"
+
+        var icon: String {
+            switch self {
+            case .weekly:  return "calendar.badge.clock"
+            case .daily:   return "sun.max.fill"
+            case .special: return "star.fill"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .weekly:  return .purple
+            case .daily:   return .cyan
+            case .special: return .yellow
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .weekly:  return "Punishment if incomplete"
+            case .daily:   return "No punishment"
+            case .special: return "Bonus"
+            }
+        }
+    }
+
+    private func section(for quest: Quest) -> QuestSection {
+        if quest.type == .weekly { return .weekly }
+        if quest.type == .oneTime { return .special }
+        return .daily
+    }
+
+    /// Weekly quests span the whole week — show them on every day's view.
+    private var weeklyQuests: [Quest] {
+        let calendar = Calendar.current
+        let weekday = calendar.component(.weekday, from: selectedDay)
+        let daysFromMonday = weekday == 1 ? 6 : weekday - 2
+        let monday = calendar.date(byAdding: .day, value: -daysFromMonday, to: calendar.startOfDay(for: selectedDay))!
+        let nextMonday = calendar.date(byAdding: .day, value: 7, to: monday)!
+        return quests.filter { $0.type == .weekly && $0.dateTag >= monday && $0.dateTag < nextMonday }
+    }
+
+    private func quests(in section: QuestSection) -> [Quest] {
+        switch section {
+        case .weekly:  return weeklyQuests
+        case .daily:   return todaysQuests.filter { $0.type != .weekly && $0.type != .oneTime }
+        case .special: return todaysQuests.filter { $0.type == .oneTime }
+        }
     }
     
     var body: some View {
@@ -54,11 +109,6 @@ struct QuestsView: View {
                                 .stroke(Color.cyan, lineWidth: 1.5)
                         )
                         .shadow(color: .cyan.opacity(0.45), radius: 8, x: 0, y: 0)
-                    } else {
-                        Button("Add", systemImage: "plus") {
-                            showingCreateQuest = true
-                        }
-                        .foregroundColor(.cyan)
                     }
                 }
                 .padding(.horizontal)
@@ -102,78 +152,44 @@ struct QuestsView: View {
                                 .padding(.horizontal)
                         }
                         
-                        if activeQuests.isEmpty && completedQuests.isEmpty {
+                        if todaysQuests.isEmpty {
                             // Empty state
                             VStack(spacing: 16) {
                                 Image(systemName: "target")
                                     .font(.system(size: 48))
                                     .foregroundColor(.cyan.opacity(0.5))
-                                
+
                                 Text("No missions for this day")
                                     .font(.title3.bold())
                                     .foregroundColor(colorScheme == .dark ? .white : .black)
-                                
-                                Text("Create your first quest to get started!")
+
+                                Text("Quests will appear here at midnight.")
                                     .font(.body)
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.center)
-                                
-                                if !isDayLocked {
-                                    Button("Create Quest") {
-                                        showingCreateQuest = true
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                }
                             }
                             .padding(.vertical, 60)
                         } else {
-                            // Active missions section
-                            if !activeQuests.isEmpty {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack {
-                                        Text("ACTIVE MISSIONS")
-                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            .foregroundColor(.cyan.opacity(0.8))
-                                        Spacer()
-                                        Text("\(activeQuests.count) remaining")
-                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                            .foregroundColor(.orange)
-                                    }
-                                    .padding(.horizontal)
-                                    
-                                    LazyVStack(spacing: 8) {
-                                        ForEach(activeQuests) { quest in
-                                            QuestRow(quest: quest, onToggle: {
-                                                toggleQuestCompletion(quest)
-                                            }, isLocked: isDayLocked)
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                }
+                            // Progress summary
+                            let allQuests = todaysQuests + weeklyQuests.filter { q in !todaysQuests.contains { $0.id == q.id } }
+                            let total = allQuests.count
+                            let done = allQuests.filter(\.isCompleted).count
+                            HStack(spacing: 12) {
+                                ProgressView(value: Double(done), total: Double(max(1, total)))
+                                    .tint(.cyan)
+                                Text("\(done)/\(total)")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.cyan)
                             }
+                            .padding(.horizontal)
 
-                            // Completed missions section
-                            if !completedQuests.isEmpty {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack {
-                                        Text("COMPLETED")
-                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            .foregroundColor(.green.opacity(0.8))
-                                        Spacer()
-                                        Text("\(completedQuests.count) done")
-                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                            .foregroundColor(.green)
-                                    }
-                                    .padding(.horizontal)
-
-                                    LazyVStack(spacing: 8) {
-                                        ForEach(completedQuests) { quest in
-                                            QuestRow(quest: quest, onToggle: {
-                                                toggleQuestCompletion(quest)
-                                            }, isLocked: isDayLocked)
-                                        }
-                                    }
-                                    .padding(.horizontal)
+                            // Sections: Weekly → Daily → Special
+                            ForEach([QuestSection.weekly, .daily, .special], id: \.rawValue) { section in
+                                let sectionQuests = quests(in: section)
+                                if !sectionQuests.isEmpty {
+                                    questSection(section,
+                                                 active: sectionQuests.filter { !$0.isCompleted },
+                                                 completed: sectionQuests.filter(\.isCompleted))
                                 }
                             }
                         }
@@ -189,24 +205,46 @@ struct QuestsView: View {
             .onChange(of: todaysQuests.count) {
                 impossibleWarnings = ImpossibleDayDetector.detect(in: todaysQuests)
             }
-            .sheet(isPresented: $showingCreateQuest) {
-                CreateQuestView(selectedDay: selectedDay)
+        }
+    }
+    
+    @ViewBuilder
+    private func questSection(_ section: QuestSection, active: [Quest], completed: [Quest]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Section header
+            HStack(spacing: 6) {
+                Image(systemName: section.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(section.color)
+                Text(section.rawValue)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(section.color.opacity(0.9))
+                Text(section.subtitle)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color(.systemFill)))
+                Spacer()
+                let sectionTotal = active.count + completed.count
+                let sectionDone = completed.count
+                Text("\(sectionDone)/\(sectionTotal)")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(sectionDone == sectionTotal ? .green : .secondary)
             }
+            .padding(.horizontal)
+
+            LazyVStack(spacing: 8) {
+                ForEach(active) { quest in
+                    QuestRow(quest: quest, isLocked: isDayLocked)
+                }
+                ForEach(completed) { quest in
+                    QuestRow(quest: quest, isLocked: isDayLocked)
+                }
+            }
+            .padding(.horizontal)
         }
     }
-    
-    private func toggleQuestCompletion(_ quest: Quest) {
-        // Only allow toggling on today — prevents retroactive XP farming
-        guard !isDayLocked else { return }
-        if quest.isCompleted {
-            // Un-complete: refund XP so the player doesn't keep what they didn't earn
-            dataManager.uncompleteQuest(quest)
-        } else {
-            // Complete via DataManager so XP is awarded
-            dataManager.completeQuest(quest)
-        }
-    }
-    
 }
 
 // MARK: - Quest Category (drives form fields + XP calculation)
@@ -353,7 +391,7 @@ enum QuestDifficulty: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Base XP for this difficulty. Scaled by category weight in CreateQuestView.
+    /// Base XP for this difficulty.
     var baseXP: Int {
         switch self {
         case .easy:   return 25
@@ -363,346 +401,7 @@ enum QuestDifficulty: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Create Quest View
 
-private enum CustomPreset: CaseIterable {
-    case weekdays, weekends, biweekly
-
-    var label: String {
-        switch self {
-        case .weekdays: return "Weekdays"
-        case .weekends: return "Weekends"
-        case .biweekly: return "Biweekly"
-        }
-    }
-
-    // iOS weekday integers: 1=Sun, 2=Mon … 7=Sat
-    var repeatDays: [Int] {
-        switch self {
-        case .weekdays: return [2, 3, 4, 5, 6]         // Mon–Fri
-        case .weekends: return [1, 7]                   // Sun + Sat
-        case .biweekly: return [2, 5]                   // Mon + Thu (twice a week)
-        }
-    }
-}
-
-struct CreateQuestView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
-    @Environment(\.colorScheme) private var colorScheme
-
-    let selectedDay: Date
-
-    // Quest info
-    @State private var title = ""
-    @State private var details = ""
-    @State private var questType: QuestType = .oneTime
-    @State private var customPreset: CustomPreset = .weekdays
-    // Multi-day selection for weekly quests: weekday integers (1=Sun, 2=Mon, ... 7=Sat)
-    @State private var selectedWeekdays: Set<Int> = []
-
-    // Category — difficulty is auto-assigned from target value
-    @State private var category: QuestCategory = .workout
-
-    // Category-specific targets
-    @State private var stepTarget: Int = 10_000
-    @State private var calTarget: Int = 400
-    @State private var sleepTarget: Double = 8.0
-    @State private var workoutType: WorkoutType = .strength  // for workout category
-
-    private let stepOptions  = [5_000, 7_500, 10_000, 12_500, 15_000, 20_000]
-    private let calOptions   = [200, 300, 400, 500, 600, 800]
-    private let sleepOptions: [Double] = [6, 7, 7.5, 8, 9]
-
-    /// Auto-assigned difficulty based on category and target — no manual override.
-    private var difficulty: QuestDifficulty {
-        switch category {
-        case .steps:
-            if stepTarget < 7_500  { return .easy }
-            if stepTarget <= 12_500 { return .medium }
-            return .hard
-        case .calories:
-            if calTarget < 300  { return .easy }
-            if calTarget <= 500 { return .medium }
-            return .hard
-        case .sleep:
-            if sleepTarget < 7.0 { return .easy }
-            if sleepTarget <= 8.0 { return .medium }
-            return .hard
-        case .workout:
-            return .medium
-        case .manual:
-            return .medium
-        }
-    }
-
-    // XP is calculated from category + difficulty — user cannot set it
-    private var calculatedXP: Int {
-        let base = difficulty.baseXP
-        switch category {
-        case .steps:    return Int(Double(base) * (Double(stepTarget) / 10_000.0)).clamped(to: 15...200)
-        case .calories: return Int(Double(base) * (Double(calTarget) / 400.0)).clamped(to: 15...200)
-        case .sleep:    return Int(Double(base) * (sleepTarget / 8.0)).clamped(to: 15...150)
-        case .workout:  return base               // workout difficulty maps 1:1
-        case .manual:   return base               // manual quests use flat difficulty XP
-        }
-    }
-
-    private var completionCondition: String {
-        switch category {
-        case .steps:    return "steps:\(stepTarget)"
-        case .calories: return "calories:\(calTarget)"
-        case .sleep:    return "sleep:\(sleepTarget)"
-        case .workout:  return "workout:\(workoutType.rawValue)"
-        case .manual:   return "manual"
-        }
-    }
-
-    private var isValid: Bool {
-        !title.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                // ── Quest Info ──────────────────────────────────────────────
-                Section("Quest Info") {
-                    TextField("Title (e.g. Morning Run)", text: $title)
-                    TextField("Details / Description (optional)", text: $details, axis: .vertical)
-                        .lineLimit(3...5)
-                }
-
-                // ── Quest Type ───────────────────────────────────────────────
-                Section("Frequency") {
-                    Picker("Frequency", selection: $questType) {
-                        ForEach(QuestType.allCases) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-                    if questType == .custom {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Repeat schedule")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            HStack(spacing: 8) {
-                                ForEach(CustomPreset.allCases, id: \.label) { preset in
-                                    Button {
-                                        customPreset = preset
-                                    } label: {
-                                        Text(preset.label)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 8)
-                                            .background(
-                                                Capsule()
-                                                    .fill(customPreset == preset ? Color.cyan : Color(.systemGray5))
-                                            )
-                                            .foregroundColor(customPreset == preset ? .white : .primary)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    if questType == .weekly {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Repeat on days")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            HStack(spacing: 6) {
-                                ForEach([(1, "S"), (2, "M"), (3, "T"), (4, "W"), (5, "T"), (6, "F"), (7, "S")], id: \.0) { num, label in
-                                    let selected = selectedWeekdays.contains(num)
-                                    Button {
-                                        if selected { selectedWeekdays.remove(num) }
-                                        else { selectedWeekdays.insert(num) }
-                                    } label: {
-                                        Text(label)
-                                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                            .frame(width: 34, height: 34)
-                                            .background(
-                                                Circle()
-                                                    .fill(selected ? Color.cyan : Color(.systemGray5))
-                                            )
-                                            .foregroundColor(selected ? .white : .primary)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-
-                // ── Category ────────────────────────────────────────────────
-                Section {
-                    ForEach(QuestCategory.allCases) { cat in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) { category = cat }
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: cat.icon)
-                                    .foregroundColor(category == cat ? .cyan : .secondary)
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(cat.displayName)
-                                        .foregroundColor(colorScheme == .dark ? .white : .black)
-                                        .font(.body)
-                                    Text(cat.verificationNote)
-                                        .foregroundColor(.secondary)
-                                        .font(.caption)
-                                }
-                                Spacer()
-                                if category == cat {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.cyan)
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Category & Verification")
-                } footer: {
-                    Text("The selected category determines how completion is verified — no manual cheating.")
-                        .font(.caption)
-                }
-
-                // ── Category-specific target ────────────────────────────────
-                if category != .manual {
-                    Section("Target") {
-                        switch category {
-                        case .steps:
-                            Picker("Step Goal", selection: $stepTarget) {
-                                ForEach(stepOptions, id: \.self) { n in
-                                    Text(n.formatted()).tag(n)
-                                }
-                            }
-                        case .calories:
-                            Picker("Active Calories", selection: $calTarget) {
-                                ForEach(calOptions, id: \.self) { n in
-                                    Text("\(n) kcal").tag(n)
-                                }
-                            }
-                        case .sleep:
-                            Picker("Hours of Sleep", selection: $sleepTarget) {
-                                ForEach(sleepOptions, id: \.self) { h in
-                                    Text(String(format: "%.1fh", h)).tag(h)
-                                }
-                            }
-                        case .workout:
-                            Picker("Workout Type", selection: $workoutType) {
-                                ForEach(WorkoutType.allCases) { type in
-                                    Label(type.displayName, systemImage: type.icon).tag(type)
-                                }
-                            }
-                        case .manual:
-                            EmptyView()
-                        }
-                    }
-                }
-
-                // ── XP Preview (read-only) ───────────────────────────────────
-                Section {
-                    HStack {
-                        Label("Difficulty", systemImage: "chart.bar.fill")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(difficulty.displayName)
-                            .foregroundColor(difficulty.color)
-                            .fontWeight(.semibold)
-                    }
-                    HStack {
-                        Label("Stat Boost", systemImage: "bolt.fill")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(category.statTarget.capitalized)
-                            .foregroundColor(.cyan)
-                            .fontWeight(.semibold)
-                    }
-                    HStack {
-                        Label("XP Reward", systemImage: "star.fill")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("+\(calculatedXP) XP")
-                            .foregroundColor(.yellow)
-                            .fontWeight(.bold)
-                    }
-                    HStack {
-                        Label("Verified By", systemImage: "lock.shield.fill")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(category == .manual ? "Manual tap" : "HealthKit")
-                            .foregroundColor(category == .manual ? .orange : .green)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                } header: {
-                    Text("Reward Preview")
-                } footer: {
-                    Text("Difficulty is auto-assigned based on your target. XP scales with difficulty and cannot be set manually.")
-                        .font(.caption)
-                }
-
-                // ── Create button ────────────────────────────────────────────
-                Section {
-                    Button(action: createQuest) {
-                        HStack {
-                            Spacer()
-                            Label("Add Quest", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                            Spacer()
-                        }
-                    }
-                    .listRowBackground(isValid ? Color.cyan : Color.gray)
-                    .disabled(!isValid)
-                }
-            }
-            .navigationTitle("New Quest")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func createQuest() {
-        let trimmedTitle = title.trimmingCharacters(in: .whitespaces)
-        guard !trimmedTitle.isEmpty else { return }
-
-        let tag = Calendar.current.startOfDay(for: selectedDay)
-
-        let (saveType, days): (QuestType, [Int]) = {
-            switch questType {
-            case .custom:  return (.weekly, customPreset.repeatDays)
-            case .weekly:  return (.weekly, Array(selectedWeekdays).sorted())
-            default:       return (questType, [])
-            }
-        }()
-
-        let quest = Quest(
-            title: trimmedTitle,
-            details: details.trimmingCharacters(in: .whitespaces),
-            type: saveType,
-            repeatDays: days,
-            xpReward: calculatedXP,
-            isUserCreated: true,
-            statTarget: category.statTarget,
-            completionCondition: completionCondition,
-            dateTag: tag
-        )
-        context.insert(quest)
-        dismiss()
-    }
-}
-
-private extension Int {
-    func clamped(to range: ClosedRange<Int>) -> Int {
-        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
-    }
-}
 
 #Preview {
     QuestsView()

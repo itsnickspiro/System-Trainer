@@ -282,6 +282,7 @@ private struct FriendsLeaderboardView: View {
     @ObservedObject private var leaderboard = LeaderboardService.shared
     @State private var enteredCode = ""
     @State private var showAddField = false
+    @FocusState private var isFriendCodeFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -313,6 +314,13 @@ private struct FriendsLeaderboardView: View {
             .padding(.horizontal, 16)
         }
         .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isFriendCodeFocused = false }
+            }
+        }
+        .onTapGesture { isFriendCodeFocused = false }
         .task { await leaderboard.fetchFriends() }
         .refreshable { await leaderboard.fetchFriends() }
         .onReceive(NotificationCenter.default.publisher(for: .rptAddFriendDeepLink)) { notification in
@@ -342,6 +350,9 @@ private struct FriendsLeaderboardView: View {
                     TextField("Enter ST-XXXXX code", text: $enteredCode)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
+                        .focused($isFriendCodeFocused)
+                        .submitLabel(.done)
+                        .onSubmit { isFriendCodeFocused = false }
                         .font(.system(size: 15, design: .monospaced))
                         .padding(10)
                         .background(

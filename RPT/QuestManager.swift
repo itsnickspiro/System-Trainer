@@ -252,6 +252,7 @@ final class QuestManager {
                 dueDate: dueDate,
                 xpReward: dayPlan.xpReward,
                 statTarget: "strength",
+                completionCondition: "workout:any",
                 dateTag: date
             ))
         }
@@ -388,6 +389,7 @@ final class QuestManager {
             """
         }
 
+        let workoutCondition = exercise.workoutType == .strength ? "workout:strength" : "workout:cardio"
         return Quest(
             title: exercise.name,
             details: details,
@@ -396,6 +398,7 @@ final class QuestManager {
             dueDate: dueDate,
             xpReward: baseXP,
             statTarget: exercise.workoutType == .strength ? "strength" : "endurance",
+            completionCondition: workoutCondition,
             dateTag: date
         )
     }
@@ -444,6 +447,7 @@ final class QuestManager {
             dueDate: dueDate,
             xpReward: xp,
             statTarget: "endurance",
+            completionCondition: "workout:cardio",
             dateTag: date
         )]
     }
@@ -510,11 +514,11 @@ final class QuestManager {
     // MARK: - Urgency Quest (Penalty Warning)
 
     private func urgencyQuest(hoursLeft: Double, date: Date, dueDate: Date?) -> Quest {
-        Quest(
+        let q = Quest(
             title: "⚠ DEADLINE IMMINENT",
             details: """
             Warning: Midnight reset deadline in \(String(format: "%.1f", hoursLeft)) hours. \
-            Incomplete quests will trigger Level 1 reset. \
+            Incomplete quests will trigger stat penalties and streak reset. \
             Use an Exemption Pass from inventory to nullify the penalty. \
             Execute all active directives immediately.
             """,
@@ -525,6 +529,11 @@ final class QuestManager {
             statTarget: "discipline",
             dateTag: date
         )
+        // Pre-complete: this is a warning notification, not a real task.
+        // Leaving it incomplete would unfairly trigger punishment.
+        q.isCompleted = true
+        q.completedAt = Date()
+        return q
     }
 
     // MARK: - Discipline Anchor Quest
