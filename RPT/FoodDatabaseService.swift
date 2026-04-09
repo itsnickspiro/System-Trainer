@@ -21,12 +21,7 @@ class FoodDatabaseService: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.httpAdditionalHeaders = ["User-Agent": "SystemTrainer/1.0 (iOS; contact@rpt.app)"]
-        return URLSession(configuration: config)
-    }()
+    private let session: URLSession = PinnedURLSession.shared
 
     // MARK: Supabase foods-proxy
     private static let foodsProxyURL = "\(Secrets.supabaseURL)/functions/v1/foods-proxy"

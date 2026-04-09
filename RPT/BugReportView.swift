@@ -281,7 +281,7 @@ struct BugReportView: View {
         req.timeoutInterval = 30 // screenshots can be slow on weak connections
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await PinnedURLSession.shared.data(for: req)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? -1
                 submitError = "Server returned HTTP \(code). Try again later."

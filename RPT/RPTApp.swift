@@ -97,9 +97,15 @@ struct RPTApp: App {
                 if let memContainer = try? ModelContainer(for: schema, configurations: [memoryConfig]) {
                     return memContainer
                 }
-                // Truly unrecoverable. Empty schema as a last resort so the
-                // app can render an error UI instead of dying at launch.
-                return try! ModelContainer(for: Schema([]), configurations: [memoryConfig])
+                // Truly unrecoverable — log and return a minimal in-memory
+                // container so the app can render an error UI instead of
+                // crashing at launch.
+                print("[SwiftData] In-memory store also failed (\(error)). Creating minimal fallback.")
+                do {
+                    return try ModelContainer(for: schema, configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
+                } catch {
+                    fatalError("[SwiftData] Cannot create any ModelContainer — SwiftData runtime is broken: \(error)")
+                }
             }
         }
     }()

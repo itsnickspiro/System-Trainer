@@ -139,7 +139,7 @@ final class AnnouncementsService: ObservableObject {
         req.httpBody = try JSONSerialization.data(withJSONObject: ["player_level": playerLevel])
         req.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await PinnedURLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             return AnnouncementsPayload(announcements: [], notificationsConfig: nil)
         }

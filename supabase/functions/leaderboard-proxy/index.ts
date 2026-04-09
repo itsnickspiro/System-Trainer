@@ -2,13 +2,17 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
 // ── Rate limiting ──────────────────────────────────────────────────────────
 // Same pattern as player-proxy. Leaderboard reads are generous (Home tab
 // can refresh often); writes and social actions are tighter.
+function redactId(id: string): string {
+  if (id.length <= 8) return "***";
+  return id.substring(0, 4) + "..." + id.substring(id.length - 4);
+}
+
 const RATE_BUDGETS: Record<string, [number, number]> = {
   get_global:    [60, 60],   // 60 reads/min
   get_weekly:    [60, 60],
@@ -34,12 +38,12 @@ async function checkRateLimit(
       p_window_seconds: windowSec,
     });
     if (error) {
-      console.error(`rate_limit_check RPC failed for ${userId}:${action}:`, error);
-      return { allowed: true }; // fail-open
+      console.error(`rate_limit_check RPC failed for ${redactId(userId)}:${action}:`, error);
+      return { allowed: true }; // fail-open (no destructive ops in leaderboard)
     }
     return { allowed: data !== false };
   } catch (e) {
-    console.error(`rate_limit_check threw for ${userId}:${action}:`, e);
+    console.error(`rate_limit_check threw for ${redactId(userId)}:${action}:`, e);
     return { allowed: true };
   }
 }

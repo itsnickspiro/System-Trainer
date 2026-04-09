@@ -73,7 +73,9 @@ final class DataManager: ObservableObject {
             CustomWorkoutPlan.self,
             Achievement.self,
             BodyMeasurement.self,
-            PlannedMeal.self
+            PlannedMeal.self,
+            WeeklyBoss.self,
+            GroceryListItem.self
         ]
         for type in typesToDelete {
             do {

@@ -672,7 +672,7 @@ struct SettingsView: View {
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await PinnedURLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 let serverMsg = String(data: data, encoding: .utf8) ?? "Unknown server error"
                 deleteAccountError = "Server refused the delete request: \(serverMsg)"

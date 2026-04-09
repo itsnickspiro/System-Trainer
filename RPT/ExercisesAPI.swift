@@ -243,7 +243,7 @@ final class ExercisesAPI {
         req.timeoutInterval = 20
         req.httpBody = try? JSONEncoder().encode(body)
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await PinnedURLSession.shared.data(for: req)
         if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
             throw APIError.http(http.statusCode)
         }

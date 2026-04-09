@@ -2,7 +2,6 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
@@ -11,6 +10,13 @@ const corsHeaders = {
 // Budgets are generous for normal usage and aggressive for destructive
 // actions. `delete_account` is the most restrictive: a user shouldn't
 // legitimately delete their account more than a handful of times per day.
+const DESTRUCTIVE_ACTIONS = new Set(["delete_account", "revoke_siwa"]);
+
+function redactId(id: string): string {
+  if (id.length <= 8) return "***";
+  return id.substring(0, 4) + "..." + id.substring(id.length - 4);
+}
+
 const RATE_BUDGETS: Record<string, [number, number]> = {
   get_profile:          [120, 60],   // 120 reads/min — fine for normal app usage
   upsert_profile:       [60, 60],    // 60 writes/min — generous (usually 1-2/min)
@@ -41,9 +47,10 @@ async function checkRateLimit(
       p_window_seconds: windowSec,
     });
     if (error) {
-      // Fail-open: if the rate limit table is unreachable, don't block
-      // legitimate users. We log the error for monitoring.
-      console.error(`rate_limit_check RPC failed for ${userId}:${action}:`, error);
+      console.error(`rate_limit_check RPC failed for ${redactId(userId)}:${action}:`, error);
+      if (DESTRUCTIVE_ACTIONS.has(action)) {
+        return { allowed: false, status: 503 };
+      }
       return { allowed: true, status: 200 };
     }
     if (data === false) {
@@ -51,7 +58,10 @@ async function checkRateLimit(
     }
     return { allowed: true, status: 200 };
   } catch (e) {
-    console.error(`rate_limit_check threw for ${userId}:${action}:`, e);
+    console.error(`rate_limit_check threw for ${redactId(userId)}:${action}:`, e);
+    if (DESTRUCTIVE_ACTIONS.has(action)) {
+      return { allowed: false, status: 503 };
+    }
     return { allowed: true, status: 200 };
   }
 }
@@ -600,7 +610,7 @@ serve(async (req) => {
         if (authCode) {
           siwaRevokeResult = await appleRevokeSIWA(authCode);
           if (siwaRevokeResult.success) {
-            console.log(`delete_account: SIWA server-side revocation succeeded for ${cloudkitUserId}`);
+            console.log(`delete_account: SIWA server-side revocation succeeded for ${redactId(cloudkitUserId)}`);
           } else if (siwaRevokeResult.skipped) {
             console.log(`delete_account: SIWA revocation skipped (${siwaRevokeResult.reason})`);
           } else {

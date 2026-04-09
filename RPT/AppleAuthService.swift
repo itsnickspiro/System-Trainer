@@ -31,9 +31,9 @@ final class AppleAuthService: NSObject, ObservableObject {
     /// a fresh ASAuthorizationController flow.
     @Published private(set) var currentAuthorizationCode: String?
 
-    fileprivate static let keychainAccount = "com.SpiroTechnologies.RPT.appleSignIn"
-    fileprivate static let displayNameKey = "rpt_apple_display_name"
-    fileprivate static let emailKey       = "rpt_apple_email"
+    fileprivate static let keychainAccount     = "com.SpiroTechnologies.RPT.appleSignIn"
+    fileprivate static let keychainDisplayName = "com.SpiroTechnologies.RPT.appleDisplayName"
+    fileprivate static let keychainEmail       = "com.SpiroTechnologies.RPT.appleEmail"
 
     /// Continuation used to bridge the delegate-based ASAuthorizationController
     /// callbacks back into our async/await API.
@@ -43,8 +43,8 @@ final class AppleAuthService: NSObject, ObservableObject {
         super.init()
         // Restore from Keychain on launch.
         currentAppleUserID = KeychainHelper.load(account: Self.keychainAccount)
-        currentDisplayName = UserDefaults.standard.string(forKey: Self.displayNameKey)
-        currentEmail       = UserDefaults.standard.string(forKey: Self.emailKey)
+        currentDisplayName = KeychainHelper.load(account: Self.keychainDisplayName)
+        currentEmail       = KeychainHelper.load(account: Self.keychainEmail)
     }
 
     var isSignedIn: Bool { currentAppleUserID?.isEmpty == false }
@@ -81,8 +81,8 @@ final class AppleAuthService: NSObject, ObservableObject {
     /// recovered by signing in again on this or any other device.
     func signOut() {
         KeychainHelper.delete(account: Self.keychainAccount)
-        UserDefaults.standard.removeObject(forKey: Self.displayNameKey)
-        UserDefaults.standard.removeObject(forKey: Self.emailKey)
+        KeychainHelper.delete(account: Self.keychainDisplayName)
+        KeychainHelper.delete(account: Self.keychainEmail)
         // Critical: clear the linked-apple-id cache as well. Without this,
         // PlayerProfileService.refresh() re-runs linkAppleID(cachedAppleID)
         // on the next launch and silently re-links the same Apple ID,
@@ -143,11 +143,11 @@ final class AppleAuthService: NSObject, ObservableObject {
         KeychainHelper.save(value: result.userID, account: Self.keychainAccount)
         currentAppleUserID = result.userID
         if let name = result.displayName {
-            UserDefaults.standard.set(name, forKey: Self.displayNameKey)
+            KeychainHelper.save(value: name, account: Self.keychainDisplayName)
             currentDisplayName = name
         }
         if let email = result.email {
-            UserDefaults.standard.set(email, forKey: Self.emailKey)
+            KeychainHelper.save(value: email, account: Self.keychainEmail)
             currentEmail = email
         }
         // In-memory only. See documentation on currentAuthorizationCode
@@ -194,11 +194,11 @@ extension AppleAuthService: ASAuthorizationControllerDelegate {
             KeychainHelper.save(value: appleUserID, account: Self.keychainAccount)
             self.currentAppleUserID = appleUserID
             if let displayName {
-                UserDefaults.standard.set(displayName, forKey: Self.displayNameKey)
+                KeychainHelper.save(value: displayName, account: Self.keychainDisplayName)
                 self.currentDisplayName = displayName
             }
             if let email {
-                UserDefaults.standard.set(email, forKey: Self.emailKey)
+                KeychainHelper.save(value: email, account: Self.keychainEmail)
                 self.currentEmail = email
             }
             if let authCodeString {

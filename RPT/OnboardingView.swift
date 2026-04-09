@@ -915,12 +915,14 @@ private struct NameStepView: View {
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 10
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, _) = try await PinnedURLSession.shared.data(for: request)
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let taken = json["taken"] as? Bool {
                 return taken
             }
-        } catch { }
+        } catch {
+            print("[Onboarding] Username availability check failed: \(error.localizedDescription)")
+        }
         // On network error, assume available (server-side will enforce uniqueness)
         return false
     }

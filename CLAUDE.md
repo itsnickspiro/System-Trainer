@@ -9,7 +9,7 @@ System Trainer (RPT) is a gamified iOS fitness app — SwiftUI + SwiftData + Clo
 - Bundle ID: `SpiroTechnologies.RPT`
 - iCloud container: `iCloud.com.SpiroTechnologies.RPT`
 - Team ID: `WRVY4Q5HA5`
-- Current version: 2.8.17 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
+- Current version: 2.8.18 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
 
 ## Quick Start
 

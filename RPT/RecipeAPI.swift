@@ -49,7 +49,7 @@ final class RecipeAPI: ObservableObject {
         request.httpBody = try? JSONEncoder().encode(body)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await PinnedURLSession.shared.data(for: request)
 
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
                 throw APIError.http(httpResponse.statusCode)

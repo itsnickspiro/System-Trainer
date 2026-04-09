@@ -79,7 +79,7 @@ final class PlayerProfileService: ObservableObject {
         // and we adopt it.
         if let cachedAppleID = UserDefaults.standard.string(forKey: "rpt_linked_apple_user_id"),
            !cachedAppleID.isEmpty {
-            let displayName = UserDefaults.standard.string(forKey: "rpt_apple_display_name")
+            let displayName = KeychainHelper.load(account: "com.SpiroTechnologies.RPT.appleDisplayName")
             _ = await linkAppleID(appleUserID: cachedAppleID, displayName: displayName)
         }
 
@@ -564,7 +564,7 @@ final class PlayerProfileService: ObservableObject {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await PinnedURLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }

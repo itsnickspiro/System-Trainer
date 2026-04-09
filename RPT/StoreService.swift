@@ -262,7 +262,7 @@ final class StoreService: ObservableObject {
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await PinnedURLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }

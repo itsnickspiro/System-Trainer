@@ -30,10 +30,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mintJWT, verifyJWT, verifyAppleIdToken, sha256 } from "../_shared/auth.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-app-attest-assertion, x-app-attest-key-id",
 };
+
+const DESTRUCTIVE_ACTIONS = new Set(["sign_out"]);
+
+function redactId(id: string): string {
+  if (id.length <= 8) return "***";
+  return id.substring(0, 4) + "..." + id.substring(id.length - 4);
+}
 
 // Rate budgets for auth-proxy actions
 const RATE_BUDGETS: Record<string, [number, number]> = {
@@ -58,11 +64,13 @@ async function checkRateLimit(
       p_window_seconds: windowSec,
     });
     if (error) {
-      console.error(`rate_limit_check RPC failed for ${key}:${action}:`, error);
-      return true; // fail-open
+      console.error(`rate_limit_check RPC failed for ${redactId(key)}:${action}:`, error);
+      if (DESTRUCTIVE_ACTIONS.has(action)) return false;
+      return true;
     }
     return data !== false;
   } catch {
+    if (DESTRUCTIVE_ACTIONS.has(action)) return false;
     return true;
   }
 }

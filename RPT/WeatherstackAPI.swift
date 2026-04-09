@@ -31,7 +31,7 @@ class WeatherstackAPI: ObservableObject {
         request.timeoutInterval = 15
         request.httpBody = try? JSONEncoder().encode(["query": query])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PinnedURLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw WeatherstackError.invalidResponse

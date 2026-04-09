@@ -4,7 +4,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // CORS headers — match the leaderboard-proxy pattern so the iOS client
 // can call this function with the same headers it already sends.
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
