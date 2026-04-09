@@ -9,7 +9,7 @@ System Trainer (RPT) is a gamified iOS fitness app — SwiftUI + SwiftData + Clo
 - Bundle ID: `SpiroTechnologies.RPT`
 - iCloud container: `iCloud.com.SpiroTechnologies.RPT`
 - Team ID: `WRVY4Q5HA5`
-- Current version: 2.8.11 (build 34) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
+- Current version: 2.8.15 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
 
 ## Quick Start
 
@@ -40,7 +40,7 @@ Nick has explicitly granted broad access so Claude can develop, test, and ship i
 - **Computer-use MCP** (`mcp__computer-use__*`) — Claude can screenshot, click, type, scroll, and drive any macOS app after a one-call `request_access`. Simulator is tier "full" (can drive it completely); Xcode and Terminal are tier "click" (visible + clickable, but typing goes through the Bash/Edit tools instead). Used primarily for visual verification of onboarding UI changes on the simulator before committing.
 - **Xcode CLI** — `xcodebuild`, `xcrun simctl`, `xcrun devicectl`, `xcrun altool`, `codesign`, `security` are all callable via Bash. Signing identity `Apple Development: Nicholas Spiro (UL35EW4SQG)` is installed in the keychain.
 - **Tethered iPhone** (when connected) — `xcrun devicectl` installs Debug builds to the real device for testing anything the simulator can't reproduce (SIWA with real Apple ID, HealthKit permission sheet, CloudKit sync, real-device gesture/hit-test differences).
-- **App Store Connect API** — P8 key at `~/.appstoreconnect/private_keys/AuthKey_2Y773SS5ZG.p8` (mode 600). Scope: "App Manager" — enough to list and expire TestFlight builds, not enough to touch users or billing. Helper script at `tools/appstoreconnect.py`.
+- **App Store Connect API** — P8 key at `~/.appstoreconnect/private_keys/AuthKey_2Y773SS5ZG.p8` (mode 600). Scope: "App Manager" — enough to list and expire TestFlight builds, not enough to touch users or billing. Helper script at `tools/appstoreconnect.js`.
 
 Destructive/shared actions (git push, App Store Connect uploads, TestFlight build expiration, touching developer.apple.com, running new `brew install` / `npm i`) still require Nick's explicit confirmation every time. The permissions grant broad capability, not unlimited authority.
 
@@ -208,6 +208,17 @@ The `category` column has a CHECK constraint:
 `default | warrior | mage | rogue | tank | anime | seasonal | premium | event` — `free` is NOT a category, it's an `unlock_type`.
 
 The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Contents.json` with `provides-namespace: false` so the imageset name is the bare lookup key (verified via `xcrun --sdk iphonesimulator assetutil --info <Assets.car>`).
+
+### Username uniqueness
+- Case-insensitive unique index on `player_profiles.display_name` — enforced at the DB level.
+- `leaderboard-proxy` has a `check_username` action for debounced availability checks during onboarding.
+- Username changes tracked client-side via `Profile.usernameChangesUsed` (SwiftData) — 1 free, then 5,000 GP per change.
+
+### File location quirks
+- `AvatarPickerView.swift` and `AvatarService.swift` are at the **repo root**, not under `RPT/`. They compile fine but sit outside the expected directory.
+
+### Notification permission timing
+- In RPTApp.swift `.task`, capture `wasOnboardingCompleteAtLaunch` from UserDefaults BEFORE any `await`. The .task chain takes 10+ seconds; if onboarding completes mid-chain, reading `hasCompletedOnboarding` after an await would fire the notification dialog over the Home screen on first install.
 
 ### Secrets
 - All secrets go through Supabase Edge Function proxies, never in client code.

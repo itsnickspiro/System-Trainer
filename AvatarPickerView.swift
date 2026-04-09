@@ -28,7 +28,12 @@ struct AvatarPickerView: View {
 
     private var groupedCatalog: [(category: String, avatars: [AvatarTemplate])] {
         categoryOrder.compactMap { cat in
-            let items = avatarService.catalog.filter { $0.category == cat }
+            let items = avatarService.catalog.filter {
+                $0.category == cat
+                && $0.key.hasSuffix("_m")
+                && $0.isUnlocked
+                && UIImage(named: $0.key) != nil
+            }
             return items.isEmpty ? nil : (cat, items)
         }
     }

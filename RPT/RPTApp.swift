@@ -158,23 +158,25 @@ struct RPTApp: App {
             //  3. PlayerProfile — needs CloudKit ID, must come after step 1.
             //  4–10. All other services in dependency order.
             .task {
+                // Capture this BEFORE any awaits. The .task chain takes
+                // 10+ seconds (CloudKit resolution, service refreshes).
+                // If the user completes onboarding during that window,
+                // hasCompletedOnboarding flips to true mid-chain, and
+                // the notification step (below) would fire the system
+                // dialog OVER the Home screen on the very first launch.
+                // Reading it here captures the launch-time state:
+                // false on fresh install, true on returning user.
+                let wasOnboardingCompleteAtLaunch = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+
                 // Step 0: Configure DataManager with the SwiftData context BEFORE
-                // any service that touches Profile data — including the SIWA
-                // recovery flow that runs in PlayerProfileService.refresh().
-                // Previously this was only called from ContentView.onAppear,
-                // which meant the entire onboarding flow ran with no model
-                // context — silently breaking applyRemoteProfile and
-                // ensureProfileExists for returning users on a fresh install.
+                // any service that touches Profile data.
                 DataManager.shared.configure(with: sharedModelContainer.mainContext)
 
                 // Step 1: Resolve CloudKit identity first (10-second timeout, non-fatal)
                 await LeaderboardService.shared.resolveCloudKitUserIDIfNeeded()
 
                 // Step 2: Notification permission (non-blocking UI)
-                // Only request after onboarding — otherwise the OS dialog
-                // appears over the boot screen with no context.
-                let isOnboardingComplete = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
-                if isOnboardingComplete {
+                if wasOnboardingCompleteAtLaunch {
                     await notificationManager.requestAuthorization()
                     if notificationManager.isAuthorized {
                         notificationManager.setupNotificationCategories()
