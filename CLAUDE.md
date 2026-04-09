@@ -33,6 +33,17 @@ Two user-defined build settings flow into `Secrets.xcconfig` → Info.plist → 
 
 In Xcode Cloud these are set as Secret Environment Variables on the workflow; `ci_scripts/ci_post_clone.sh` writes them into `Secrets.xcconfig` before the build runs.
 
+## Claude's sandbox on the Mac Mini
+
+Nick has explicitly granted broad access so Claude can develop, test, and ship iOS builds autonomously from this Mac Mini. The granted capabilities are:
+
+- **Computer-use MCP** (`mcp__computer-use__*`) — Claude can screenshot, click, type, scroll, and drive any macOS app after a one-call `request_access`. Simulator is tier "full" (can drive it completely); Xcode and Terminal are tier "click" (visible + clickable, but typing goes through the Bash/Edit tools instead). Used primarily for visual verification of onboarding UI changes on the simulator before committing.
+- **Xcode CLI** — `xcodebuild`, `xcrun simctl`, `xcrun devicectl`, `xcrun altool`, `codesign`, `security` are all callable via Bash. Signing identity `Apple Development: Nicholas Spiro (UL35EW4SQG)` is installed in the keychain.
+- **Tethered iPhone** (when connected) — `xcrun devicectl` installs Debug builds to the real device for testing anything the simulator can't reproduce (SIWA with real Apple ID, HealthKit permission sheet, CloudKit sync, real-device gesture/hit-test differences).
+- **App Store Connect API** — P8 key at `~/.appstoreconnect/private_keys/AuthKey_2Y773SS5ZG.p8` (mode 600). Scope: "App Manager" — enough to list and expire TestFlight builds, not enough to touch users or billing. Helper script at `tools/appstoreconnect.py`.
+
+Destructive/shared actions (git push, App Store Connect uploads, TestFlight build expiration, touching developer.apple.com, running new `brew install` / `npm i`) still require Nick's explicit confirmation every time. The permissions grant broad capability, not unlimited authority.
+
 ## Visual verification on the simulator (required before every UI commit)
 
 The Mac Mini is set up so Claude can drive the Simulator directly via computer-use and verify UI changes before committing. This is the **default workflow for any UI change** — don't ship onboarding/layout/animation fixes without running them on the simulator first.
