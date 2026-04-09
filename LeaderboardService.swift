@@ -88,8 +88,9 @@ final class LeaderboardService: ObservableObject {
     func upsertEntry() async {
         guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
         guard let profile = DataManager.shared.currentProfile,
-              !profile.name.trimmingCharacters(in: .whitespaces).isEmpty else {
-            print("[LeaderboardService] upsertEntry skipped — profile not yet loaded")
+              !profile.name.trimmingCharacters(in: .whitespaces).isEmpty,
+              profile.name != "Player" else {
+            print("[LeaderboardService] upsertEntry skipped — profile not yet loaded or default name")
             return
         }
 
@@ -136,7 +137,11 @@ final class LeaderboardService: ObservableObject {
         ]
         do {
             let data = try await postToProxy(body: body)
-            let payload = try JSONDecoder().decode(LeaderboardGlobalPayload.self, from: data)
+            var payload = try JSONDecoder().decode(LeaderboardGlobalPayload.self, from: data)
+            // Client-side rank fallback: assign from sorted position if server didn't
+            for i in payload.entries.indices where payload.entries[i].rank == nil || payload.entries[i].rank == 0 {
+                payload.entries[i].rank = i + 1
+            }
             globalEntries = payload.entries
             playerGlobalRank = payload.playerRank
             try? JSONEncoder().encode(payload.entries).write(to: Self.globalCacheURL, options: .atomic)
@@ -158,7 +163,10 @@ final class LeaderboardService: ObservableObject {
         ]
         do {
             let data = try await postToProxy(body: body)
-            let payload = try JSONDecoder().decode(LeaderboardWeeklyPayload.self, from: data)
+            var payload = try JSONDecoder().decode(LeaderboardWeeklyPayload.self, from: data)
+            for i in payload.entries.indices where payload.entries[i].rank == nil || payload.entries[i].rank == 0 {
+                payload.entries[i].rank = i + 1
+            }
             weeklyEntries = payload.entries
             try? JSONEncoder().encode(payload.entries).write(to: Self.weeklyCacheURL, options: .atomic)
         } catch {
@@ -180,7 +188,10 @@ final class LeaderboardService: ObservableObject {
         ]
         do {
             let data = try await postToProxy(body: body)
-            let payload = try JSONDecoder().decode(LeaderboardFriendsPayload.self, from: data)
+            var payload = try JSONDecoder().decode(LeaderboardFriendsPayload.self, from: data)
+            for i in payload.entries.indices where payload.entries[i].rank == nil || payload.entries[i].rank == 0 {
+                payload.entries[i].rank = i + 1
+            }
             friendEntries = payload.entries
             try? JSONEncoder().encode(payload.entries).write(to: Self.friendCacheURL, options: .atomic)
         } catch {
@@ -355,7 +366,7 @@ struct LeaderboardEntry: Codable, Identifiable {
     let totalXP:         Int?
     let weeklyXP:        Int?
     let weeklyWorkouts:  Int?
-    let rank:            Int?
+    var rank:            Int?
     let currentStreak:   Int?
     let avatarKey:       String?
     let isCurrentUser:   Bool?
@@ -408,7 +419,7 @@ struct LeaderboardEntry: Codable, Identifiable {
 // MARK: - Wire Payloads (private)
 
 private struct LeaderboardGlobalPayload: Decodable {
-    let entries:    [LeaderboardEntry]
+    var entries:    [LeaderboardEntry]
     let playerRank: Int?
 
     enum CodingKeys: String, CodingKey {
@@ -418,9 +429,9 @@ private struct LeaderboardGlobalPayload: Decodable {
 }
 
 private struct LeaderboardWeeklyPayload: Decodable {
-    let entries: [LeaderboardEntry]
+    var entries: [LeaderboardEntry]
 }
 
 private struct LeaderboardFriendsPayload: Decodable {
-    let entries: [LeaderboardEntry]
+    var entries: [LeaderboardEntry]
 }

@@ -90,6 +90,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 dataManager.refreshHealthOnForeground()
+                NotificationManager.shared.clearBadge()
             } else if newPhase == .background {
                 dataManager.saveLocalChanges()
                 Task { await PlayerProfileService.shared.syncProfile() }

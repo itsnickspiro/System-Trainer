@@ -89,6 +89,9 @@ serve(async (req) => {
         .range(offset, offset + pageSize - 1);
       if (error) throw error;
 
+      // Assign ranks from sorted position (entries arrive sorted by total_xp DESC)
+      (data ?? []).forEach((entry: Record<string, unknown>, i: number) => { entry.rank = offset + i + 1; });
+
       // Compute caller's rank correctly: fetch their total_xp first, then count
       // rows with strictly greater total_xp. The previous version passed a query
       // builder to .gt() which silently produced totalRows + 1 every time.
@@ -114,6 +117,7 @@ serve(async (req) => {
     if (action === "get_weekly") {
       const { data, error } = await supabase.from("leaderboard").select("player_id, display_name, level, weekly_xp, weekly_workouts, rank, avatar_key").eq("is_banned", false).order("weekly_xp", { ascending: false }).range(offset, offset + pageSize - 1);
       if (error) throw error;
+      (data ?? []).forEach((entry: Record<string, unknown>, i: number) => { entry.rank = offset + i + 1; });
       return new Response(JSON.stringify({ entries: data ?? [], page }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -125,6 +129,7 @@ serve(async (req) => {
       friendIds.push(cloudkitUserId); // include self
       const { data, error } = await supabase.from("leaderboard").select("player_id, display_name, level, total_xp, rank, current_streak, avatar_key").in("cloudkit_user_id", friendIds).eq("is_banned", false).order("total_xp", { ascending: false });
       if (error) throw error;
+      (data ?? []).forEach((entry: Record<string, unknown>, i: number) => { entry.rank = i + 1; });
       return new Response(JSON.stringify({ entries: data ?? [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 

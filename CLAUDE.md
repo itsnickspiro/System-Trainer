@@ -9,7 +9,7 @@ System Trainer (RPT) is a gamified iOS fitness app — SwiftUI + SwiftData + Clo
 - Bundle ID: `SpiroTechnologies.RPT`
 - iCloud container: `iCloud.com.SpiroTechnologies.RPT`
 - Team ID: `WRVY4Q5HA5`
-- Current version: 2.8.15 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
+- Current version: 2.8.17 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
 
 ## Quick Start
 
@@ -192,6 +192,13 @@ Project ref: `erghbsnxtsbnmfuycnyb` (System-Trainer). The CLI is already linked 
 - Every `@Model` property must have a default value or be optional. CloudKit requires this.
 - **Never `@Attribute(.unique)`** on a CloudKit-synced model. CloudKit enforces uniqueness via record names and rejects unique constraints. The store load throws `NSCocoaError 134060` and the app fatals at the `try!` in `RPTApp.swift` (`sharedModelContainer`). This crashed launch in 2.8.10.
 - The 3-tier `ModelContainer` fallback (CloudKit → local → in-memory) only catches **environment** failures — every tier shares the same `Schema`, so a schema-illegal model fails all three tiers identically. If you see all three fall through, the bug is in the schema, not the environment.
+
+### Xcode project structure
+- `RPT/` is a `PBXFileSystemSynchronizedRootGroup` — Xcode auto-discovers and compiles every file in the folder for all targets. **Never add manual PBXBuildFile / PBXFileReference entries** for files inside `RPT/`; doing so creates duplicates and triggers "Multiple commands produce .stringsdata" build errors.
+- `import Combine` is required in any file that uses `@Published`. Without it `ObservableObject` conformance fails with a misleading "does not conform" error. Do NOT switch to `@Observable` — the rest of the codebase is Combine-based and mixing frameworks causes cascading import errors.
+
+### File-backed JSON managers
+- `ActivityLogManager` and `NotificationInboxManager` use a lightweight JSON-file pattern: singleton, `@Published` array, read/write to `Documents/`, capped entry count, no SwiftData/CloudKit. Use this pattern for local-only data that doesn't need sync.
 
 ### Service patterns
 - Singleton pattern with a `shared` static property. All services are `@MainActor`.

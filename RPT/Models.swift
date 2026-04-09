@@ -373,19 +373,13 @@ final class Profile {
             exemptionExpiresAt = nil
         }
 
-        // Penalty: full Level 1 reset (bestStreak preserved — it's a historical record)
-        xp = 0
-        level = 1
+        // Penalty: stat hit + streak break (XP and level preserved)
         currentStreak = 0
         lastCompletionDate = nil
         hardcoreResetDeadline = nil
-        health = max(20.0, health - 30.0)
-        energy = max(10.0, energy - 40.0)
-        discipline = max(10.0, discipline - 50.0)
-
-        // Activate the Rehabilitation Arc — 3 days of easier quests
-        isInRecovery = true
-        recoveryDaysRemaining = 3
+        health = max(20.0, health - 10.0)
+        energy = max(10.0, energy - 15.0)
+        discipline = max(10.0, discipline - 20.0)
         lastResetDate = now
     }
 
