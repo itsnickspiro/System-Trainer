@@ -65,6 +65,11 @@ struct OnboardingView: View {
     /// computes the transition.
     @State private var navigatingBackward: Bool = false
 
+    /// Username uniqueness checking — debounced against the server.
+    @State private var isCheckingUsername: Bool = false
+    @State private var usernameIsTaken: Bool = false
+    @State private var usernameCheckTask: Task<Void, Never>? = nil
+
     /// True when the app was launched with the `-onboardingDebugAutofill 1`
     /// argument. Used by my (Claude's) screenshot pipeline to walk through
     /// every step of onboarding without needing real input — values are
@@ -324,7 +329,12 @@ struct OnboardingView: View {
                          }
                      }
                  )
-        case 1:  NameStepView(profileName: $profileName)
+        case 1:  NameStepView(
+                    profileName: $profileName,
+                    isCheckingUsername: $isCheckingUsername,
+                    usernameIsTaken: $usernameIsTaken,
+                    usernameCheckTask: $usernameCheckTask
+                 )
         case 2:  GenderStepView(selectedGender: $selectedGender)
         case 3:  BodyStatsStepView(
                     ageText: $ageText,
@@ -394,8 +404,9 @@ struct OnboardingView: View {
 
     private var canAdvance: Bool {
         switch currentStep {
-        case 1: // Name
-            return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
+        case 1: // Username — minimum 8 characters, must not be empty whitespace
+            let trimmed = profileName.trimmingCharacters(in: .whitespaces)
+            return trimmed.count >= 8 && !isCheckingUsername && !usernameIsTaken
         case 3: // Body stats — all three numeric fields must parse to > 0
             let age    = Int(ageText) ?? 0
             let height = Double(heightText) ?? 0
@@ -579,6 +590,15 @@ struct OnboardingView: View {
         // typed with a stale "Player" default that was upserted earlier in
         // the RPTApp .task chain before onboarding finished.
         Task { await PlayerProfileService.shared.syncProfile() }
+
+        // Final belt-and-suspenders: set the name on DataManager's
+        // currentProfile RIGHT BEFORE flipping the onboarding flag.
+        // This is the exact object HomeView reads, and setting it here
+        // means no race can intervene between the write and the
+        // navigation to ContentView.
+        let finalName = trimmedName.isEmpty ? "Player" : trimmedName
+        DataManager.shared.currentProfile?.name = finalName
+        try? modelContext.save()
 
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         isOnboardingComplete = true
@@ -783,7 +803,27 @@ private struct BootStepView: View {
 
 private struct NameStepView: View {
     @Binding var profileName: String
+    @Binding var isCheckingUsername: Bool
+    @Binding var usernameIsTaken: Bool
+    @Binding var usernameCheckTask: Task<Void, Never>?
     @FocusState private var focused: Bool
+
+    private var trimmed: String {
+        profileName.trimmingCharacters(in: .whitespaces)
+    }
+
+    private var validationMessage: (String, Color)? {
+        if trimmed.isEmpty {
+            return ("Username required to continue", .orange.opacity(0.7))
+        } else if trimmed.count < 8 {
+            return ("Must be at least 8 characters (\(trimmed.count)/8)", .orange.opacity(0.7))
+        } else if isCheckingUsername {
+            return ("Checking availability…", .white.opacity(0.4))
+        } else if usernameIsTaken {
+            return ("Username is already taken", .red)
+        }
+        return nil
+    }
 
     var body: some View {
         OnboardingStepShell(
@@ -797,6 +837,8 @@ private struct NameStepView: View {
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.white)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
                     .accessibilityIdentifier("name_text_field")
                     .padding(.vertical, 14)
                     .padding(.horizontal, 20)
@@ -811,15 +853,76 @@ private struct NameStepView: View {
                     .focused($focused)
                     .submitLabel(.continue)
                     .frame(maxWidth: 320)
+                    .onChange(of: profileName) { _, newValue in
+                        // Debounced server-side uniqueness check.
+                        // Cancel any in-flight check, wait 600ms of idle,
+                        // then query the leaderboard/player-profiles for
+                        // the typed username.
+                        usernameIsTaken = false
+                        usernameCheckTask?.cancel()
+                        let name = newValue.trimmingCharacters(in: .whitespaces)
+                        guard name.count >= 8 else {
+                            isCheckingUsername = false
+                            return
+                        }
+                        isCheckingUsername = true
+                        usernameCheckTask = Task {
+                            try? await Task.sleep(for: .seconds(0.6))
+                            guard !Task.isCancelled else { return }
+                            let taken = await checkUsernameTaken(name)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                usernameIsTaken = taken
+                                isCheckingUsername = false
+                            }
+                        }
+                    }
 
-                if profileName.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text("Username required to continue")
+                if let (text, color) = validationMessage {
+                    Text(text)
                         .font(.caption)
-                        .foregroundColor(.orange.opacity(0.7))
+                        .foregroundColor(color)
+                        .transition(.opacity)
+                } else if trimmed.count >= 8 && !isCheckingUsername && !usernameIsTaken {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Username available")
+                            .foregroundColor(.green)
+                    }
+                    .font(.caption)
+                    .transition(.opacity)
                 }
             }
         }
         .onAppear { focused = true }
+    }
+
+    /// Checks if the username is already taken by querying the
+    /// leaderboard proxy (which has display_name). Returns true
+    /// if taken, false if available.
+    private func checkUsernameTaken(_ username: String) async -> Bool {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/leaderboard-proxy") else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+        let body: [String: Any] = [
+            "action": "check_username",
+            "display_name": username
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 10
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let taken = json["taken"] as? Bool {
+                return taken
+            }
+        } catch { }
+        // On network error, assume available (server-side will enforce uniqueness)
+        return false
     }
 }
 
