@@ -93,9 +93,17 @@ xcodebuild -project RPT.xcodeproj -scheme RPT -configuration Release \
   -archivePath build/RPT.xcarchive clean archive
 xcodebuild -exportArchive -archivePath build/RPT.xcarchive \
   -exportOptionsPlist ExportOptions.plist -exportPath build/export
+
+# Auto-expire intermediate duplicates of the SAME marketing version.
+# Safe to call immediately after upload — it only touches builds of
+# the version you pass in and always keeps the newest one. Replace
+# 2.8.12 with whatever MARKETING_VERSION you just bumped to.
+node tools/appstoreconnect.js expire-intermediates 2.8.12
 ```
 
 `ExportOptions.plist` is configured for App Store Connect upload (`destination = upload`), so the export step both packages and uploads in one pass. Builds usually finish processing in TestFlight within 5–15 minutes.
+
+The `expire-intermediates` step is **required** on every release, not optional. Xcode Cloud auto-builds on every push to `main` (including docs-only commits), so every git push creates a shadow duplicate TestFlight build of whatever marketing version is current. The auto-cleanup step hides those duplicates from testers. The upstream fix is narrowing Xcode Cloud's trigger in Product → Xcode Cloud → Manage Workflows → Start Conditions → File/Folder Changes to something like `RPT/**/*.swift`, `RPT.xcodeproj/**`, but that's a GUI-only change Claude can't make from the CLI.
 
 ## Verifying a Signed Archive
 
