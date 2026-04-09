@@ -12,7 +12,7 @@ import SwiftUI
 
 struct LeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = LeaderboardService.shared
+    @ObservedObject private var leaderboard = LeaderboardService.shared
     @State private var selectedTab: LeaderboardTab = .global
 
     enum LeaderboardTab: String, CaseIterable {
@@ -102,7 +102,7 @@ struct LeaderboardView: View {
 
 private struct GlobalLeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = LeaderboardService.shared
+    @ObservedObject private var leaderboard = LeaderboardService.shared
 
     var body: some View {
         ScrollView {
@@ -199,7 +199,7 @@ private struct GlobalLeaderboardView: View {
 
 private struct WeeklyLeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = LeaderboardService.shared
+    @ObservedObject private var leaderboard = LeaderboardService.shared
 
     /// Seconds until next Monday 00:00 UTC.
     private var secondsUntilReset: Int {
@@ -279,7 +279,7 @@ private struct WeeklyLeaderboardView: View {
 
 private struct FriendsLeaderboardView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = LeaderboardService.shared
+    @ObservedObject private var leaderboard = LeaderboardService.shared
     @State private var enteredCode = ""
     @State private var showAddField = false
 
@@ -404,7 +404,7 @@ private struct FriendsLeaderboardView: View {
 
 struct YourPlayerIDView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var leaderboard = LeaderboardService.shared
+    @ObservedObject private var leaderboard = LeaderboardService.shared
     @State private var showCopied = false
 
     private var playerID: String {
@@ -432,7 +432,7 @@ struct YourPlayerIDView: View {
                         Text("YOUR RANK")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyan.opacity(0.8))
-                        Text("#\(rank)")
+                        Text(rank == 0 ? "—" : "#\(rank)")
                             .font(.system(size: 48, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyan)
                     }
@@ -616,7 +616,7 @@ struct LeaderboardRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 12) {
-            Text("#\(entry.rank ?? 0)")
+            Text((entry.rank ?? 0) == 0 ? "—" : "#\(entry.rank ?? 0)")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .foregroundColor(entry.isCurrentUser == true ? .cyan : .secondary)
                 .frame(width: 32, alignment: .leading)

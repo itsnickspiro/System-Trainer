@@ -614,28 +614,11 @@ serve(async (req) => {
         siwaRevokeResult = { success: false, reason: "exception", detail: String(e) };
       }
 
-      // CRITICAL: player_profiles must succeed for the delete to be honored.
-      // If it fails (RLS blocked, network glitch, foreign-key constraint),
-      // return a non-200 so the client does NOT proceed to wipe local
-      // state and leave the user half-deleted with orphaned cloud rows.
-      const { data: profileDeleted, error: profileErr } = await supabase
-        .from("player_profiles")
-        .delete({ count: "exact" })
-        .eq("cloudkit_user_id", cloudkitUserId)
-        .select("cloudkit_user_id");
-      if (profileErr) {
-        console.error("delete_account: CRITICAL — player_profiles delete failed:", profileErr);
-        return new Response(JSON.stringify({
-          success: false,
-          error: `player_profiles delete failed: ${profileErr.message ?? "unknown error"}`,
-        }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      if (profileDeleted && profileDeleted.length > 0) deletedFrom.push("player_profiles");
-
-      // Secondary tables — we tolerate per-table failures here because the
-      // primary record (player_profiles) is already gone, and the secondary
-      // tables are FK-cascaded or self-cleaning. Failures are logged so we
-      // can spot them in the function logs.
+      // ── Step 1: Delete secondary tables FIRST ──────────────────────────
+      // Secondary tables are cleaned up before player_profiles so that any
+      // foreign-key constraints referencing player_profiles don't block the
+      // profile delete, and so that if the profile delete later fails we
+      // haven't left orphaned rows that reference a still-existing profile.
       const secondaryTables = [
         "leaderboard",
         "player_inventory",
@@ -678,6 +661,25 @@ serve(async (req) => {
       } catch (e) {
         console.error("delete_account: friend_connections delete failed:", e);
       }
+
+      // ── Step 2: Delete player_profiles (the primary record) ────────────
+      // CRITICAL: this must succeed for the delete to be honored. If it
+      // fails (RLS blocked, network glitch), return a non-200 so the
+      // client does NOT proceed to wipe local state and leave the user
+      // half-deleted with orphaned cloud rows.
+      const { data: profileDeleted, error: profileErr } = await supabase
+        .from("player_profiles")
+        .delete({ count: "exact" })
+        .eq("cloudkit_user_id", cloudkitUserId)
+        .select("cloudkit_user_id");
+      if (profileErr) {
+        console.error("delete_account: CRITICAL — player_profiles delete failed:", profileErr);
+        return new Response(JSON.stringify({
+          success: false,
+          error: `player_profiles delete failed: ${profileErr.message ?? "unknown error"}`,
+        }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (profileDeleted && profileDeleted.length > 0) deletedFrom.push("player_profiles");
 
       // Defense in depth: also wipe by apple_user_id if provided
       if (appleUserId) {

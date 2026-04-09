@@ -742,36 +742,12 @@ struct WorkoutView: View {
                 .padding()
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6)))
             } else {
-                List {
+                LazyVStack(spacing: 8) {
                     ForEach(sessionsForSelectedDay) { session in
                         sessionRow(session)
-                            .listRowBackground(Color(.systemGray6))
-                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                            .listRowSeparatorTint(Color.gray.opacity(0.3))
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if !isDayLocked {
-                                    Button(role: .destructive) {
-                                        deleteSession(session)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                            }
-                            .swipeActions(edge: .leading) {
-                                if !isDayLocked {
-                                    Button {
-                                        sessionToEdit = session
-                                    } label: {
-                                        Label("Edit", systemImage: "pencil")
-                                    }
-                                    .tint(.blue)
-                                }
-                            }
                     }
                 }
-                .listStyle(.plain)
-                .scrollDisabled(true)
-                .frame(height: CGFloat(sessionsForSelectedDay.count) * 70)
+                .padding(.horizontal)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.2), lineWidth: 1))
             }

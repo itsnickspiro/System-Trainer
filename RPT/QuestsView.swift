@@ -141,28 +141,14 @@ struct QuestsView: View {
                                     }
                                     .padding(.horizontal)
                                     
-                                    List {
+                                    LazyVStack(spacing: 8) {
                                         ForEach(activeQuests) { quest in
                                             QuestRow(quest: quest, onToggle: {
                                                 toggleQuestCompletion(quest)
                                             }, isLocked: isDayLocked)
-                                            .listRowBackground(Color.clear)
-                                            .listRowSeparator(.hidden)
-                                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                                if !isDayLocked && quest.isUserCreated {
-                                                    Button(role: .destructive) {
-                                                        dataManager.deleteUserCreatedQuest(quest)
-                                                    } label: {
-                                                        Label("Delete Quest", systemImage: "trash.fill")
-                                                    }
-                                                }
-                                            }
                                         }
                                     }
-                                    .listStyle(.plain)
-                                    .scrollDisabled(true)
-                                    .frame(height: CGFloat(activeQuests.count) * 140)
+                                    .padding(.horizontal)
                                 }
                             }
 
@@ -180,28 +166,14 @@ struct QuestsView: View {
                                     }
                                     .padding(.horizontal)
 
-                                    List {
+                                    LazyVStack(spacing: 8) {
                                         ForEach(completedQuests) { quest in
                                             QuestRow(quest: quest, onToggle: {
                                                 toggleQuestCompletion(quest)
                                             }, isLocked: isDayLocked)
-                                            .listRowBackground(Color.clear)
-                                            .listRowSeparator(.hidden)
-                                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                                if !isDayLocked && quest.isUserCreated {
-                                                    Button(role: .destructive) {
-                                                        dataManager.deleteUserCreatedQuest(quest)
-                                                    } label: {
-                                                        Label("Delete Quest", systemImage: "trash.fill")
-                                                    }
-                                                }
-                                            }
                                         }
                                     }
-                                    .listStyle(.plain)
-                                    .scrollDisabled(true)
-                                    .frame(height: CGFloat(completedQuests.count) * 140)
+                                    .padding(.horizontal)
                                 }
                             }
                         }

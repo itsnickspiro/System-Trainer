@@ -18,3 +18,4 @@ DerivedData/
 xcuserdata/
 .DS_Store
 build/
+.claude/worktrees/

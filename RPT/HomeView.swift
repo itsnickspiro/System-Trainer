@@ -9,7 +9,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var dataManager = DataManager.shared
-    @StateObject private var achievementManager = AchievementManager.shared
+    @ObservedObject private var achievementManager = AchievementManager.shared
     @ObservedObject private var avatarService = AvatarService.shared
     @Query(filter: #Predicate<WorkoutSession> { session in
         session.startedAt >= homeViewSessionCutoff
