@@ -144,14 +144,13 @@ struct OnboardingView: View {
                         .padding(.bottom, 40)
                 }
             }
-            // Tap-anywhere-to-dismiss-keyboard. simultaneousGesture means
-            // child Buttons (like the back chevron) still receive their
-            // taps first — only empty-space taps fall through to dismiss
-            // the keyboard. Replaces the previous Color.black.onTapGesture
-            // which was racing/winning over the back button.
-            .simultaneousGesture(
-                TapGesture().onEnded { dismissKeyboard() }
-            )
+            // No tap-anywhere-to-dismiss-keyboard gesture here. Two prior
+            // attempts (Color.black.onTapGesture in build 34, then
+            // simultaneousGesture on this VStack in build 35) both raced
+            // and won over the back chevron Button despite SwiftUI docs
+            // saying child Buttons should win. The Done button in the
+            // safeAreaInset overlay below handles keyboard dismissal
+            // completely, so tap-anywhere is no longer needed.
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(.dark)
@@ -660,9 +659,22 @@ private struct BootStepView: View {
 
         switch outcome {
         case .recoveredCompleted:
-            // Existing player who already finished onboarding on another
-            // device. Skip the rest of onboarding entirely.
-            onExistingUserRecovered()
+            // Server says this player has completed onboarding before.
+            // BUT — we deliberately do NOT auto-skip onboarding on a
+            // fresh install. AppStorage's hasCompletedOnboarding flag
+            // does not survive reinstalls, and the user testing the
+            // app on a fresh install (or after Delete Account) expects
+            // to walk through the steps again. The recovery from the
+            // server still happened (applyRemoteProfile pre-filled the
+            // local Profile), so they'll see all their data already
+            // populated and can tap Continue through quickly. The only
+            // case the auto-skip would matter for is true cross-device
+            // recovery, which is rare enough that asking the user to
+            // tap through pre-filled steps is a small cost compared
+            // to the much-more-common "user reinstalled and wants to
+            // re-onboard" case that build 27→34 kept stranding on
+            // the home page with no onboarding.
+            onNewUserSignedIn()
 
         case .linkedNewOrIncomplete:
             // Brand new player OR an existing player whose cloud row is
