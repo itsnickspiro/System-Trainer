@@ -44,14 +44,13 @@ struct OnboardingView: View {
     @State private var weightText          = "70"    // always stored in kg internally
     @State private var activityLevelIndex  = 1
     @State private var selectedAvatarKey: String?      = nil
-    @State private var selectedPlanID: String?         = nil   // nil = skip / custom
+    @State private var selectedPlanID: String?         = nil
     @State private var useMetric: Bool = (Locale.current.measurementSystem == .metric)
-    /// Set to true when the user picks "Build my own plan" on the plan step.
-    /// Controls whether step 6 (the Goal Survey gate) is shown.
-    @State private var isBuildingCustomPlan: Bool = false
-    /// Tracks whether the in-memory profile has had its goal survey completed.
-    /// Bound against the actual Profile model so step 6 Continue can enable.
-    @State private var goalSurveyCompleted: Bool = false
+    // The "Build my own plan" custom-plan path and its Goal Survey gate
+    // were removed in 2.8.11 — they were a source of repeated render
+    // bugs (the survey fullScreenCover never rendered correctly) and
+    // user confusion. Onboarding is now strictly: pick a pre-built
+    // anime plan or skip the workout-plan selection entirely.
 
     /// True while a permission-fetching Task is in flight on the current step.
     /// Used to disable the Continue button so a fast double-tap can't spawn
@@ -72,13 +71,42 @@ struct OnboardingView: View {
     @ObservedObject private var avatarService    = AvatarService.shared
 
     // ── Step configuration ────────────────────────────────────────────────────
-    private let totalProgressSteps = 12  // logical progress denominator (1–11 visible + Ready)
-    private let skippableSteps: Set<Int> = [11]  // Only Notifications is optional; HealthKit (10) and Avatar (9) are required
+    // 11 logical steps shown to the user (1 Name, 2 Gender, 3 Body Stats,
+    // 4 Goal, 5 Class, 6 Diet, 7 Workout Plan, 9 Avatar, 10 Health,
+    // 11 Notifications, 12 Ready). Step 8 — the Goal Survey Gate — is
+    // intentionally retired in 2.8.11 along with the custom-plan path,
+    // and the step number is permanently skipped by advanceFrom and
+    // previousStep so the user never lands on it.
+    private let totalProgressSteps = 11
+    // HealthKit (10) and Notifications (11) are both skippable — neither
+    // is allowed to block the user from completing onboarding. HealthKit
+    // in particular has been a sticking point because Apple's system
+    // sheet is one-shot per install: if the user denies once, they can
+    // never re-trigger it from inside the app. The skip path lets them
+    // proceed and re-grant later from Settings → Privacy → Health.
+    private let skippableSteps: Set<Int> = [10, 11]
     private let noProgressBarSteps: Set<Int> = [0, 12]
+
+    /// Dismisses the keyboard. Used by the tap-anywhere gesture and the
+    /// keyboard accessory Done button. Wrapped here so both call sites
+    /// invoke the exact same UIKit responder path.
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil, from: nil, for: nil
+        )
+    }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // Tap-anywhere-on-background dismisses the keyboard. This is
+            // the primary keyboard-dismissal affordance now — the system
+            // accessory bar Done button is a backup. The .contentShape
+            // makes the otherwise-hit-test-empty Color register taps.
+            Color.black
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { dismissKeyboard() }
 
             VStack(spacing: 0) {
                 // Progress bar (hidden on boot and ready screens)
@@ -101,7 +129,7 @@ struct OnboardingView: View {
                         removal: .move(edge: navigatingBackward ? .trailing : .leading).combined(with: .opacity)
                     ))
                     .id(currentStep)
-                    .animation(.interpolatingSpring(stiffness: 220, damping: 26), value: currentStep)
+                    .animation(.spring(response: 0.45, dampingFraction: 0.82), value: currentStep)
 
                 // Navigation buttons (hidden on boot and ready screens)
                 if !noProgressBarSteps.contains(currentStep) {
@@ -117,39 +145,20 @@ struct OnboardingView: View {
         // (Name, Body Stats, etc). The system places this in the keyboard
         // accessory bar, so it's only visible while a TextField is focused
         // and disappears the moment the keyboard goes down.
+        // Keyboard accessory bar: a Spacer pushes the Done button to the
+        // trailing edge with the system's natural padding. This is the
+        // backup dismiss path; the primary one is tap-anywhere on the
+        // black background (handled above by the .onTapGesture on
+        // Color.black). Past attempts to add explicit cyan-capsule
+        // styling here were ignored by the system accessory bar's
+        // layout, so this version uses the simplest native shape and
+        // lets iOS handle the spacing.
         .toolbar {
-            // The keyboard accessory bar lays out ToolbarItem children in
-            // a tight system HStack and ignores most padding/frame
-            // modifiers applied directly to the Button. To get visible
-            // breathing room around the Done button, we use a single
-            // ToolbarItem and put the spacing inside its label as a
-            // wrapping HStack with leading/trailing pads of clear color.
-            // Tested as the only way to actually get gaps in the
-            // accessory bar without the system overriding them.
-            ToolbarItem(placement: .keyboard) {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    Button {
-                        UIApplication.shared.sendAction(
-                            #selector(UIResponder.resignFirstResponder),
-                            to: nil, from: nil, for: nil
-                        )
-                    } label: {
-                        Text("Done")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.cyan)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule().fill(Color.cyan.opacity(0.12))
-                            )
-                            .overlay(
-                                Capsule().stroke(Color.cyan.opacity(0.4), lineWidth: 1)
-                            )
-                    }
-                    .padding(.trailing, 16)
-                    .padding(.vertical, 4)
-                }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done", action: dismissKeyboard)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.cyan)
             }
         }
     }
@@ -164,7 +173,7 @@ struct OnboardingView: View {
                     // Flag MUST be set inside the same withAnimation block
                     // (and before currentStep mutates) so SwiftUI captures
                     // the reversed transition edges for this animation.
-                    withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                         navigatingBackward = true
                         currentStep = previousStep(from: currentStep)
                     }
@@ -191,7 +200,7 @@ struct OnboardingView: View {
                 }
                 .frame(height: 4)
 
-                Text("\(currentStep)/\(totalProgressSteps)")
+                Text("\(displayedStep)/\(totalProgressSteps)")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.white.opacity(0.4))
                     .frame(width: 36, alignment: .trailing)
@@ -200,9 +209,17 @@ struct OnboardingView: View {
         }
     }
 
+    /// Maps the raw currentStep (which can include the retired Goal Survey
+    /// Gate position 8) to a 1..totalProgressSteps display number, so the
+    /// progress bar fills smoothly without a missing-tooth gap at the
+    /// position where step 8 used to live.
+    private var displayedStep: Int {
+        currentStep > 8 ? currentStep - 1 : currentStep
+    }
+
     private var progressFraction: CGFloat {
         guard currentStep > 0 else { return 0 }
-        return CGFloat(currentStep) / CGFloat(totalProgressSteps)
+        return CGFloat(displayedStep) / CGFloat(totalProgressSteps)
     }
 
     // MARK: - Step Content Router
@@ -229,7 +246,7 @@ struct OnboardingView: View {
                              selectedGender = p.gender
                              selectedGoal   = p.fitnessGoal
                          }
-                         withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
+                         withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                              navigatingBackward = false
                              currentStep = 1
                          }
@@ -251,14 +268,11 @@ struct OnboardingView: View {
         case 6:  DietPreferenceStepView(selectedDietType: $selectedDietType)
         case 7:  WorkoutPlanStepView(
                     selectedPlanID: $selectedPlanID,
-                    isBuildingCustomPlan: $isBuildingCustomPlan,
                     playerGender: selectedGender,
                     playerGoal: selectedGoal
                  )
-        case 8:  GoalSurveyGateStepView(
-                    profileProvider: { ensureProfile() },
-                    goalSurveyCompleted: $goalSurveyCompleted
-                 )
+        // Step 8 (Goal Survey Gate) was removed in 2.8.11. The advanceFrom
+        // and previousStep functions skip this step number unconditionally.
         case 9:  AvatarPickerStepView(
                     selectedAvatarKey: $selectedAvatarKey,
                     playerGender: selectedGender
@@ -289,17 +303,10 @@ struct OnboardingView: View {
             .buttonStyle(OnboardingPrimaryButtonStyle())
             .disabled(!canAdvance || isAdvancing)
 
-            // Helper text when the goal survey gate blocks progression
-            if currentStep == 8 && !goalSurveyCompleted {
-                Text("Complete the goal survey to continue.")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.5))
-            }
-
             // Skip button (optional steps only)
             if skippableSteps.contains(currentStep) {
                 Button("Skip for now") {
-                    withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                         advanceFrom(currentStep)
                     }
                 }
@@ -325,10 +332,8 @@ struct OnboardingView: View {
         case 6: // Diet — .none is a legitimate answer ("no restrictions"),
                 // so the default selection counts as a valid response.
             return true
-        case 7: // Workout plan — pick a preset OR opt into the custom-plan flow
-            return selectedPlanID != nil || isBuildingCustomPlan
-        case 8: // Goal survey gate
-            return goalSurveyCompleted
+        case 7: // Workout plan — must pick a preset
+            return selectedPlanID != nil
         case 9: // Avatar
             return selectedAvatarKey != nil
         default:
@@ -336,31 +341,21 @@ struct OnboardingView: View {
         }
     }
 
-    /// Advances from `step`, skipping the Goal Survey Gate when the
-    /// user didn't pick "Build my own plan".
+    /// Advances from `step`. Step 8 (the retired Goal Survey Gate) is
+    /// always skipped — its slot is permanently empty post-2.8.11.
     private func advanceFrom(_ step: Int) {
         var next = step + 1
-        if next == 8 && !isBuildingCustomPlan {
-            next = 9
-        }
+        if next == 8 { next = 9 }
         // Reset the back-flag so the slide animation runs forward.
-        // All forward-advance paths funnel through here OR through the
-        // two BootStep→Name handoffs (currentStep = 1) which set this
-        // explicitly themselves.
         navigatingBackward = false
         currentStep = next
     }
 
     /// Inverse of `advanceFrom` for the back button. Mirrors the same
-    /// step-skipping rules so we never land on a step the forward path
-    /// would have skipped — most importantly the Goal Survey Gate (step
-    /// 8) when the user didn't pick "Build my own plan", which is
-    /// otherwise stranded as an invalid back-target from step 9.
+    /// step-skipping rule so we never land on the retired step 8.
     private func previousStep(from step: Int) -> Int {
         var prev = step - 1
-        if prev == 8 && !isBuildingCustomPlan {
-            prev = 7
-        }
+        if prev == 8 { prev = 7 }
         return max(1, prev)
     }
 
@@ -372,7 +367,7 @@ struct OnboardingView: View {
 
         if currentStep == 0 {
             // Boot → Name
-            withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                 navigatingBackward = false
                 currentStep = 1
             }
@@ -388,7 +383,7 @@ struct OnboardingView: View {
             if let key = selectedAvatarKey {
                 Task { await AvatarService.shared.setAvatar(key: key) }
             }
-            withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) { advanceFrom(9) }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { advanceFrom(9) }
             return
         case 10:
             // HealthKit (required). If the user denies, we still advance —
@@ -399,7 +394,7 @@ struct OnboardingView: View {
                     await healthManager.requestAuthorization()
                 }
                 isAdvancing = false
-                withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) { advanceFrom(10) }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { advanceFrom(10) }
             }
             return
         case 11:
@@ -409,14 +404,14 @@ struct OnboardingView: View {
                     await notificationManager.requestAuthorization()
                 }
                 isAdvancing = false
-                withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) { advanceFrom(11) }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { advanceFrom(11) }
             }
             return
         default:
             break
         }
 
-        withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
             advanceFrom(currentStep)
         }
     }
@@ -458,12 +453,7 @@ struct OnboardingView: View {
         profile.weight             = weight   // stored in kg
         profile.useMetric          = useMetric
         profile.activityLevelIndex = activityLevelIndex
-        if isBuildingCustomPlan {
-            // Leave the "custom_pending" (or whatever the survey set) sentinel in place.
-            if (profile.activePlanID ?? "").isEmpty {
-                profile.activePlanID = "custom_pending"
-            }
-        } else if let planID = selectedPlanID, !planID.isEmpty {
+        if let planID = selectedPlanID, !planID.isEmpty {
             profile.activePlanID = planID
         } else {
             profile.activePlanID = ""
@@ -1399,7 +1389,6 @@ private struct AvatarCell: View {
 
 private struct WorkoutPlanStepView: View {
     @Binding var selectedPlanID: String?
-    @Binding var isBuildingCustomPlan: Bool
     /// Player's biological sex — used to filter anime programs to gender-appropriate ones.
     let playerGender: PlayerGender
     /// Player's fitness goal — used (best-effort) to filter plans by recommended goal.
@@ -1407,12 +1396,8 @@ private struct WorkoutPlanStepView: View {
     @ObservedObject private var planService = AnimeWorkoutPlanService.shared
 
     @State private var showingAnimePicker = false
-    @State private var pickMode: PickMode = .none
-
-    private enum PickMode { case none, anime, custom }
 
     /// Plans whose target gender matches the player (or that are gender-neutral).
-    /// The goal filter is applied as a nice-to-have if the plan model exposes it.
     private var visiblePlans: [AnimeWorkoutPlan] {
         planService.all.filter { plan in
             plan.targetGender == nil || plan.targetGender == playerGender
@@ -1428,18 +1413,17 @@ private struct WorkoutPlanStepView: View {
             icon: "figure.strengthtraining.traditional",
             iconColor: .orange,
             title: "Training Protocol",
-            subtitle: "Start with a proven plan or build your own.",
-            isSkippable: true
+            subtitle: "Pick a proven plan to start with — you can swap any time from the Training tab.",
+            isSkippable: false
         ) {
             VStack(spacing: 14) {
                 // Anime Plan card. Title/subtitle reflect the actual chosen
                 // plan once one is picked, so the user can see at a glance
-                // what they selected without scanning down to the
-                // confirmation row. Tapping the card after selection
+                // what they selected. Tapping the card after selection
                 // re-opens the picker so they can swap plans.
+                // The "Build my own plan" path was removed in 2.8.11.
                 let chosenAnimePlan: AnimeWorkoutPlan? = {
                     if let id = selectedPlanID,
-                       id != "custom_pending",
                        let plan = planService.plan(id: id) {
                         return plan
                     }
@@ -1447,34 +1431,19 @@ private struct WorkoutPlanStepView: View {
                 }()
                 PlanOptionCard(
                     icon: chosenAnimePlan?.iconSymbol ?? "sparkles",
-                    title: chosenAnimePlan?.character ?? "Anime Plan",
+                    title: chosenAnimePlan?.character ?? "Choose your plan",
                     subtitle: chosenAnimePlan.map { "\($0.anime) — tap to change" }
-                        ?? "Train like your favourite character",
+                        ?? "Browse the full catalog of anime training programs",
                     color: .orange,
                     isSelected: chosenAnimePlan != nil
                 ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
-                        pickMode = .anime
                         showingAnimePicker = true
                     }
                 }
 
-                // Build my own plan card — triggers the Goal Survey gate.
-                PlanOptionCard(
-                    icon: "plus.circle.fill",
-                    title: "Build my own plan",
-                    subtitle: "Answer a short survey so we can tailor quests to you",
-                    color: .blue,
-                    isSelected: pickMode == .custom
-                ) {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        pickMode = .custom
-                        selectedPlanID = "custom_pending"
-                        isBuildingCustomPlan = true
-                    }
-                }
-
-                // Mini anime plan preview strip
+                // Mini anime plan preview strip — quick picks of the
+                // most popular plans without opening the full picker.
                 if !previewPlans.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("POPULAR PLANS")
@@ -1488,35 +1457,11 @@ private struct WorkoutPlanStepView: View {
                                     MiniPlanChip(plan: plan,
                                                  isSelected: selectedPlanID == plan.id) {
                                         selectedPlanID = plan.id
-                                        pickMode = .anime
-                                        isBuildingCustomPlan = false
                                     }
                                 }
                             }
                         }
                     }
-                }
-
-                // Confirmation
-                if let id = selectedPlanID,
-                   let plan = planService.plan(id: id) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Selected: \(plan.character)")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.top, 4)
-                } else if pickMode == .custom {
-                    HStack(spacing: 8) {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundColor(.blue)
-                        Text("Build your plan after setup in the Training tab")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                    .padding(.top, 4)
                 }
             }
         }
@@ -1525,12 +1470,6 @@ private struct WorkoutPlanStepView: View {
                 plans: visiblePlans,
                 selectedPlanID: $selectedPlanID
             )
-        }
-        .onChange(of: selectedPlanID) { _, newValue in
-            // Any non-sentinel real plan ID clears the "custom" intent.
-            if let id = newValue, !id.isEmpty, id != "custom_pending" {
-                isBuildingCustomPlan = false
-            }
         }
     }
 }
@@ -1803,7 +1742,7 @@ private struct HealthStepView: View {
             iconColor: .red,
             title: "Connect Apple Health",
             subtitle: "Required to power your stats and personalize daily quests.",
-            isSkippable: false
+            isSkippable: true
         ) {
             VStack(spacing: 18) {
                 if healthManager.isAuthorized {
@@ -1848,20 +1787,50 @@ private struct HealthStepView: View {
                     .buttonStyle(OnboardingPrimaryButtonStyle())
                     .padding(.top, 4)
 
-                    if showDeniedHint {
-                        VStack(spacing: 8) {
-                            Text("Permission denied — open Settings to enable.")
+                    if showDeniedHint || healthManager.lastErrorMessage != nil {
+                        VStack(spacing: 10) {
+                            // Surface the actual error from HealthManager
+                            // when present (entitlement issue, denial,
+                            // device unsupported), otherwise fall back
+                            // to the generic denied message.
+                            Text(healthManager.lastErrorMessage
+                                 ?? "Permission denied — you can grant access later from iOS Settings → Privacy & Security → Health.")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.white.opacity(0.7))
                                 .multilineTextAlignment(.center)
-                            Button("Open Settings") {
-                                if let url = URL(string: UIApplication.openSettingsURLString) {
-                                    UIApplication.shared.open(url)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            HStack(spacing: 12) {
+                                Button("Open Health Settings") {
+                                    // Direct deep link into the Health
+                                    // app's Sources screen for this app.
+                                    // Falls back to general Settings if
+                                    // the URL scheme isn't available.
+                                    if let url = URL(string: "x-apple-health://") {
+                                        UIApplication.shared.open(url) { ok in
+                                            if !ok, let s = URL(string: UIApplication.openSettingsURLString) {
+                                                UIApplication.shared.open(s)
+                                            }
+                                        }
+                                    }
                                 }
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.cyan)
                             }
-                            .font(.caption)
-                            .foregroundColor(.cyan)
+
+                            Text("Tap Skip below to continue without Apple Health — you can connect it later from the Settings tab.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 2)
                         }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.orange.opacity(0.08))
+                                .overlay(RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.orange.opacity(0.3), lineWidth: 1))
+                        )
                     }
 
                     Text("We never share your health data. Everything stays on your device or in your private CloudKit container.")
@@ -2219,74 +2188,9 @@ struct SecondaryButtonStyle: ButtonStyle {
 // MARK: - QuestDifficulty, QuestCategory (still in QuestsView.swift — no change)
 
 // MARK: - Preview
-
-// MARK: - Step 6: Goal Survey Gate
-//
-// Only shown when the user picked "Build my own plan" on step 5.
-// Presents GoalSurveyView in a fullScreenCover. Continue (in the parent nav
-// bar) is disabled until `profile.goalSurveyCompleted == true`.
-
-private struct GoalSurveyGateStepView: View {
-    /// Lazily fetches-or-creates the live Profile so the survey sheet has
-    /// something to mutate.
-    let profileProvider: () -> Profile
-    @Binding var goalSurveyCompleted: Bool
-
-    @State private var showingSurvey = false
-    @State private var resolvedProfile: Profile? = nil
-
-    var body: some View {
-        OnboardingStepShell(
-            icon: "list.bullet.clipboard.fill",
-            iconColor: .cyan,
-            title: "Goal Survey Required",
-            subtitle: "To generate quests for your custom plan, complete a 7-question survey about your training preferences."
-        ) {
-            VStack(spacing: 16) {
-                Button {
-                    resolvedProfile = profileProvider()
-                    showingSurvey = true
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: goalSurveyCompleted
-                              ? "checkmark.circle.fill"
-                              : "arrow.right.circle.fill")
-                        Text(goalSurveyCompleted ? "Survey Complete" : "Take the Survey")
-                            .font(.system(size: 15, weight: .bold))
-                    }
-                    .foregroundColor(goalSurveyCompleted ? .green : .cyan)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill((goalSurveyCompleted ? Color.green : Color.cyan).opacity(0.12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke((goalSurveyCompleted ? Color.green : Color.cyan)
-                                            .opacity(0.4), lineWidth: 1)
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-
-                if goalSurveyCompleted {
-                    Text("Nice — tap Continue to keep going.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-            }
-        }
-        .fullScreenCover(isPresented: $showingSurvey) {
-            if let profile = resolvedProfile {
-                GoalSurveyView(profile: profile) {
-                    // Sync local gate state from the profile after the survey dismisses.
-                    goalSurveyCompleted = profile.goalSurveyCompleted
-                    showingSurvey = false
-                }
-            }
-        }
-    }
-}
+// (GoalSurveyGateStepView removed in 2.8.11 along with the custom-plan path.
+// GoalSurveyView is no longer reachable from onboarding; it can be re-used
+// later from a Settings screen if needed.)
 
 // MARK: - Step 9: ATT (App Tracking Transparency) Prompt
 //
