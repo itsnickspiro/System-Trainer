@@ -192,6 +192,57 @@ final class GuildService: ObservableObject {
         }
     }
 
+    /// Permanently delete the guild. Only the owner can do this.
+    /// Removes all members and destroys the guild record.
+    func dismantleGuild() async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty,
+              let guild = currentGuild else { return false }
+        do {
+            _ = try await postToProxy(body: [
+                "action": "dismantle_guild",
+                "guild_id": guild.id,
+                "cloudkit_user_id": cloudKitID
+            ])
+            // Clear local cache
+            DataManager.shared.updateProfile { p in
+                p.guildID = ""
+                p.guildName = ""
+                p.guildRole = ""
+            }
+            currentGuild = nil
+            currentRole = ""
+            currentMembers = []
+            currentRaid = nil
+            currentContributions = []
+            return true
+        } catch {
+            print("[GuildService] dismantleGuild failed: \(error.localizedDescription)")
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Transfer guild ownership to another member. Only the current owner
+    /// can call this — the target must already be a member.
+    func transferLeadership(to memberCloudKitID: String) async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty,
+              let guild = currentGuild else { return false }
+        do {
+            _ = try await postToProxy(body: [
+                "action": "transfer_leadership",
+                "guild_id": guild.id,
+                "cloudkit_user_id": cloudKitID,
+                "new_owner_cloudkit_user_id": memberCloudKitID
+            ])
+            await refresh()
+            return true
+        } catch {
+            print("[GuildService] transferLeadership failed: \(error.localizedDescription)")
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
     func claimRaidReward() async -> Result<Int, String> {
         guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else {
             return .failure("Not signed in")

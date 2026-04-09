@@ -508,6 +508,17 @@ struct OnboardingView: View {
         let height = Double(heightText) ?? 170.0
         let weight = Double(weightText) ?? 70.0
 
+        // Persist the username to UserDefaults FIRST so that any code path
+        // that calls DataManager.ensureProfileExists() (which reads
+        // "userProfileName") will pick up the real name instead of the
+        // default "Player". This must happen before the SwiftData fetch
+        // below, because ensureProfileExists can be triggered from
+        // PlayerProfileService.refresh() running concurrently in the
+        // RPTApp .task chain.
+        if !trimmedName.isEmpty {
+            UserDefaults.standard.set(trimmedName, forKey: "userProfileName")
+        }
+
         // Write to SwiftData Profile
         let existing = try? modelContext.fetch(FetchDescriptor<Profile>())
         let profile: Profile
@@ -534,9 +545,21 @@ struct OnboardingView: View {
         }
         try? modelContext.save()
 
-        // UserDefaults sync
-        if !trimmedName.isEmpty {
-            UserDefaults.standard.set(trimmedName, forKey: "userProfileName")
+        // Keep DataManager.shared.currentProfile in sync. If it already
+        // points to a Profile (same SwiftData context — same managed
+        // object), the name update above is already visible. If it hasn't
+        // been materialised yet, ensureProfileExists will create/fetch it
+        // using the UserDefaults name we wrote above, so it picks up the
+        // correct username. Force-ensure it exists now so HomeView sees
+        // the profile immediately.
+        if DataManager.shared.currentProfile == nil {
+            DataManager.shared.ensureProfileExists()
+        } else if let dmProfile = DataManager.shared.currentProfile,
+                  !trimmedName.isEmpty {
+            // Same context means same managed object, but be defensive:
+            // if the name somehow didn't propagate, set it directly.
+            dmProfile.name = trimmedName
+            try? modelContext.save()
         }
 
         // Notifications
@@ -550,8 +573,12 @@ struct OnboardingView: View {
             Task { await AvatarService.shared.setAvatar(key: key) }
         }
 
-        // Kick off profile sync
-        Task { await PlayerProfileService.shared.refresh() }
+        // Push local profile to the cloud. Use syncProfile() (upsert-only)
+        // instead of refresh() — refresh() fetches the remote profile and
+        // applies it locally, which can overwrite the name the user just
+        // typed with a stale "Player" default that was upserted earlier in
+        // the RPTApp .task chain before onboarding finished.
+        Task { await PlayerProfileService.shared.syncProfile() }
 
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
         isOnboardingComplete = true
@@ -762,11 +789,11 @@ private struct NameStepView: View {
         OnboardingStepShell(
             icon: "person.circle.fill",
             iconColor: .cyan,
-            title: "What should we\ncall you, Warrior?",
-            subtitle: "Your identity in the system."
+            title: "Pick a username",
+            subtitle: "Your identity across the system.\nOther players will see this."
         ) {
             VStack(spacing: 8) {
-                TextField("Enter your name", text: $profileName)
+                TextField("Enter a username", text: $profileName)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.white)
@@ -786,7 +813,7 @@ private struct NameStepView: View {
                     .frame(maxWidth: 320)
 
                 if profileName.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Text("Required to continue")
+                    Text("Username required to continue")
                         .font(.caption)
                         .foregroundColor(.orange.opacity(0.7))
                 }

@@ -298,6 +298,67 @@ serve(async (req) => {
       return jsonResponse({ success: true });
     }
 
+    // ----- TRANSFER LEADERSHIP -----
+    if (action === "transfer_leadership") {
+      const callerId = (body.cloudkit_user_id ?? "").toString();
+      const newLeaderId = (body.new_leader_cloudkit_user_id ?? "").toString();
+      if (!callerId || !newLeaderId) return jsonResponse({ error: "Missing params" }, 400);
+
+      // Look up caller's membership
+      const { data: callerMembership } = await supabase
+        .from("guild_members")
+        .select("*")
+        .eq("cloudkit_user_id", callerId)
+        .maybeSingle();
+      if (!callerMembership) return jsonResponse({ error: "You're not in a guild." }, 400);
+      if (callerMembership.role !== "owner") {
+        return jsonResponse({ error: "Only the guild owner can transfer leadership" }, 403);
+      }
+
+      const guildId = callerMembership.guild_id;
+
+      // Verify target is a member of the same guild
+      const { data: targetMembership } = await supabase
+        .from("guild_members")
+        .select("*")
+        .eq("guild_id", guildId)
+        .eq("cloudkit_user_id", newLeaderId)
+        .maybeSingle();
+      if (!targetMembership) {
+        return jsonResponse({ error: "Target player is not a member of this guild" }, 400);
+      }
+      if (targetMembership.role === "owner") {
+        return jsonResponse({ error: "That player is already the owner" }, 400);
+      }
+
+      // Promote new leader to owner
+      const { error: promoteErr } = await supabase
+        .from("guild_members")
+        .update({ role: "owner" })
+        .eq("guild_id", guildId)
+        .eq("cloudkit_user_id", newLeaderId);
+      if (promoteErr) throw promoteErr;
+
+      // Demote old leader to member
+      const { error: demoteErr } = await supabase
+        .from("guild_members")
+        .update({ role: "member" })
+        .eq("guild_id", guildId)
+        .eq("cloudkit_user_id", callerId);
+      if (demoteErr) throw demoteErr;
+
+      // Update guild's owner reference
+      await supabase
+        .from("guilds")
+        .update({
+          owner_cloudkit_user_id: newLeaderId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", guildId);
+
+      return jsonResponse({ success: true, new_owner: newLeaderId });
+    }
+
     // ----- GET MY GUILD -----
     if (action === "get_my_guild") {
       const userId = (body.cloudkit_user_id ?? "").toString();
@@ -508,6 +569,53 @@ serve(async (req) => {
         .eq("cloudkit_user_id", userId);
 
       return jsonResponse({ success: true, gp_award: 200 });
+    }
+
+    // ----- DISMANTLE GUILD -----
+    if (action === "dismantle_guild") {
+      const userId = (body.cloudkit_user_id ?? "").toString();
+      if (!userId) return jsonResponse({ error: "Missing cloudkit_user_id" }, 400);
+
+      const { data: membership } = await supabase
+        .from("guild_members")
+        .select("*")
+        .eq("cloudkit_user_id", userId)
+        .maybeSingle();
+      if (!membership) return jsonResponse({ error: "You're not in a guild." }, 400);
+
+      const guildId = membership.guild_id;
+
+      const { data: guild } = await supabase
+        .from("guilds")
+        .select("*")
+        .eq("id", guildId)
+        .maybeSingle();
+      if (!guild || guild.is_disbanded) return jsonResponse({ error: "Guild not found." }, 404);
+
+      // Only the owner can dismantle
+      if (membership.role !== "owner") {
+        return jsonResponse({ error: "Only the guild owner can dismantle the guild" }, 403);
+      }
+
+      // Remove ALL members
+      const { error: delMembersErr } = await supabase
+        .from("guild_members")
+        .delete()
+        .eq("guild_id", guildId);
+      if (delMembersErr) throw delMembersErr;
+
+      // Mark the guild as disbanded and zero out members
+      const { error: disbandErr } = await supabase
+        .from("guilds")
+        .update({
+          member_count: 0,
+          is_disbanded: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", guildId);
+      if (disbandErr) throw disbandErr;
+
+      return jsonResponse({ success: true, dismantled: true });
     }
 
     return jsonResponse({ error: "Unknown action" }, 400);

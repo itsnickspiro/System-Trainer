@@ -8,6 +8,8 @@ struct GuildView: View {
     @State private var showingCreateSheet = false
     @State private var showingFocusEditor = false
     @State private var showingLeaveConfirm = false
+    @State private var showingTransferConfirm = false
+    @State private var showingDismantleConfirm = false
     @State private var focusDraft: String = ""
 
     var body: some View {
@@ -54,17 +56,32 @@ struct GuildView: View {
                     }
                 }
             }
+            // Regular member leave confirmation
             .alert("Leave Guild", isPresented: $showingLeaveConfirm) {
                 Button("Leave", role: .destructive) {
                     Task { _ = await service.leaveGuild() }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                if service.currentRole == "owner" {
-                    Text("You're the owner. Leaving will transfer ownership to the longest-tenured member. The guild will continue without you.")
-                } else {
-                    Text("You can re-join later if there's still room.")
+                Text("You can re-join later if there's still room.")
+            }
+            // Owner with other members — transfer leadership on leave
+            .alert("Transfer Leadership", isPresented: $showingTransferConfirm) {
+                Button("Transfer & Leave", role: .destructive) {
+                    Task { _ = await service.leaveGuild() }
                 }
+                Button("Stay", role: .cancel) {}
+            } message: {
+                Text("You're the guild owner. Leaving will transfer leadership to the next longest member. Your guild progress will be preserved.")
+            }
+            // Owner as sole member — dismantle the guild
+            .alert("Dismantle Guild", isPresented: $showingDismantleConfirm) {
+                Button("Dismantle & Leave", role: .destructive) {
+                    Task { _ = await service.leaveGuild() }
+                }
+                Button("Stay", role: .cancel) {}
+            } message: {
+                Text("You're the only member. Leaving will permanently delete the guild.")
             }
             .task {
                 await service.refresh()
@@ -187,11 +204,22 @@ struct GuildView: View {
                 if !service.currentContributions.isEmpty {
                     contributionsSection
                 }
+                // Leave Guild — routes to the appropriate confirmation
+                // based on owner status and member count
                 Button(role: .destructive) {
-                    showingLeaveConfirm = true
+                    if service.currentRole == "owner" {
+                        if service.currentMembers.count <= 1 {
+                            showingDismantleConfirm = true
+                        } else {
+                            showingTransferConfirm = true
+                        }
+                    } else {
+                        showingLeaveConfirm = true
+                    }
                 } label: {
                     Label("Leave Guild", systemImage: "rectangle.portrait.and.arrow.right")
                         .frame(maxWidth: .infinity)
+                        .frame(minHeight: 44)
                 }
                 .padding(.top, 8)
                 .buttonStyle(.bordered)

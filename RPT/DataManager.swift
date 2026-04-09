@@ -27,6 +27,8 @@ final class DataManager: ObservableObject {
     @Published var isOnline = true
     @Published var isSyncing = false
     @Published var syncError: Error?
+    /// Set when a SwiftData context save fails so the UI can surface the problem.
+    @Published var lastSaveError: String? = nil
     
     // MARK: - HealthKit background delivery
     /// Active observer queries, keyed by sample type identifier.
@@ -538,6 +540,9 @@ final class DataManager: ObservableObject {
     }
 
     func uncompleteQuest(_ quest: Quest) {
+        // Only allow un-completing quests from today — past days are locked.
+        guard Calendar.current.isDateInToday(quest.dateTag ?? Date()) else { return }
+
         quest.isCompleted = false
         quest.completedAt = nil
 
@@ -896,9 +901,13 @@ final class DataManager: ObservableObject {
         let maxGP = rc.int("gp_bonus_max", default: 25)
         guard maxGP > 0 else { return }
 
+        // Ensure min <= max so the closed range doesn't crash at runtime.
+        let safeMin = min(minGP, maxGP)
+        let safeMax = max(minGP, maxGP)
+
         for quest in quests {
             if Double.random(in: 0..<1) < Double(chance) {
-                quest.creditReward = Int.random(in: minGP...maxGP)
+                quest.creditReward = Int.random(in: safeMin...safeMax)
             }
         }
     }
@@ -1237,8 +1246,10 @@ final class DataManager: ObservableObject {
         
         do {
             try context.save()
+            lastSaveError = nil
         } catch {
             print("Failed to save local changes: \(error)")
+            lastSaveError = error.localizedDescription
         }
     }
     
