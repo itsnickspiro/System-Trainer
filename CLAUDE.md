@@ -1,70 +1,224 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository.
 
 ## What This Is
 
-System Trainer (RPT) is a gamified iOS fitness app built with SwiftUI and SwiftData. It turns workouts, nutrition tracking, and daily habits into an RPG-style progression system with quests, XP, levels, streaks, achievements, leaderboards, and an in-app store/inventory.
+System Trainer (RPT) is a gamified iOS fitness app — SwiftUI + SwiftData + CloudKit + a Supabase backend. Workouts, nutrition, and daily habits become an RPG progression system: quests, XP, levels, streaks, achievements, leaderboards, store, inventory, anime-themed workout plans.
 
-## Build & Run
+- Bundle ID: `SpiroTechnologies.RPT`
+- iCloud container: `iCloud.com.SpiroTechnologies.RPT`
+- Team ID: `WRVY4Q5HA5`
+- Current version: 2.8.11 (build 34) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
 
-- **Open in Xcode:** `RPT.xcodeproj` — no CocoaPods or SPM dependencies to resolve
-- **Build:** Cmd+B in Xcode, or `xcodebuild -project RPT.xcodeproj -scheme RPT -sdk iphonesimulator`
-- **Required Xcode Build Settings (User-Defined):**
-  - `SUPABASE_ANON_KEY` — from Supabase dashboard (Settings → API → anon public)
-  - `APP_SECRET` — shared secret matching `RPT_APP_SECRET` in Supabase Vault
-  - These flow into Info.plist and are read by `Secrets.swift` at runtime
-- **CloudKit:** Uses private CloudKit database (`iCloud.com.SpiroTechnologies.RPT`). Falls back to local-only SwiftData store in Simulator or when entitlement is missing.
-- **Xcode Cloud:** Auto-builds and uploads to TestFlight on every push to `main`. Configured to run `ci_scripts/ci_post_clone.sh`, which generates `Secrets.xcconfig` from the `SUPABASE_ANON_KEY` and `APP_SECRET` Secret Environment Variables set in the workflow.
-- **No test suite currently exists.**
+## Quick Start
 
-## Supabase Backend
+```bash
+# Build for simulator
+xcodebuild -project RPT.xcodeproj -scheme RPT -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 17' build
 
-Edge Functions in `supabase/functions/` proxy all third-party API calls — no API keys are ever sent to the client. Each proxy function follows the same pattern: validate `x-app-secret` header, fetch the real key from Supabase Vault, call the external API, return the result.
+# Open in Xcode
+open RPT.xcodeproj
+```
 
-**Proxy functions:** `exercises-proxy`, `nutrition-proxy`, `foods-proxy`, `recipe-proxy`, `weather-proxy`, `anime-plans-proxy`, `quest-templates-proxy`, `remote-config-proxy`, `usda-proxy`
+No CocoaPods, no SPM. Everything compiles from the .xcodeproj as-is.
 
-**Deploy:** `supabase functions deploy` (all) or `supabase functions deploy <name>`
+## Required Build Settings
 
-**Local dev:** `supabase functions serve --env-file .env.local`
+Two user-defined build settings flow into `Secrets.xcconfig` → Info.plist → `Secrets.swift` at runtime:
 
-**Database scripts** (`supabase/scripts/`): Python scripts for seeding exercises, foods, and anime plans. See `supabase/DEPLOY.md` for full setup instructions.
+- `SUPABASE_ANON_KEY` — from Supabase dashboard → Settings → API → anon public
+- `APP_SECRET` — must match `RPT_APP_SECRET` in Supabase Vault (validates the `x-app-secret` header on every Edge Function call)
+
+In Xcode Cloud these are set as Secret Environment Variables on the workflow; `ci_scripts/ci_post_clone.sh` writes them into `Secrets.xcconfig` before the build runs.
+
+## Visual verification on the simulator (required before every UI commit)
+
+The Mac Mini is set up so Claude can drive the Simulator directly via computer-use and verify UI changes before committing. This is the **default workflow for any UI change** — don't ship onboarding/layout/animation fixes without running them on the simulator first.
+
+```bash
+# Build + install + launch in one pass
+xcodebuild -project RPT.xcodeproj -scheme RPT -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,id=FF3C9C19-B01C-4ADD-A9DF-735D7FC2D7D2' \
+  -configuration Debug build
+APP="/Users/nickspiro/Library/Developer/Xcode/DerivedData/RPT-aurjojbqmomvovezermqipqlcugz/Build/Products/Debug-iphonesimulator/RPT.app"
+xcrun simctl uninstall booted SpiroTechnologies.RPT
+xcrun simctl install booted "$APP"
+xcrun simctl launch booted SpiroTechnologies.RPT
+```
+
+Then grant `Simulator` via `mcp__computer-use__request_access` and use click/type/screenshot to drive the app. The "Skip SIWA (DEBUG)" button in `BootStepView` (stripped from Release via `#if DEBUG`) bypasses the Apple ID gate that would otherwise block automated testing on the simulator. Optional launch argument `-onboardingDebugAutofill 1` pre-fills name/age/height/weight/class.
+
+Accessibility identifiers to find UI elements:
+- `siwa_button` / `debug_skip_siwa` — welcome screen entry
+- `onboarding_back_button` / `onboarding_continue_button` / `onboarding_skip_button` — nav chrome
+- `onboarding_step_counter` — "N/11" progress text
+- `name_text_field` — step 1 name input
+
+**Simulator limitations — test on the tethered iPhone for these:** SIWA with real Apple ID, HealthKit permissions, CloudKit sync, and subtle gesture/hit-test differences between simulator and device.
+
+## Version policy
+
+Every bug fix bumps the marketing version by one patch AND resets `CURRENT_PROJECT_VERSION` to 1. Example: 2.8.11 build 36 → 2.8.12 build 1 → 2.8.13 build 1. Avoid "same version, build N+1" stacking — it clutters App Store Connect history.
+
+```bash
+# Bumping 2.8.12 → 2.8.13 (and resetting build to 1):
+sed -i '' 's/MARKETING_VERSION = 2\.8\.12;/MARKETING_VERSION = 2.8.13;/g; \
+          s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = 1;/g' \
+  RPT.xcodeproj/project.pbxproj
+```
+
+Infrastructure-only changes (testing hooks, docs, CLAUDE.md) can skip the marketing bump and just increment the build number.
+
+## Release Pipeline (manual CLI)
+
+Used for hot-fix builds when bypassing Xcode Cloud. Bump versions in `RPT.xcodeproj/project.pbxproj` first (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` — there are 6 occurrences of each, sed-replace them all).
+
+```bash
+rm -rf build/RPT.xcarchive build/export
+xcodebuild -project RPT.xcodeproj -scheme RPT -configuration Release \
+  -sdk iphoneos -destination 'generic/platform=iOS' \
+  -archivePath build/RPT.xcarchive clean archive
+xcodebuild -exportArchive -archivePath build/RPT.xcarchive \
+  -exportOptionsPlist ExportOptions.plist -exportPath build/export
+```
+
+`ExportOptions.plist` is configured for App Store Connect upload (`destination = upload`), so the export step both packages and uploads in one pass. Builds usually finish processing in TestFlight within 5–15 minutes.
+
+## Verifying a Signed Archive
+
+The ground-truth check for whether HealthKit / CloudKit / SIWA / push entitlements actually shipped with the binary — much faster than reading `RPT/RPT.entitlements`:
+
+```bash
+codesign -d --entitlements - build/RPT.xcarchive/Products/Applications/RPT.app
+security cms -D -i build/RPT.xcarchive/Products/Applications/RPT.app/embedded.mobileprovision
+```
+
+When debugging "permission denied" / "feature not working in TestFlight" reports, verify entitlements before assuming a code bug.
 
 ## Architecture
 
-### Data Layer
-- **SwiftData** with CloudKit sync — all `@Model` properties must be optional or have defaults
-- **`Models.swift`** — all SwiftData model definitions: `Profile`, `Quest`, `FoodItem`, `FoodEntry`, `CustomMeal`, `ExerciseItem`, `WorkoutSession`, `ExerciseSet`, `ActiveRoutine`, `PersonalRecord`, `PatrolRoute`, `InventoryItem`, `CustomWorkoutPlan`, `Achievement`, `BodyMeasurement`, `PlannedMeal`
-- **`DataManager.swift`** — singleton (`DataManager.shared`) that owns ModelContext reference and manages quest generation, XP/level calculations, streak tracking, and daily resets
+### Data layer
+- **SwiftData with CloudKit sync.** All `@Model` properties must have defaults (CloudKit requirement). Models live in `RPT/Models.swift`.
+- **`DataManager.swift`** — `DataManager.shared` singleton owning the `ModelContext`. Manages quest generation, XP/level math, streak tracking, and the Midnight Reset.
+- The model schema is declared in `RPTApp.swift` inside `sharedModelContainer`. **Anything declared `@Model` but missing from this `Schema([...])` array silently fails to persist.** Always update both places together.
 
-### Service Singletons (all `ObservableObject`, refreshed in sequence at launch)
-Launch order matters — defined in `RPTApp.swift`:
-1. `LeaderboardService` (CloudKit user ID resolution)
-2. `RemoteConfigService` (feature flags)
-3. `PlayerProfileService` (cloud profile)
-4. `QuestTemplateService` → `AchievementsService` → `AnnouncementsService` → `StoreService` → `EventsService` → `AnimeWorkoutPlanService` → `LeaderboardService` (rankings) → `AvatarService`
+### Service singletons
+All `ObservableObject`, all `@MainActor`, all `.shared`. Refreshed in a fixed sequence at launch (defined in `RPTApp.swift` `.task` modifier on `RootContainerView`):
 
-### API Layer
-Swift API files call Supabase Edge Functions (never external APIs directly):
-- `ExercisesAPI.swift` — exercise search
-- `NutritionAPI.swift` — nutrition data lookup
-- `RecipeAPI.swift` — recipe search
-- `WeatherstackAPI.swift` — weather for outdoor workouts
-- `FoodDatabaseService.swift` — food database queries
+1. `DataManager.configure(with:)` — must run before any service that touches Profile data, including the SIWA recovery flow
+2. `LeaderboardService.resolveCloudKitUserIDIfNeeded()` (10s timeout, non-fatal)
+3. (Notification permission, only if onboarding complete)
+4. `RemoteConfigService.refresh()`
+5. `PlayerProfileService.refresh()`
+6. `QuestTemplateService` → `AchievementsService` → `AnnouncementsService` → `StoreService` → `EventsService` → `AnimeWorkoutPlanService`
+7. `LeaderboardService.refresh()` (rankings)
+8. `AvatarService.refresh()`
+
+**Order matters.** Anything that needs the CloudKit user ID must run after step 2.
+
+### API layer
+Swift API files NEVER call third-party APIs directly. Everything goes through Supabase Edge Function proxies. Each proxy validates the `x-app-secret` header, fetches the real third-party key from Supabase Vault, and returns the result. See `RPT/ExercisesAPI.swift`, `NutritionAPI.swift`, `RecipeAPI.swift`, `WeatherstackAPI.swift`, `FoodDatabaseService.swift`.
 
 ### Navigation
-`ContentView.swift` — TabView with: Home, Quests, Diet, Training, Leaderboard (feature-flagged). Deep links via `rpt://` and `systemtrainer://` URL schemes.
+`RPT/ContentView.swift` — `TabView` with Home / Quests / Diet / Training / Leaderboard (the leaderboard tab is feature-flagged via `RemoteConfigService`). Deep links via the `rpt://` and `systemtrainer://` URL schemes; handlers live in `RPTApp.swift handleDeepLink(_:)`.
 
-### Key Patterns
-- **Feature flags** via `RemoteConfigService` — gates like `feature_coach_enabled`, `feature_leaderboard_enabled`, `feature_anime_plans_enabled`
-- **`@AppStorage`** for user preferences (color scheme, notification toggles, gameplay settings)
-- **`HealthManager.swift`** — HealthKit integration for steps, heart rate, calories, sleep
-- **`QuestManager.swift`** — procedural quest generation with progressive overload based on player demographics
-- **`AchievementManager.swift`** — achievement tracking and unlock logic
+### Onboarding
+`RPT/OnboardingView.swift` — single file, ~2200 lines, all step views inlined. Driven by an `Int currentStep` state. The full flow:
 
-## Conventions
+| Step | View | Notes |
+|---|---|---|
+| 0 | `BootStepView` | SIWA welcome — only path into the app for new installs |
+| 1 | `NameStepView` | |
+| 2 | `GenderStepView` | |
+| 3 | `BodyStatsStepView` | Age / height / weight. Gates Continue. |
+| 4 | `GoalStepView` | |
+| 5 | `ClassSelectionStepView` | Must pick non-`.unselected`. Gates Continue. |
+| 6 | `DietPreferenceStepView` | `.none` is a valid answer ("no restrictions") |
+| 7 | `WorkoutPlanStepView` | Pick a pre-built anime plan. **No custom-plan option** — see "Removed in 2.8.11" |
+| 8 | *(retired)* | Permanently skipped by `advanceFrom`/`previousStep` |
+| 9 | `AvatarPickerStepView` | Filtered by player gender via key suffix `_m`/`_f` |
+| 10 | `HealthStepView` | **Skippable** — HealthKit can fail for reasons the app can't fix |
+| 11 | `NotificationsStepView` | Skippable |
+| 12 | `ReadyStepView` | |
 
-- All secrets go through Supabase Edge Function proxies, never in client code
-- SwiftData models: every property needs a default value (CloudKit requirement)
-- Services use singleton pattern with `shared` static property
-- UI defaults to dark mode (`@AppStorage("colorScheme")` defaults to `"dark"`)
+`displayedStep` remaps `currentStep` for the progress bar so it fills smoothly across the retired position 8.
+
+### Backend (Supabase)
+Edge Functions in `supabase/functions/` (deployed via `supabase functions deploy <name>`):
+
+- **Proxies** (third-party API gateways): `exercises-proxy`, `nutrition-proxy`, `foods-proxy`, `recipe-proxy`, `weather-proxy`, `anime-plans-proxy`, `quest-templates-proxy`, `remote-config-proxy`, `usda-proxy`
+- **App services**: `player-proxy` (profile / SIWA / delete-account / revoke), `avatars-proxy`, `leaderboard-proxy`, `notifications-proxy`
+- **Auth (2.9.0 in progress)**: `_shared/auth.ts`, App Attest verification, JWT minting
+
+Database scripts in `supabase/scripts/` (Python) seed exercises, foods, anime plans. See `supabase/DEPLOY.md`.
+
+## Supabase ad-hoc SQL workflow
+
+`supabase db push` does **NOT** work in this repo — the remote DB has 50+ migrations created via the dashboard before migration tracking existed, and the CLI refuses to push until the local history matches. For one-off seeds, schema inspection, or manual migrations, use `db query` instead:
+
+```bash
+brew install supabase/tap/supabase     # do NOT use npm -g, Supabase blocks it
+export SUPABASE_ACCESS_TOKEN=sbp_xxx   # personal access token from dashboard
+supabase db query --linked -f supabase/migrations/<file>.sql
+supabase db query --linked "SELECT key, name FROM avatars WHERE key LIKE 'avatar_%' ORDER BY sort_order"
+```
+
+Project ref: `erghbsnxtsbnmfuycnyb` (System-Trainer). The CLI is already linked in `supabase/config.toml`.
+
+## Conventions & gotchas
+
+### SwiftData + CloudKit rules
+- Every `@Model` property must have a default value or be optional. CloudKit requires this.
+- **Never `@Attribute(.unique)`** on a CloudKit-synced model. CloudKit enforces uniqueness via record names and rejects unique constraints. The store load throws `NSCocoaError 134060` and the app fatals at the `try!` in `RPTApp.swift` (`sharedModelContainer`). This crashed launch in 2.8.10.
+- The 3-tier `ModelContainer` fallback (CloudKit → local → in-memory) only catches **environment** failures — every tier shares the same `Schema`, so a schema-illegal model fails all three tiers identically. If you see all three fall through, the bug is in the schema, not the environment.
+
+### Service patterns
+- Singleton pattern with a `shared` static property. All services are `@MainActor`.
+- Services use `do/catch` around their network calls and set `lastError` / `lastErrorMessage` published properties. **Catch blocks should populate user-visible state**, not just `print()` — TestFlight users can't read console logs. The HealthManager catch was print-only for months and silently masked a real bug.
+
+### Avatars are two-part
+Adding an avatar requires BOTH:
+1. Bundling the PNG in `RPT/Assets.xcassets/Avatars/{Male,Female}/<key>.imageset/` with a `Contents.json` that names it
+2. Inserting a row in the Supabase `avatars` table with the matching `key`
+
+`AvatarPickerView` loads via `UIImage(named: avatar.key)` with no integrity check — reusing an existing key silently swaps the artwork on the existing row. Always run `SELECT key FROM avatars WHERE key IN (...)` before bundling new images.
+
+The `category` column has a CHECK constraint:
+`default | warrior | mage | rogue | tank | anime | seasonal | premium | event` — `free` is NOT a category, it's an `unlock_type`.
+
+The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Contents.json` with `provides-namespace: false` so the imageset name is the bare lookup key (verified via `xcrun --sdk iphonesimulator assetutil --info <Assets.car>`).
+
+### Secrets
+- All secrets go through Supabase Edge Function proxies, never in client code.
+- `.entitlements` and `Info.plist` are checked in. `Secrets.xcconfig` is generated at build time and gitignored.
+
+### UI defaults
+- Dark mode is the default (`@AppStorage("colorScheme")` defaults to `"dark"`).
+- `@AppStorage` for user preferences (notifications, gameplay toggles, color scheme).
+- The onboarding flow uses `Color.black` backgrounds with cyan accent everywhere — match this when adding new onboarding steps.
+
+## Removed in 2.8.11 — do not revive without context
+
+- The "Build my own plan" custom workout plan path and the entire `GoalSurveyView` were removed in 2.8.11 after three failed attempts to fix a black-screen render bug in the survey's `fullScreenCover`. The fix was deletion, not patching.
+- Profile fields like `goalSurveyCompleted`, `goalSurveyDaysPerWeek`, `goalSurveySplit` etc. remain in the SwiftData model for CloudKit backward compatibility but are unreferenced from onboarding.
+- If you reintroduce this feature, do NOT use `fullScreenCover` for the survey — wrap it in a `NavigationStack` with an explicit close `ToolbarItem` so it has a guaranteed rendering shell and a guaranteed dismiss path.
+
+## Memory systems & state
+
+- `@AppStorage("hasCompletedOnboarding")` — gates whether the user sees onboarding or `ContentView`. Settings → Delete Account flips this back to `false` and the SwiftUI hierarchy automatically routes the user back to `OnboardingView`.
+- `@AppStorage("rpt_linked_apple_user_id")` — persists the SIWA user ID so future launches can re-link without a fresh credential flow.
+- `KeychainHelper` (in `AppleAuthService.swift`) — stores the Apple user ID under account `com.SpiroTechnologies.RPT.appleSignIn`. Survives app deletion.
+- App Group: `group.com.SpiroTechnologies.RPT` — shared with the widget extension.
+
+## Testing
+
+There is no test target. The project has had `RPTTests` and `RPTUITests` schemes since project init but no tests have been written. When adding a new feature, **add a manual test plan in the PR description** rather than writing test code that nobody runs.
+
+## When stuck
+
+- If a SwiftUI view "doesn't render" — prefer a structural container that *guarantees* rendering (`NavigationStack`, explicit `ZStack { Color.black }` base, GeometryReader) over patching modifier-by-modifier.
+- If a TestFlight user reports a permission/entitlement bug, **verify the signed archive entitlements before assuming code** (see "Verifying a Signed Archive" above).
+- If `supabase db push` errors with "Remote migration versions not found", do NOT run the `repair` command it suggests — use `supabase db query --linked -f` instead (see "Supabase ad-hoc SQL workflow").
+- If a service decode silently produces empty results, check whether the proxy's JSON shape matches the Swift `Decodable` (camelCase vs snake_case, wrapper objects vs bare arrays). The avatar picker was broken for months because of exactly this mismatch.
