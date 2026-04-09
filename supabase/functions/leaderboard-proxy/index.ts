@@ -239,6 +239,24 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, found: !!friendProfile }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // CHECK USERNAME — case-insensitive uniqueness check against
+    // player_profiles.display_name. Used by the onboarding NameStepView
+    // to show "username is already taken" before the user hits Continue.
+    if (action === "check_username") {
+      const displayName: string = (body.display_name ?? "").trim();
+      if (!displayName || displayName.length < 8) {
+        return new Response(JSON.stringify({ taken: false }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const { data, error } = await supabase
+        .from("player_profiles")
+        .select("cloudkit_user_id")
+        .ilike("display_name", displayName)
+        .limit(1);
+      if (error) throw error;
+      const taken = (data ?? []).length > 0;
+      return new Response(JSON.stringify({ taken }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("leaderboard-proxy error:", err);
