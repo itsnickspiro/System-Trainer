@@ -154,6 +154,9 @@ final class Profile {
     /// Number of earned Hermit's Miracle Seeds in the player's possession (max 3).
     var exemptionPassCount: Int = 0
 
+    // Username change tracking — 0 means never changed (1 free change available), 1+ means paid changes required.
+    var usernameChangesUsed: Int = 0
+
     // Double XP state
     var doubleXPActiveUntil: Date?
     var hasDoubleXP: Bool { doubleXPActiveUntil.map { $0 > Date() } ?? false }

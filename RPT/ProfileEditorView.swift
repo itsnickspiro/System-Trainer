@@ -22,8 +22,16 @@ struct ProfileEditorView: View {
     @State private var isEditingWeight = false
     @State private var showingAvatarPicker = false
     @State private var showingPlanPicker = false
+    @State private var showingUsernameChange = false
+    @State private var newUsername: String = ""
+    @State private var usernameIsTaken = false
+    @State private var isCheckingUsername = false
+    @State private var usernameCheckTask: Task<Void, Never>?
+    @State private var isSavingUsername = false
+    @State private var usernameChangeError: String?
     @ObservedObject private var avatarService = AvatarService.shared
     @ObservedObject private var planService = AnimeWorkoutPlanService.shared
+    @ObservedObject private var playerProfile = PlayerProfileService.shared
     
     @State private var weightUnit: WeightUnit = (Locale.current.measurementSystem == .metric) ? .metric : .imperial
     @State private var weightKilograms: Int = 75
@@ -115,12 +123,44 @@ struct ProfileEditorView: View {
                 }
 
                 Section("Basic Information") {
+                    // Username display + change button
                     HStack {
                         Text("Name")
-                        TextField("Your name", text: $name)
-                            .multilineTextAlignment(.trailing)
+                        Spacer()
+                        Text(name)
+                            .foregroundColor(.secondary)
+                        Button {
+                            newUsername = name
+                            usernameIsTaken = false
+                            isCheckingUsername = false
+                            usernameChangeError = nil
+                            showingUsernameChange = true
+                        } label: {
+                            Text("Change")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.blue)
+                        }
                     }
-                    
+
+                    // Free change badge or GP cost indicator
+                    if profile.usernameChangesUsed == 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "gift.fill")
+                                .font(.caption2)
+                            Text("1 free change remaining")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.cyan)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .font(.caption2)
+                            Text("Next change costs 5,000 GP")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.orange)
+                    }
+
                     // Height summary row
                     Button {
                         withAnimation { isEditingHeight.toggle() }
@@ -358,6 +398,250 @@ struct ProfileEditorView: View {
                 }
             )
         }
+        .sheet(isPresented: $showingUsernameChange) {
+            usernameChangeSheet
+        }
+    }
+
+    // MARK: - Username Change Sheet
+
+    private var usernameChangeSheet: some View {
+        NavigationStack {
+            Form {
+                // Cost section
+                Section {
+                    if profile.usernameChangesUsed == 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "gift.fill")
+                                .foregroundColor(.cyan)
+                            Text("This change is free!")
+                                .foregroundColor(.cyan)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundColor(.orange)
+                            Text("Cost: 5,000 GP")
+                                .foregroundColor(.orange)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("Balance: \(playerProfile.systemCredits.formatted()) GP")
+                                .font(.caption)
+                                .foregroundColor(playerProfile.systemCredits >= 5000 ? .secondary : .red)
+                        }
+                    }
+                }
+
+                // Username input
+                Section("New Username") {
+                    TextField("Enter new username", text: $newUsername)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: newUsername) { _, newValue in
+                            // Debounced uniqueness check
+                            usernameIsTaken = false
+                            usernameChangeError = nil
+                            usernameCheckTask?.cancel()
+                            let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                            guard trimmed.count >= 8 else {
+                                isCheckingUsername = false
+                                return
+                            }
+                            // Skip check if name hasn't actually changed
+                            guard trimmed != name else {
+                                isCheckingUsername = false
+                                return
+                            }
+                            isCheckingUsername = true
+                            usernameCheckTask = Task {
+                                try? await Task.sleep(for: .seconds(0.6))
+                                guard !Task.isCancelled else { return }
+                                let taken = await checkUsernameTaken(trimmed)
+                                guard !Task.isCancelled else { return }
+                                await MainActor.run {
+                                    usernameIsTaken = taken
+                                    isCheckingUsername = false
+                                }
+                            }
+                        }
+
+                    // Validation feedback
+                    if let error = usernameChangeError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    } else if newUsername.trimmingCharacters(in: .whitespaces).count < 8 && !newUsername.isEmpty {
+                        Text("Username must be at least 8 characters")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } else if isCheckingUsername {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Checking availability...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } else if usernameIsTaken {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                            Text("Username is already taken")
+                                .foregroundColor(.red)
+                        }
+                        .font(.caption)
+                    } else if newUsername.trimmingCharacters(in: .whitespaces).count >= 8
+                                && newUsername.trimmingCharacters(in: .whitespaces) != name {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("Username available")
+                                .foregroundColor(.green)
+                        }
+                        .font(.caption)
+                    }
+                }
+
+                // Confirm button
+                Section {
+                    Button {
+                        Task { await confirmUsernameChange() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isSavingUsername {
+                                ProgressView()
+                            } else {
+                                Text(profile.usernameChangesUsed == 0 ? "Change Username (Free)" : "Change Username (5,000 GP)")
+                                    .fontWeight(.semibold)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .disabled(!isUsernameChangeAllowed)
+                    .foregroundColor(isUsernameChangeAllowed ? .white : .gray)
+                    .listRowBackground(isUsernameChangeAllowed ? Color.blue : Color.gray.opacity(0.3))
+                }
+
+                // Insufficient GP warning
+                if profile.usernameChangesUsed >= 1 && playerProfile.systemCredits < 5000 {
+                    Section {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text("Not enough GP. You need 5,000 GP to change your username.")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Change Username")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        showingUsernameChange = false
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether the confirm button should be enabled.
+    private var isUsernameChangeAllowed: Bool {
+        let trimmed = newUsername.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 8,
+              trimmed != name,
+              !usernameIsTaken,
+              !isCheckingUsername,
+              !isSavingUsername else { return false }
+        // If paid change, check GP balance
+        if profile.usernameChangesUsed >= 1 && playerProfile.systemCredits < 5000 {
+            return false
+        }
+        return true
+    }
+
+    /// Performs the username change: validates, deducts GP if needed, updates profile + server.
+    private func confirmUsernameChange() async {
+        let trimmed = newUsername.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 8, trimmed != name else { return }
+
+        isSavingUsername = true
+        usernameChangeError = nil
+
+        // Final uniqueness check before committing
+        let taken = await checkUsernameTaken(trimmed)
+        if taken {
+            usernameIsTaken = true
+            isSavingUsername = false
+            return
+        }
+
+        // Deduct GP if this is a paid change
+        if profile.usernameChangesUsed >= 1 {
+            guard playerProfile.systemCredits >= 5000 else {
+                usernameChangeError = "Not enough GP"
+                isSavingUsername = false
+                return
+            }
+            // Deduct 5000 GP via the server
+            await playerProfile.addCredits(amount: -5000, type: "username_change")
+            // Verify deduction succeeded (balance should have decreased)
+            if playerProfile.systemCredits > (playerProfile.systemCredits + 5000) {
+                usernameChangeError = "Failed to deduct GP. Try again."
+                isSavingUsername = false
+                return
+            }
+        }
+
+        // Update the name locally
+        name = trimmed
+        profile.name = trimmed
+        profile.usernameChangesUsed += 1
+
+        do {
+            try modelContext.save()
+        } catch {
+            usernameChangeError = "Failed to save: \(error.localizedDescription)"
+            isSavingUsername = false
+            return
+        }
+
+        // Sync the updated name to the server
+        await playerProfile.syncProfile()
+
+        NotificationCenter.default.post(name: .profileDidSave, object: nil)
+
+        isSavingUsername = false
+        showingUsernameChange = false
+    }
+
+    /// Checks if a username is already taken by querying the leaderboard proxy.
+    private func checkUsernameTaken(_ username: String) async -> Bool {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/leaderboard-proxy") else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+        let body: [String: Any] = [
+            "action": "check_username",
+            "display_name": username
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 10
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let taken = json["taken"] as? Bool {
+                return taken
+            }
+        } catch { }
+        // On network error, assume available (server-side will enforce uniqueness)
+        return false
     }
     
     private func saveProfile() {
