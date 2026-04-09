@@ -12,6 +12,26 @@ class HealthManager: ObservableObject {
     // MARK: - Published State
     @Published var isAuthorized = false
     @Published var healthDataAvailable = false
+    /// Tracks whether the user has previously denied write access on this
+    /// device. iOS will not show the system permission sheet a second time
+    /// once a type has been explicitly denied — the user must go to
+    /// Settings → Privacy & Security → Health → System Trainer. The
+    /// onboarding HealthStepView surfaces this so users don't tap the
+    /// Connect button forever expecting a sheet that will never appear.
+    @Published var writeStatus: HKAuthorizationStatus = .notDetermined
+
+    /// Refreshes the cached write-permission status from HealthKit. Call
+    /// from view onAppear before deciding what UI to show.
+    func refreshAuthorizationStatus() {
+        guard healthDataAvailable else {
+            writeStatus = .notDetermined
+            isAuthorized = false
+            return
+        }
+        let status = healthStore.authorizationStatus(for: HKQuantityType(.bodyMass))
+        writeStatus = status
+        isAuthorized = (status == .sharingAuthorized)
+    }
     
     // MARK: - Health Data Types
     private let readTypes: Set<HKSampleType> = {
@@ -92,11 +112,13 @@ class HealthManager: ObservableObject {
             // (`!= .notDetermined`) was a false-positive that treated
             // explicit denial as success and made every fetch silently fail
             // against zero-default Profile fields.
-            let writeStatus = healthStore.authorizationStatus(for: HKQuantityType(.bodyMass))
-            isAuthorized = (writeStatus == .sharingAuthorized)
+            let status = healthStore.authorizationStatus(for: HKQuantityType(.bodyMass))
+            self.writeStatus = status
+            isAuthorized = (status == .sharingAuthorized)
         } catch {
             print("HealthKit authorization failed: \(error)")
             isAuthorized = false
+            writeStatus = .notDetermined
         }
     }
     
