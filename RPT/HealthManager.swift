@@ -19,6 +19,12 @@ class HealthManager: ObservableObject {
     /// onboarding HealthStepView surfaces this so users don't tap the
     /// Connect button forever expecting a sheet that will never appear.
     @Published var writeStatus: HKAuthorizationStatus = .notDetermined
+    /// Last HealthKit error description, if any. Surfaced to the
+    /// HealthStepView so configuration / entitlement issues are visible
+    /// to users instead of being silently swallowed by the catch block
+    /// (which previously only printed to a console no TestFlight user
+    /// could read).
+    @Published var lastErrorMessage: String? = nil
 
     /// Refreshes the cached write-permission status from HealthKit. Call
     /// from view onAppear before deciding what UI to show.
@@ -103,22 +109,31 @@ class HealthManager: ObservableObject {
                 HKCategoryType(.mindfulSession)
             ]
             try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
-            // requestAuthorization succeeds even when the user denies all
-            // types. Apple does not expose read-permission status (privacy),
-            // so we use the *write* status of bodyMass (which we always
-            // request) as a proxy: if the user authorized writes, they
-            // overwhelmingly also authorized reads, and the prompt was at
-            // least dismissed by tapping Allow. The previous check
-            // (`!= .notDetermined`) was a false-positive that treated
-            // explicit denial as success and made every fetch silently fail
-            // against zero-default Profile fields.
+            // Use the bodyMass write status as a proxy for "user actually
+            // tapped Allow on the system sheet". Apple intentionally
+            // doesn't expose read-permission status (privacy), and the
+            // requestAuthorization call itself succeeds even when the
+            // user denies all types — so we have to read back the
+            // status of one type we asked for.
             let status = healthStore.authorizationStatus(for: HKQuantityType(.bodyMass))
             self.writeStatus = status
             isAuthorized = (status == .sharingAuthorized)
+            if status == .sharingDenied {
+                lastErrorMessage = "Apple Health permission was denied. To enable, open iOS Settings → Privacy & Security → Health → System Trainer."
+            } else if status == .notDetermined {
+                lastErrorMessage = "Apple Health didn't return a permission status. This usually means the entitlement isn't honored on this build."
+            } else {
+                lastErrorMessage = nil
+            }
         } catch {
-            print("HealthKit authorization failed: \(error)")
+            let nsError = error as NSError
+            print("[HealthManager] requestAuthorization failed: \(error) — \(nsError.userInfo)")
             isAuthorized = false
             writeStatus = .notDetermined
+            // Surface the actual error to the UI instead of silently
+            // dropping it. The previous behavior was a console-only
+            // print() which TestFlight users could never see.
+            lastErrorMessage = "Apple Health error: \(error.localizedDescription)"
         }
     }
     
