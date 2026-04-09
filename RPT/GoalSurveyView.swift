@@ -27,87 +27,77 @@ struct GoalSurveyView: View {
     private let totalPages: Int = 7
 
     var body: some View {
-        ZStack {
-            // Dark background matches OnboardingView
-            LinearGradient(
-                colors: [Color.black, Color(red: 0.04, green: 0.06, blue: 0.10)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+        // NavigationStack gives us a real toolbar (so the close button can't
+        // be hidden by layout collapse) and a guaranteed background that
+        // fills the cover. Two prior attempts to fix the "black screen"
+        // tried to wrangle the bare-VStack layout — both failed because
+        // the TabView and then the Group kept losing their height to
+        // greedy siblings inside the cover. NavigationStack + a
+        // ScrollView with explicit fill is the bulletproof shape.
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Top bar with a close affordance. Without this the user
-                // is trapped inside the fullScreenCover until they finish
-                // all 7 pages — there's no swipe-to-dismiss on
-                // fullScreenCover, no navigation bar, no Cancel button.
-                // Tapping X calls onComplete which dismisses the cover
-                // without flipping profile.goalSurveyCompleted, so the
-                // gate step still sees the unfinished state and the user
-                // is free to either retry or back out to step 7 and
-                // choose a different workout plan.
-                HStack {
-                    Spacer()
+                VStack(spacing: 0) {
+                    progressDots
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+
+                    ScrollView {
+                        currentPageContent
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 24)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    navigationButtons
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
+                        .padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button {
                         onComplete()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white.opacity(0.8))
-                            .frame(width: 36, height: 36)
-                            .background(
-                                Circle().fill(Color.white.opacity(0.08))
-                            )
-                            .overlay(
-                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 1)
-                            )
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.cyan)
                     }
                     .accessibilityLabel("Close survey")
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-
-                progressDots
-                    .padding(.top, 12)
-                    .padding(.bottom, 12)
-
-                // The previous implementation used TabView with
-                // .tabViewStyle(.page(indexDisplayMode: .never)) which
-                // collapsed to zero height once a sibling HStack (the close
-                // button bar) was added above it inside the parent VStack —
-                // SwiftUI's page-style TabView is greedy *only* if it has
-                // an explicit infinite frame, otherwise it shrinks. The
-                // result was a fully black survey with progress dots and
-                // nav buttons floating against the gradient and no
-                // visible question content. Switching to a direct
-                // page-by-page Group + explicit .frame(maxHeight: .infinity)
-                // is more reliable on every iOS version and matches the
-                // pattern OnboardingView itself uses.
-                Group {
-                    switch currentPage {
-                    case 0: daysPage
-                    case 1: splitPage
-                    case 2: sessionLengthPage
-                    case 3: intensityPage
-                    case 4: focusAreasPage
-                    case 5: equipmentPage
-                    case 6: cardioPage
-                    default: daysPage
-                    }
+                ToolbarItem(placement: .principal) {
+                    Text("Goal Survey")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .id(currentPage)
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-                .animation(.easeInOut(duration: 0.25), value: currentPage)
-
-                navigationButtons
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .toolbarBackground(Color.black, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: loadExistingAnswers)
+    }
+
+    /// The current page's question UI. Pulled out of the body so the
+    /// switch isn't competing for height inside a VStack — it sits
+    /// inside a ScrollView that has its own explicit infinite frame.
+    @ViewBuilder
+    private var currentPageContent: some View {
+        switch currentPage {
+        case 0: daysPage
+        case 1: splitPage
+        case 2: sessionLengthPage
+        case 3: intensityPage
+        case 4: focusAreasPage
+        case 5: equipmentPage
+        case 6: cardioPage
+        default: daysPage
+        }
     }
 
     // MARK: - Progress dots
@@ -409,25 +399,27 @@ private struct QuestionContainer<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.white)
-                        .shadow(color: .cyan.opacity(0.4), radius: 12)
-                    Text(subtitle)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.white.opacity(0.55))
-                }
-                .padding(.top, 8)
-
-                content
-
-                Spacer(minLength: 32)
+        // The parent GoalSurveyView already wraps this in a ScrollView,
+        // so this used to be a nested ScrollView (which is a SwiftUI
+        // anti-pattern that produces unpredictable layout collapse).
+        // Replaced with a plain VStack — the outer ScrollView handles
+        // overflow.
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.white)
+                    .shadow(color: .cyan.opacity(0.3), radius: 8)
+                Text(subtitle)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 24)
+            .padding(.top, 4)
+
+            content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

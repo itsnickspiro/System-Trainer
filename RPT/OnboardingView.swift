@@ -93,12 +93,15 @@ struct OnboardingView: View {
                 // navigatingBackward so the back button feels like going
                 // backward (new content enters from the left) and Continue
                 // feels like going forward (new content enters from the right).
+                // Uses an interpolating spring for a smoother, less abrupt
+                // page transition than easeInOut.
                 stepContent
                     .transition(.asymmetric(
                         insertion: .move(edge: navigatingBackward ? .leading : .trailing).combined(with: .opacity),
                         removal: .move(edge: navigatingBackward ? .trailing : .leading).combined(with: .opacity)
                     ))
                     .id(currentStep)
+                    .animation(.interpolatingSpring(stiffness: 220, damping: 26), value: currentStep)
 
                 // Navigation buttons (hidden on boot and ready screens)
                 if !noProgressBarSteps.contains(currentStep) {
@@ -115,21 +118,38 @@ struct OnboardingView: View {
         // accessory bar, so it's only visible while a TextField is focused
         // and disappears the moment the keyboard goes down.
         .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button {
-                    UIApplication.shared.sendAction(
-                        #selector(UIResponder.resignFirstResponder),
-                        to: nil, from: nil, for: nil
-                    )
-                } label: {
-                    Text("Done")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.cyan)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
+            // The keyboard accessory bar lays out ToolbarItem children in
+            // a tight system HStack and ignores most padding/frame
+            // modifiers applied directly to the Button. To get visible
+            // breathing room around the Done button, we use a single
+            // ToolbarItem and put the spacing inside its label as a
+            // wrapping HStack with leading/trailing pads of clear color.
+            // Tested as the only way to actually get gaps in the
+            // accessory bar without the system overriding them.
+            ToolbarItem(placement: .keyboard) {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    Button {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil, from: nil, for: nil
+                        )
+                    } label: {
+                        Text("Done")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.cyan)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule().fill(Color.cyan.opacity(0.12))
+                            )
+                            .overlay(
+                                Capsule().stroke(Color.cyan.opacity(0.4), lineWidth: 1)
+                            )
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.vertical, 4)
                 }
-                .padding(.trailing, 8)
             }
         }
     }
@@ -144,7 +164,7 @@ struct OnboardingView: View {
                     // Flag MUST be set inside the same withAnimation block
                     // (and before currentStep mutates) so SwiftUI captures
                     // the reversed transition edges for this animation.
-                    withAnimation(.easeInOut(duration: 0.35)) {
+                    withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
                         navigatingBackward = true
                         currentStep = previousStep(from: currentStep)
                     }
@@ -209,7 +229,7 @@ struct OnboardingView: View {
                              selectedGender = p.gender
                              selectedGoal   = p.fitnessGoal
                          }
-                         withAnimation(.easeInOut(duration: 0.35)) {
+                         withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
                              navigatingBackward = false
                              currentStep = 1
                          }
@@ -279,7 +299,7 @@ struct OnboardingView: View {
             // Skip button (optional steps only)
             if skippableSteps.contains(currentStep) {
                 Button("Skip for now") {
-                    withAnimation(.easeInOut(duration: 0.35)) {
+                    withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
                         advanceFrom(currentStep)
                     }
                 }
@@ -293,10 +313,26 @@ struct OnboardingView: View {
 
     private var canAdvance: Bool {
         switch currentStep {
-        case 1: return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
-        case 8: return goalSurveyCompleted
-        case 9: return selectedAvatarKey != nil
-        default: return true
+        case 1: // Name
+            return !profileName.trimmingCharacters(in: .whitespaces).isEmpty
+        case 3: // Body stats — all three numeric fields must parse to > 0
+            let age    = Int(ageText) ?? 0
+            let height = Double(heightText) ?? 0
+            let weight = Double(weightText) ?? 0
+            return age > 0 && height > 0 && weight > 0
+        case 5: // Class — must explicitly pick a non-unselected class
+            return selectedClass != .unselected
+        case 6: // Diet — .none is a legitimate answer ("no restrictions"),
+                // so the default selection counts as a valid response.
+            return true
+        case 7: // Workout plan — pick a preset OR opt into the custom-plan flow
+            return selectedPlanID != nil || isBuildingCustomPlan
+        case 8: // Goal survey gate
+            return goalSurveyCompleted
+        case 9: // Avatar
+            return selectedAvatarKey != nil
+        default:
+            return true
         }
     }
 
@@ -336,7 +372,7 @@ struct OnboardingView: View {
 
         if currentStep == 0 {
             // Boot → Name
-            withAnimation(.easeInOut(duration: 0.35)) {
+            withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
                 navigatingBackward = false
                 currentStep = 1
             }
@@ -352,7 +388,7 @@ struct OnboardingView: View {
             if let key = selectedAvatarKey {
                 Task { await AvatarService.shared.setAvatar(key: key) }
             }
-            withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(9) }
+            withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) { advanceFrom(9) }
             return
         case 10:
             // HealthKit (required). If the user denies, we still advance —
@@ -363,7 +399,7 @@ struct OnboardingView: View {
                     await healthManager.requestAuthorization()
                 }
                 isAdvancing = false
-                withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(10) }
+                withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) { advanceFrom(10) }
             }
             return
         case 11:
@@ -373,14 +409,14 @@ struct OnboardingView: View {
                     await notificationManager.requestAuthorization()
                 }
                 isAdvancing = false
-                withAnimation(.easeInOut(duration: 0.35)) { advanceFrom(11) }
+                withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) { advanceFrom(11) }
             }
             return
         default:
             break
         }
 
-        withAnimation(.easeInOut(duration: 0.35)) {
+        withAnimation(.interpolatingSpring(stiffness: 220, damping: 26)) {
             advanceFrom(currentStep)
         }
     }
@@ -1396,13 +1432,26 @@ private struct WorkoutPlanStepView: View {
             isSkippable: true
         ) {
             VStack(spacing: 14) {
-                // Anime Plan card
+                // Anime Plan card. Title/subtitle reflect the actual chosen
+                // plan once one is picked, so the user can see at a glance
+                // what they selected without scanning down to the
+                // confirmation row. Tapping the card after selection
+                // re-opens the picker so they can swap plans.
+                let chosenAnimePlan: AnimeWorkoutPlan? = {
+                    if let id = selectedPlanID,
+                       id != "custom_pending",
+                       let plan = planService.plan(id: id) {
+                        return plan
+                    }
+                    return nil
+                }()
                 PlanOptionCard(
-                    icon: "sparkles",
-                    title: "Anime Plan",
-                    subtitle: "Train like your favourite character",
+                    icon: chosenAnimePlan?.iconSymbol ?? "sparkles",
+                    title: chosenAnimePlan?.character ?? "Anime Plan",
+                    subtitle: chosenAnimePlan.map { "\($0.anime) — tap to change" }
+                        ?? "Train like your favourite character",
                     color: .orange,
-                    isSelected: pickMode == .anime
+                    isSelected: chosenAnimePlan != nil
                 ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         pickMode = .anime
