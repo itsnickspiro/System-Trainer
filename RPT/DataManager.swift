@@ -299,6 +299,11 @@ final class DataManager: ObservableObject {
         let oldLevel = profile.level
         profile.addXP(scaledXP)
 
+        // Log XP gain
+        if scaledXP != 0 {
+            ActivityLogManager.shared.log(.xp, "\(scaledXP > 0 ? "+" : "")\(scaledXP) XP from \(source)", detail: scaledXP != xp ? "Base \(xp) × multipliers → \(scaledXP)" : nil)
+        }
+
         // Check for level up
         if profile.level > oldLevel {
             handleLevelUp(from: oldLevel, to: profile.level)
@@ -315,6 +320,8 @@ final class DataManager: ObservableObject {
 
     private func handleLevelUp(from oldLevel: Int, to newLevel: Int) {
         print("Level up! \(oldLevel) -> \(newLevel)")
+        ActivityLogManager.shared.log(.levelUp, "Level \(oldLevel) → \(newLevel)")
+        NotificationInboxManager.shared.add(title: "Level Up!", body: "You reached level \(newLevel)!", category: "levelUp")
 
         // Isekai-style milestone notifications at key levels. The manager
         // queues them if multiple fire at once, so crossing levels 5 → 10 in
@@ -395,6 +402,8 @@ final class DataManager: ObservableObject {
             guard !awarded else { continue }
             let bonus = rc.int(m.configKey, default: m.threshold == 7 ? 25 : 100)
             if bonus > 0 {
+                ActivityLogManager.shared.log(.streak, "\(m.threshold)-day streak milestone!", detail: "+\(bonus) GP bonus")
+                NotificationInboxManager.shared.add(title: "Streak Milestone!", body: "You hit a \(m.threshold)-day streak and earned \(bonus) GP!", category: "streak")
                 Task {
                     await PlayerProfileService.shared.addCredits(
                         amount: bonus,
@@ -446,6 +455,8 @@ final class DataManager: ObservableObject {
 
         quest.isCompleted = true
         quest.completedAt = Date()
+
+        ActivityLogManager.shared.log(.quest, "Completed: \(quest.title)", detail: "+\(quest.xpReward) XP reward")
 
         // Award XP (through multipliers) and register completion
         if let profile = currentProfile {

@@ -200,6 +200,13 @@ class NotificationManager: NSObject, ObservableObject {
 // MARK: - UNUserNotificationCenterDelegate
 extension NotificationManager: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Record to inbox
+        let content = notification.request.content
+        NotificationInboxManager.shared.addFromBackground(
+            title: content.title,
+            body: content.body,
+            category: content.categoryIdentifier.isEmpty ? "general" : content.categoryIdentifier
+        )
         // Show notification even when app is in foreground
         completionHandler([.banner, .list, .badge, .sound])
     }

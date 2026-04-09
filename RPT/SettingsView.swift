@@ -22,6 +22,9 @@ struct SettingsView: View {
     @State private var showingDietInfo = false
     @State private var showingGuildView = false
     @State private var showingBugReport = false
+    @State private var showingActivityLog = false
+    @State private var showingNotificationInbox = false
+    @ObservedObject private var notificationInbox = NotificationInboxManager.shared
     @ObservedObject private var avatarService = AvatarService.shared
     @State private var showingSignOutConfirm = false
     @State private var showingDeleteAccountConfirm = false
@@ -370,6 +373,47 @@ struct SettingsView: View {
                             Text("Notifications")
                         }
                     }
+
+                    // Notification Inbox
+                    Button {
+                        showingNotificationInbox = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "tray.fill")
+                                .foregroundColor(.cyan)
+                            Text("Notification Inbox")
+                            Spacer()
+                            if notificationInbox.unreadCount > 0 {
+                                Text("\(notificationInbox.unreadCount)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                            }
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundColor(.primary)
+
+                    // Activity Log
+                    Button {
+                        showingActivityLog = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "list.bullet.rectangle")
+                                .foregroundColor(.mint)
+                            Text("Activity Log")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundColor(.primary)
                     
                     NavigationLink(destination: GameplaySettingsView()) {
                         HStack {
@@ -537,6 +581,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingDietInfo) {
                 DietInfoView()
+            }
+            .sheet(isPresented: $showingActivityLog) {
+                ActivityLogView()
+            }
+            .sheet(isPresented: $showingNotificationInbox) {
+                NotificationInboxView()
             }
             .alert("Sign out of Apple?", isPresented: $showingSignOutConfirm) {
                 Button("Cancel", role: .cancel) { }

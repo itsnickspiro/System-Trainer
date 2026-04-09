@@ -158,6 +158,7 @@ final class PlayerProfileService: ObservableObject {
                 lifetimeCreditsEarned = result.lifetimeCreditsEarned
                 UserDefaults.standard.set(systemCredits, forKey: "rpt_system_credits")
             }
+            ActivityLogManager.shared.log(.gp, "\(amount > 0 ? "+" : "")\(amount) GP (\(type))")
         } catch {
             lastError = error.localizedDescription
         }
