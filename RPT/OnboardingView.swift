@@ -65,6 +65,19 @@ struct OnboardingView: View {
     /// computes the transition.
     @State private var navigatingBackward: Bool = false
 
+    /// True when the app was launched with the `-onboardingDebugAutofill 1`
+    /// argument. Used by my (Claude's) screenshot pipeline to walk through
+    /// every step of onboarding without needing real input — values are
+    /// pre-filled and the back/Continue buttons remain interactive so I
+    /// can also test them via computer-use MCP. Compiled out of Release.
+    private var debugAutofillEnabled: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "onboardingDebugAutofill")
+        #else
+        return false
+        #endif
+    }
+
     /// Driven by UIResponder.keyboardWillShow/Hide notifications. When true,
     /// a custom Done overlay is rendered via safeAreaInset(.bottom) so we
     /// have full layout control over the dismiss button — bypassing the
@@ -229,6 +242,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(currentStep <= 1)
+                .accessibilityIdentifier("onboarding_back_button")
 
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -250,6 +264,7 @@ struct OnboardingView: View {
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.white.opacity(0.4))
                     .frame(width: 36, alignment: .trailing)
+                    .accessibilityIdentifier("onboarding_step_counter")
             }
             .frame(height: 32)
         }
@@ -292,6 +307,17 @@ struct OnboardingView: View {
                              selectedGender = p.gender
                              selectedGoal   = p.fitnessGoal
                          }
+                         // Debug-only autofill so the visual test pipeline
+                         // can walk through every step without real input.
+                         #if DEBUG
+                         if debugAutofillEnabled {
+                             if profileName.isEmpty { profileName = "TestUser" }
+                             if ageText.isEmpty { ageText = "30" }
+                             if heightText.isEmpty { heightText = "175" }
+                             if weightText.isEmpty { weightText = "75" }
+                             if selectedClass == .unselected { selectedClass = .warrior }
+                         }
+                         #endif
                          withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
                              navigatingBackward = false
                              currentStep = 1
@@ -348,6 +374,7 @@ struct OnboardingView: View {
             }
             .buttonStyle(OnboardingPrimaryButtonStyle())
             .disabled(!canAdvance || isAdvancing)
+            .accessibilityIdentifier("onboarding_continue_button")
 
             // Skip button (optional steps only)
             if skippableSteps.contains(currentStep) {
@@ -358,6 +385,7 @@ struct OnboardingView: View {
                 }
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.white.opacity(0.4))
+                .accessibilityIdentifier("onboarding_skip_button")
             }
         }
     }
@@ -602,7 +630,32 @@ private struct BootStepView: View {
                             Task { await handleSignIn(result) }
                         }
                         .frame(height: 50)
+                        .accessibilityIdentifier("siwa_button")
                     }
+
+                    // DEBUG-only: bypass SIWA so XCUITest smoke tests can
+                    // walk through the onboarding flow without needing a
+                    // real Apple ID. The button is stripped at compile
+                    // time from Release builds and never ships to
+                    // TestFlight or the App Store. The accessibilityIdentifier
+                    // is what the UI test uses to find and tap it.
+                    #if DEBUG
+                    Button {
+                        onNewUserSignedIn()
+                    } label: {
+                        Text("Skip SIWA (DEBUG)")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .stroke(Color.orange.opacity(0.4), lineWidth: 1)
+                            )
+                    }
+                    .accessibilityIdentifier("debug_skip_siwa")
+                    .padding(.top, 4)
+                    #endif
 
                     if let err = authError {
                         Text(err)
@@ -717,6 +770,7 @@ private struct NameStepView: View {
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.white)
+                    .accessibilityIdentifier("name_text_field")
                     .padding(.vertical, 14)
                     .padding(.horizontal, 20)
                     .background(
