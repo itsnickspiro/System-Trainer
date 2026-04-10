@@ -118,7 +118,6 @@ private struct GlobalLeaderboardView: View {
         }
         .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
         .task { await leaderboard.fetchGlobal(page: 1) }
-        .refreshable { await leaderboard.fetchGlobal(page: 1) }
     }
 
     @ViewBuilder
@@ -180,7 +179,7 @@ private struct GlobalLeaderboardView: View {
             weeklyWorkouts: nil,
             rank:           rank,
             currentStreak:  dm.currentProfile?.currentStreak ?? 0,
-            avatarKey:      nil,
+            avatarKey:      AvatarService.shared.current?.key,
             isCurrentUser:  true
         )
     }
@@ -256,7 +255,6 @@ private struct WeeklyLeaderboardView: View {
         }
         .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
         .task { await leaderboard.fetchWeekly(page: 1) }
-        .refreshable { await leaderboard.fetchWeekly(page: 1) }
     }
 
     private var emptyState: some View {
@@ -322,7 +320,6 @@ private struct FriendsLeaderboardView: View {
         }
         .onTapGesture { isFriendCodeFocused = false }
         .task { await leaderboard.fetchFriends() }
-        .refreshable { await leaderboard.fetchFriends() }
         .onReceive(NotificationCenter.default.publisher(for: .rptAddFriendDeepLink)) { notification in
             guard let code = notification.userInfo?["code"] as? String, !code.isEmpty else { return }
             Task { await leaderboard.addFriend(playerID: code) }

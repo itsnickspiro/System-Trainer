@@ -88,8 +88,9 @@ final class LeaderboardService: ObservableObject {
     func upsertEntry() async {
         guard let cloudKitID = currentUserID, !cloudKitID.isEmpty else { return }
         guard let profile = DataManager.shared.currentProfile,
-              !profile.name.trimmingCharacters(in: .whitespaces).isEmpty else {
-            print("[LeaderboardService] upsertEntry skipped — profile not yet loaded")
+              !profile.name.trimmingCharacters(in: .whitespaces).isEmpty,
+              profile.name != "Player" else {
+            print("[LeaderboardService] upsertEntry skipped — profile not yet loaded or still default")
             return
         }
 
