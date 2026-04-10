@@ -526,7 +526,17 @@ serve(async (req) => {
         .eq("guild_id", guild.id)
         .eq("cloudkit_user_id", userId);
 
-      return jsonResponse({ success: true, raid: updatedRaid, defeated: wasDefeated });
+      // Guild XP + leveling — each point of raid damage earns 1 guild XP.
+      // Level thresholds: level N requires N×500 total XP.
+      const newGuildXP = (guild.total_xp ?? 0) + damage;
+      const newGuildLevel = Math.max(1, Math.floor(newGuildXP / 500) + 1);
+      await supabase.from("guilds").update({
+        total_xp: newGuildXP,
+        level: newGuildLevel,
+        updated_at: new Date().toISOString(),
+      }).eq("id", guild.id);
+
+      return jsonResponse({ success: true, raid: updatedRaid, defeated: wasDefeated, guild_xp: newGuildXP, guild_level: newGuildLevel });
     }
 
     // ----- CLAIM RAID REWARD -----
@@ -615,6 +625,105 @@ serve(async (req) => {
       if (disbandErr) throw disbandErr;
 
       return jsonResponse({ success: true, dismantled: true });
+    }
+
+    // ----- GET GUILD LEADERBOARD -----
+    if (action === "get_guild_leaderboard") {
+      const page = Math.max(parseInt(body.page ?? "1", 10), 1);
+      const pageSize = Math.min(Math.max(parseInt(body.page_size ?? "50", 10), 1), 100);
+      const offset = (page - 1) * pageSize;
+
+      const { data, error, count } = await supabase
+        .from("guilds")
+        .select("id, name, description, level, total_xp, member_count, max_members, owner_cloudkit_user_id", { count: "exact" })
+        .eq("is_disbanded", false)
+        .order("total_xp", { ascending: false })
+        .order("level", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+
+      // Assign ranks
+      (data ?? []).forEach((g: Record<string, unknown>, i: number) => { g.rank = offset + i + 1; });
+
+      return jsonResponse({ guilds: data ?? [], total: count ?? 0 });
+    }
+
+    // ----- PROMOTE MEMBER TO OFFICER -----
+    if (action === "promote_member") {
+      const callerId = (body.cloudkit_user_id ?? "").toString();
+      const targetId = (body.target_cloudkit_user_id ?? "").toString();
+      if (!callerId || !targetId) return jsonResponse({ error: "Missing params" }, 400);
+
+      const { data: callerMember } = await supabase
+        .from("guild_members").select("*").eq("cloudkit_user_id", callerId).maybeSingle();
+      if (!callerMember || callerMember.role !== "owner") {
+        return jsonResponse({ error: "Only the guild owner can promote members" }, 403);
+      }
+
+      const { data: targetMember } = await supabase
+        .from("guild_members").select("*")
+        .eq("guild_id", callerMember.guild_id).eq("cloudkit_user_id", targetId).maybeSingle();
+      if (!targetMember) return jsonResponse({ error: "Target is not in your guild" }, 400);
+      if (targetMember.role === "owner") return jsonResponse({ error: "Cannot promote the owner" }, 400);
+
+      await supabase.from("guild_members").update({ role: "officer" })
+        .eq("guild_id", callerMember.guild_id).eq("cloudkit_user_id", targetId);
+
+      return jsonResponse({ success: true, new_role: "officer" });
+    }
+
+    // ----- DEMOTE OFFICER TO MEMBER -----
+    if (action === "demote_officer") {
+      const callerId = (body.cloudkit_user_id ?? "").toString();
+      const targetId = (body.target_cloudkit_user_id ?? "").toString();
+      if (!callerId || !targetId) return jsonResponse({ error: "Missing params" }, 400);
+
+      const { data: callerMember } = await supabase
+        .from("guild_members").select("*").eq("cloudkit_user_id", callerId).maybeSingle();
+      if (!callerMember || callerMember.role !== "owner") {
+        return jsonResponse({ error: "Only the guild owner can demote officers" }, 403);
+      }
+
+      await supabase.from("guild_members").update({ role: "member" })
+        .eq("guild_id", callerMember.guild_id).eq("cloudkit_user_id", targetId);
+
+      return jsonResponse({ success: true, new_role: "member" });
+    }
+
+    // ----- KICK MEMBER -----
+    if (action === "kick_member") {
+      const callerId = (body.cloudkit_user_id ?? "").toString();
+      const targetId = (body.target_cloudkit_user_id ?? "").toString();
+      if (!callerId || !targetId) return jsonResponse({ error: "Missing params" }, 400);
+      if (callerId === targetId) return jsonResponse({ error: "Cannot kick yourself" }, 400);
+
+      const { data: callerMember } = await supabase
+        .from("guild_members").select("*").eq("cloudkit_user_id", callerId).maybeSingle();
+      if (!callerMember || (callerMember.role !== "owner" && callerMember.role !== "officer")) {
+        return jsonResponse({ error: "Only owners and officers can kick members" }, 403);
+      }
+
+      const { data: targetMember } = await supabase
+        .from("guild_members").select("*")
+        .eq("guild_id", callerMember.guild_id).eq("cloudkit_user_id", targetId).maybeSingle();
+      if (!targetMember) return jsonResponse({ error: "Target is not in your guild" }, 400);
+      if (targetMember.role === "owner") return jsonResponse({ error: "Cannot kick the owner" }, 400);
+      if (targetMember.role === "officer" && callerMember.role !== "owner") {
+        return jsonResponse({ error: "Only the owner can kick officers" }, 403);
+      }
+
+      await supabase.from("guild_members").delete()
+        .eq("guild_id", callerMember.guild_id).eq("cloudkit_user_id", targetId);
+
+      // Decrement member count
+      const { data: guild } = await supabase.from("guilds").select("member_count")
+        .eq("id", callerMember.guild_id).single();
+      await supabase.from("guilds").update({
+        member_count: Math.max(0, (guild?.member_count ?? 1) - 1),
+        updated_at: new Date().toISOString(),
+      }).eq("id", callerMember.guild_id);
+
+      return jsonResponse({ success: true, kicked: targetId });
     }
 
     return jsonResponse({ error: "Unknown action" }, 400);

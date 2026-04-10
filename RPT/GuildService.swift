@@ -269,6 +269,74 @@ final class GuildService: ObservableObject {
         }
     }
 
+    // MARK: - Officer Management
+
+    func promoteMember(_ targetCloudKitID: String) async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else { return false }
+        do {
+            _ = try await postToProxy(body: [
+                "action": "promote_member",
+                "cloudkit_user_id": cloudKitID,
+                "target_cloudkit_user_id": targetCloudKitID
+            ])
+            await refresh()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    func demoteOfficer(_ targetCloudKitID: String) async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else { return false }
+        do {
+            _ = try await postToProxy(body: [
+                "action": "demote_officer",
+                "cloudkit_user_id": cloudKitID,
+                "target_cloudkit_user_id": targetCloudKitID
+            ])
+            await refresh()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    func kickMember(_ targetCloudKitID: String) async -> Bool {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else { return false }
+        do {
+            _ = try await postToProxy(body: [
+                "action": "kick_member",
+                "cloudkit_user_id": cloudKitID,
+                "target_cloudkit_user_id": targetCloudKitID
+            ])
+            await refresh()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    // MARK: - Guild Leaderboard
+
+    @Published private(set) var guildLeaderboard: [GuildSummary] = []
+
+    func fetchGuildLeaderboard(page: Int = 1) async {
+        do {
+            let data = try await postToProxy(body: [
+                "action": "get_guild_leaderboard",
+                "page": page,
+                "page_size": 50
+            ])
+            let response = try JSONDecoder().decode(PublicGuildsResponse.self, from: data)
+            guildLeaderboard = response.guilds ?? []
+        } catch {
+            print("[GuildService] fetchGuildLeaderboard failed: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Internals
 
     private func applyMyGuildResponse(_ response: MyGuildResponse) {

@@ -248,6 +248,19 @@ struct GuildView: View {
                 Text("Lv \(guild.guildLevel) · \(guild.memberCount)/\(guild.maxMembers) members")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                // Guild XP progress to next level
+                let currentXP = guild.total_xp ?? 0
+                let levelThreshold = guild.guildLevel * 500
+                let prevThreshold = (guild.guildLevel - 1) * 500
+                let progressInLevel = Double(currentXP - prevThreshold) / Double(max(1, levelThreshold - prevThreshold))
+                HStack(spacing: 6) {
+                    ProgressView(value: min(1, max(0, progressInLevel)))
+                        .tint(.cyan)
+                        .frame(width: 80)
+                    Text("\(currentXP)/\(levelThreshold) XP")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
                 if !service.currentRole.isEmpty {
                     Text(service.currentRole.uppercased())
                         .font(.system(size: 9, weight: .black, design: .monospaced))
@@ -412,6 +425,36 @@ struct GuildView: View {
         }
         .padding(10)
         .background(isMe ? Color.cyan.opacity(0.08) : Color.gray.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .contextMenu {
+            if service.currentRole == "owner" && !isMe {
+                if member.role == "member" {
+                    Button {
+                        Task { await service.promoteMember(member.cloudkit_user_id) }
+                    } label: {
+                        Label("Promote to Officer", systemImage: "arrow.up.circle")
+                    }
+                }
+                if member.role == "officer" {
+                    Button {
+                        Task { await service.demoteOfficer(member.cloudkit_user_id) }
+                    } label: {
+                        Label("Demote to Member", systemImage: "arrow.down.circle")
+                    }
+                }
+                Button(role: .destructive) {
+                    Task { await service.kickMember(member.cloudkit_user_id) }
+                } label: {
+                    Label("Kick from Guild", systemImage: "person.fill.xmark")
+                }
+            }
+            if service.currentRole == "officer" && !isMe && member.role == "member" {
+                Button(role: .destructive) {
+                    Task { await service.kickMember(member.cloudkit_user_id) }
+                } label: {
+                    Label("Kick from Guild", systemImage: "person.fill.xmark")
+                }
+            }
+        }
     }
 
     private var contributionsSection: some View {
