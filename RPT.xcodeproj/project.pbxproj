@@ -100,6 +100,7 @@
 		01CB9C7E2F5BA384000CF421 /* PatrolMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatrolMapView.swift; sourceTree = "<group>"; };
 		01CB9C822F5BA3D2000CF421 /* ActiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveWorkoutView.swift; sourceTree = "<group>"; };
 		01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemScannerView.swift; sourceTree = "<group>"; };
+		BAEBEA112F8976EF007CB211 /* RPTWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RPTWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -139,6 +140,11 @@
 			path = RPT;
 			sourceTree = "<group>";
 		};
+		BAEBEA062F8976EE007CB211 /* RPTWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RPTWatch;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -164,6 +170,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BAEBEA0E2F8976EF007CB211 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -171,6 +184,7 @@
 			isa = PBXGroup;
 			children = (
 				011D8F902EA40A0100609E51 /* RPT */,
+				BAEBEA062F8976EE007CB211 /* RPTWatch */,
 				0176B6D12EAC6D2900ADF2A8 /* Frameworks */,
 				011D8F8F2EA40A0100609E51 /* Products */,
 				01CB9C7A2F5BA11E000CF421 /* InventoryAndShopView.swift */,
@@ -195,6 +209,7 @@
 				011D8F8E2EA40A0100609E51 /* RPT.app */,
 				011D8F9D2EA40A0200609E51 /* RPTTests.xctest */,
 				011D8FA72EA40A0200609E51 /* RPTUITests.xctest */,
+				BAEBEA112F8976EF007CB211 /* RPTWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -277,6 +292,25 @@
 			productReference = 011D8FA72EA40A0200609E51 /* RPTUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		BAEBEA102F8976EF007CB211 /* RPTWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BAEBEA212F8976EF007CB211 /* Build configuration list for PBXNativeTarget "RPTWatch" */;
+			buildPhases = (
+				BAEBEA0D2F8976EF007CB211 /* Sources */,
+				BAEBEA0E2F8976EF007CB211 /* Frameworks */,
+				BAEBEA0F2F8976EF007CB211 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RPTWatch;
+			packageProductDependencies = (
+			);
+			productName = "RPTWatch Watch App";
+			productReference = BAEBEA112F8976EF007CB211 /* RPTWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -284,7 +318,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					011D8F8D2EA40A0100609E51 = {
@@ -297,6 +331,9 @@
 					011D8FA62EA40A0200609E51 = {
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = 011D8F8D2EA40A0100609E51;
+					};
+					BAEBEA102F8976EF007CB211 = {
+						CreatedOnToolsVersion = 26.4;
 					};
 				};
 			};
@@ -317,6 +354,7 @@
 				011D8F8D2EA40A0100609E51 /* RPT */,
 				011D8F9C2EA40A0200609E51 /* RPTTests */,
 				011D8FA62EA40A0200609E51 /* RPTUITests */,
+				BAEBEA102F8976EF007CB211 /* RPTWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -337,6 +375,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		011D8FA52EA40A0200609E51 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAEBEA0F2F8976EF007CB211 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -400,6 +445,13 @@
 				0113FADD2F74185900FE951D /* AvatarService.swift in Sources */,
 				01CB9C7B2F5BA11E000CF421 /* InventoryAndShopView.swift in Sources */,
 				013B98312F70C6F700F50F41 /* AchievementManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAEBEA0D2F8976EF007CB211 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -575,7 +627,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.4;
+				MARKETING_VERSION = 3.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -621,7 +673,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.4;
+				MARKETING_VERSION = 3.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -742,6 +794,74 @@
 			};
 			name = Release;
 		};
+		BAEBEA1F2F8976EF007CB211 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = RPTWatch/RPTWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WRVY4Q5HA5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = RPTWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.SpiroTechnologies.RPT.watchkitapp.RPTWatch;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.SpiroTechnologies.RPT.watchkitapp.RPTWatch.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.4;
+			};
+			name = Debug;
+		};
+		BAEBEA202F8976EF007CB211 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = RPTWatch/RPTWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WRVY4Q5HA5;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = RPTWatch;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.SpiroTechnologies.RPT.watchkitapp.RPTWatch;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.SpiroTechnologies.RPT.watchkitapp.RPTWatch.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.4;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -777,6 +897,15 @@
 			buildConfigurations = (
 				011D8FB82EA40A0200609E51 /* Debug */,
 				011D8FB92EA40A0200609E51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BAEBEA212F8976EF007CB211 /* Build configuration list for PBXNativeTarget "RPTWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BAEBEA1F2F8976EF007CB211 /* Debug */,
+				BAEBEA202F8976EF007CB211 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
