@@ -45,6 +45,8 @@
 		01CB9C8B2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */; };
 		01CB9C8C2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */; };
 		01CB9C8D2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */; };
+		BAEBEAEC2F8980C4007CB211 /* RPTWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = BAEBEA112F8976EF007CB211 /* RPTWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BAEBEAF42F8980E9007CB211 /* RPT.app in Resources */ = {isa = PBXBuildFile; fileRef = 011D8F8E2EA40A0100609E51 /* RPT.app */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +58,34 @@
 			remoteInfo = RPT;
 		};
 		011D8FA82EA40A0200609E51 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 011D8F862EA40A0100609E51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 011D8F8D2EA40A0100609E51;
+			remoteInfo = RPT;
+		};
+		BAEBEAED2F8980C4007CB211 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 011D8F862EA40A0100609E51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BAEBEA102F8976EF007CB211;
+			remoteInfo = RPTWatch;
+		};
+		BAEBEAF02F8980CC007CB211 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 011D8F862EA40A0100609E51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BAEBEA102F8976EF007CB211;
+			remoteInfo = RPTWatch;
+		};
+		BAEBEAF22F8980E0007CB211 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 011D8F862EA40A0100609E51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BAEBEA102F8976EF007CB211;
+			remoteInfo = RPTWatch;
+		};
+		BAEBEAF52F8980E9007CB211 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 011D8F862EA40A0100609E51 /* Project object */;
 			proxyType = 1;
@@ -74,6 +104,17 @@
 				0176B6D72EAC6D5400ADF2A8 /* WorkoutKit.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAEBEAEF2F8980C4007CB211 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				BAEBEAEC2F8980C4007CB211 /* RPTWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -236,10 +277,14 @@
 				011D8F8A2EA40A0100609E51 /* Sources */,
 				011D8F8B2EA40A0100609E51 /* Frameworks */,
 				011D8F8C2EA40A0100609E51 /* Resources */,
+				BAEBEAEF2F8980C4007CB211 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BAEBEAEE2F8980C4007CB211 /* PBXTargetDependency */,
+				BAEBEAF12F8980CC007CB211 /* PBXTargetDependency */,
+				BAEBEAF32F8980E0007CB211 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				011D8F902EA40A0100609E51 /* RPT */,
@@ -303,6 +348,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				BAEBEAF62F8980E9007CB211 /* PBXTargetDependency */,
 			);
 			name = RPTWatch;
 			packageProductDependencies = (
@@ -385,6 +431,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BAEBEAF42F8980E9007CB211 /* RPT.app in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -467,6 +514,26 @@
 			isa = PBXTargetDependency;
 			target = 011D8F8D2EA40A0100609E51 /* RPT */;
 			targetProxy = 011D8FA82EA40A0200609E51 /* PBXContainerItemProxy */;
+		};
+		BAEBEAEE2F8980C4007CB211 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BAEBEA102F8976EF007CB211 /* RPTWatch */;
+			targetProxy = BAEBEAED2F8980C4007CB211 /* PBXContainerItemProxy */;
+		};
+		BAEBEAF12F8980CC007CB211 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BAEBEA102F8976EF007CB211 /* RPTWatch */;
+			targetProxy = BAEBEAF02F8980CC007CB211 /* PBXContainerItemProxy */;
+		};
+		BAEBEAF32F8980E0007CB211 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BAEBEA102F8976EF007CB211 /* RPTWatch */;
+			targetProxy = BAEBEAF22F8980E0007CB211 /* PBXContainerItemProxy */;
+		};
+		BAEBEAF62F8980E9007CB211 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 011D8F8D2EA40A0100609E51 /* RPT */;
+			targetProxy = BAEBEAF52F8980E9007CB211 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -614,6 +681,12 @@
 				INFOPLIST_FILE = RPT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = System;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSCameraUsageDescription = "System Trainer uses the camera to scan food barcodes so you can log meals instantly without typing.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "System Trainer reads your steps, sleep, heart rate, workouts, and body measurements from Apple Health to power daily quests, track your progression, and personalize coaching.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "System Trainer writes workouts, body weight, water intake, and meal nutrition back to Apple Health so all your fitness data stays in one place.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "System Trainer needs continued location access to keep recording your route while the screen is locked during outdoor cardio sessions.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "System Trainer uses your location to track outdoor cardio routes (Patrol mode) so you can see distance, pace, and the path you ran or walked.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "System Trainer uses your photo library so you can attach screenshots to bug reports and add photos to your meal log.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -627,7 +700,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.5;
+				MARKETING_VERSION = 3.0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -660,6 +733,12 @@
 				INFOPLIST_FILE = RPT/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = System;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSCameraUsageDescription = "System Trainer uses the camera to scan food barcodes so you can log meals instantly without typing.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "System Trainer reads your steps, sleep, heart rate, workouts, and body measurements from Apple Health to power daily quests, track your progression, and personalize coaching.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "System Trainer writes workouts, body weight, water intake, and meal nutrition back to Apple Health so all your fitness data stays in one place.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "System Trainer needs continued location access to keep recording your route while the screen is locked during outdoor cardio sessions.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "System Trainer uses your location to track outdoor cardio routes (Patrol mode) so you can see distance, pace, and the path you ran or walked.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "System Trainer uses your photo library so you can attach screenshots to bug reports and add photos to your meal log.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -673,7 +752,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.5;
+				MARKETING_VERSION = 3.0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
