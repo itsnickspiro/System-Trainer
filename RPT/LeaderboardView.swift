@@ -596,8 +596,13 @@ struct LeaderboardRow: View {
     }
 
     var body: some View {
-        rowContent
-            .contextMenu {
+        NavigationLink {
+            PublicProfileView(entry: entry)
+        } label: {
+            rowContent
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
                 if canBeRival {
                     if isRival {
                         Button(role: .destructive) {

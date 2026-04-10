@@ -19,6 +19,7 @@ function redactId(id: string): string {
 
 const RATE_BUDGETS: Record<string, [number, number]> = {
   get_profile:          [120, 60],   // 120 reads/min — fine for normal app usage
+  get_public_profile:   [60, 60],    // 60 reads/min — viewing other players
   upsert_profile:       [60, 60],    // 60 writes/min — generous (usually 1-2/min)
   save_backup:          [10, 60],    // 10 backups/min — usually 1-2 per session
   mark_override_applied:[10, 60],
@@ -295,6 +296,8 @@ const UPSERT_ALLOWED_COLUMNS = [
   "daily_step_goal",
   "daily_water_goal_oz",
   "onboarding_completed",
+  "is_profile_public",
+  "showcase_achievement_keys",
 ];
 
 serve(async (req) => {
@@ -345,6 +348,63 @@ serve(async (req) => {
 
     // All other actions require cloudkit_user_id
     if (!cloudkitUserId) return new Response(JSON.stringify({ error: "cloudkit_user_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    // GET PUBLIC PROFILE — returns limited public info for another player.
+    // Privacy-safe: no weight, height, age, diet, or personal details.
+    if (action === "get_public_profile") {
+      const targetId = body.target_cloudkit_user_id ?? body.target_player_id ?? "";
+      if (!targetId) {
+        return new Response(JSON.stringify({ error: "target_cloudkit_user_id or target_player_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // Look up by player_id or cloudkit_user_id
+      let query = supabase.from("player_profiles").select(
+        "player_id, cloudkit_user_id, display_name, avatar_key, level, total_xp, current_streak, longest_streak, player_class, fitness_goal, guild_id, guild_name, guild_role, is_profile_public, showcase_achievement_keys, total_workouts_logged, total_quests_completed, total_days_active"
+      );
+      if (targetId.startsWith("ST-") || targetId.startsWith("RPT-")) {
+        query = query.eq("player_id", targetId);
+      } else {
+        query = query.eq("cloudkit_user_id", targetId);
+      }
+      const { data, error } = await query.maybeSingle();
+      if (error && error.code !== "PGRST116") throw error;
+      if (!data) {
+        return new Response(JSON.stringify({ success: false, error: "not_found" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // Respect privacy setting
+      if (data.is_profile_public === false) {
+        return new Response(JSON.stringify({
+          success: true,
+          is_private: true,
+          display_name: data.display_name,
+          avatar_key: data.avatar_key,
+          player_id: data.player_id,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        is_private: false,
+        player_id: data.player_id,
+        cloudkit_user_id: data.cloudkit_user_id,
+        display_name: data.display_name,
+        avatar_key: data.avatar_key,
+        level: data.level,
+        total_xp: data.total_xp,
+        current_streak: data.current_streak,
+        longest_streak: data.longest_streak,
+        player_class: data.player_class,
+        fitness_goal: data.fitness_goal,
+        guild_id: data.guild_id,
+        guild_name: data.guild_name,
+        guild_role: data.guild_role,
+        showcase_achievement_keys: data.showcase_achievement_keys ?? [],
+        total_workouts_logged: data.total_workouts_logged,
+        total_quests_completed: data.total_quests_completed,
+        total_days_active: data.total_days_active,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // GET PROFILE — returns the row as flat top-level fields (no envelope).
     // The previous { profile, override } envelope is dropped per the new

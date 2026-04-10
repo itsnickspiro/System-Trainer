@@ -366,6 +366,17 @@ struct SettingsView: View {
                         .frame(width: 190)
                     }
 
+                    Toggle(isOn: Binding(
+                        get: { UserDefaults.standard.object(forKey: "rpt_is_profile_public") as? Bool ?? true },
+                        set: { UserDefaults.standard.set($0, forKey: "rpt_is_profile_public") }
+                    )) {
+                        HStack {
+                            Image(systemName: "eye.fill")
+                                .foregroundColor(.green)
+                            Text("Public Profile")
+                        }
+                    }
+
                     NavigationLink(destination: NotificationSettingsView()) {
                         HStack {
                             Image(systemName: "bell.fill")
@@ -562,7 +573,7 @@ struct SettingsView: View {
                 BodyMetricsView()
             }
             .sheet(isPresented: $showingAchievements) {
-                AchievementsView()
+                AchievementGalleryView()
             }
             .sheet(isPresented: $showingStore) {
                 StoreView()

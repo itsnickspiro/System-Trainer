@@ -511,6 +511,13 @@ final class PlayerProfileService: ObservableObject {
             body["avatar_key"] = avatarKey
         }
 
+        // Sync privacy and achievement showcase
+        body["is_profile_public"] = UserDefaults.standard.object(forKey: "rpt_is_profile_public") as? Bool ?? true
+        let showcaseKeys = UserDefaults.standard.stringArray(forKey: "rpt_showcase_achievement_keys") ?? []
+        if !showcaseKeys.isEmpty {
+            body["showcase_achievement_keys"] = showcaseKeys
+        }
+
         do {
             let data = try await postToProxy(body: body)
             // The proxy wraps the upserted row in `{ success, profile }` —
@@ -535,6 +542,21 @@ final class PlayerProfileService: ObservableObject {
             }
         } catch {
             print("[PlayerProfileService] upsertProfile failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Syncs showcase achievement keys to the server immediately.
+    func syncShowcaseKeys(_ keys: [String]) async {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else { return }
+        let body: [String: Any] = [
+            "action": "upsert_profile",
+            "cloudkit_user_id": cloudKitID,
+            "showcase_achievement_keys": keys
+        ]
+        do {
+            try await postToProxy(body: body)
+        } catch {
+            print("[PlayerProfileService] syncShowcaseKeys failed: \(error.localizedDescription)")
         }
     }
 
