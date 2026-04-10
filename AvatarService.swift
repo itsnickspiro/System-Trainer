@@ -38,7 +38,14 @@ final class AvatarService: ObservableObject {
     private init() {
         catalog = (try? JSONDecoder().decode([AvatarTemplate].self,
                                              from: Data(contentsOf: Self.cacheURL))) ?? []
-        current = catalog.first { $0.isEquipped }
+        // Restore from UserDefaults first (survives bad server data in the cache),
+        // then fall back to the isEquipped flag in the cached catalog.
+        if let savedKey = UserDefaults.standard.string(forKey: "rpt_current_avatar_key"),
+           let match = catalog.first(where: { $0.key == savedKey }) {
+            current = match
+        } else {
+            current = catalog.first { $0.isEquipped }
+        }
     }
 
     // MARK: - Refresh
@@ -76,8 +83,10 @@ final class AvatarService: ObservableObject {
             if let key = response.current_avatar_key,
                let match = response.avatars.first(where: { $0.key == key }) {
                 current = match
+                UserDefaults.standard.set(key, forKey: "rpt_current_avatar_key")
             } else if let equipped = response.avatars.first(where: { $0.isEquipped }) {
                 current = equipped
+                UserDefaults.standard.set(equipped.key, forKey: "rpt_current_avatar_key")
             }
             // else: keep current unchanged — server returned a placeholder
             // key ("avatar_default") that doesn't match any real avatar.
@@ -105,6 +114,7 @@ final class AvatarService: ObservableObject {
             return copy
         }
         current = catalog.first { $0.isEquipped }
+        UserDefaults.standard.set(key, forKey: "rpt_current_avatar_key")
 
         let body: [String: Any] = [
             "action":           "set_avatar",
