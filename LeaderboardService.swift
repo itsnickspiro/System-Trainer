@@ -253,7 +253,7 @@ final class LeaderboardService: ObservableObject {
         }
         // Notify the rival via their notification inbox (local only —
         // the rival will see it next time their app fetches)
-        let myName = DataManager.shared.currentProfile?.name ?? "Someone"
+        _ = DataManager.shared.currentProfile?.name ?? "Someone"
         NotificationInboxManager.shared.add(
             title: "New Rival!",
             body: "You set \(entry.displayName) as your rival. Time to surpass them!",
