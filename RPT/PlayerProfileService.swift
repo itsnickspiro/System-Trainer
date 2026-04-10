@@ -331,8 +331,8 @@ final class PlayerProfileService: ObservableObject {
             return
         }
 
-        // Identity — remote wins when non-empty
-        if let name = remote.display_name, !name.isEmpty {
+        // Identity — remote wins when non-empty and not the default "Player"
+        if let name = remote.display_name, !name.isEmpty, name != "Player" {
             profile.name = name
         }
 

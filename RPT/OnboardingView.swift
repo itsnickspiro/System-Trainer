@@ -404,9 +404,9 @@ struct OnboardingView: View {
 
     private var canAdvance: Bool {
         switch currentStep {
-        case 1: // Username — minimum 8 characters, must not be empty whitespace
+        case 1: // Username — minimum 8 characters, no spaces, not "Player"
             let trimmed = profileName.trimmingCharacters(in: .whitespaces)
-            return trimmed.count >= 8 && !isCheckingUsername && !usernameIsTaken
+            return trimmed.count >= 8 && !trimmed.contains(" ") && trimmed.lowercased() != "player" && !isCheckingUsername && !usernameIsTaken
         case 3: // Body stats — all three numeric fields must parse to > 0
             let age    = Int(ageText) ?? 0
             let height = Double(heightText) ?? 0
@@ -815,6 +815,10 @@ private struct NameStepView: View {
     private var validationMessage: (String, Color)? {
         if trimmed.isEmpty {
             return ("Username required to continue", .orange.opacity(0.7))
+        } else if trimmed.contains(" ") {
+            return ("Username cannot contain spaces", .orange.opacity(0.7))
+        } else if trimmed.lowercased() == "player" {
+            return ("\"Player\" is not allowed as a username", .orange.opacity(0.7))
         } else if trimmed.count < 8 {
             return ("Must be at least 8 characters (\(trimmed.count)/8)", .orange.opacity(0.7))
         } else if isCheckingUsername {

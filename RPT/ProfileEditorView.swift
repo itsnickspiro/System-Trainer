@@ -471,6 +471,14 @@ struct ProfileEditorView: View {
                         Text(error)
                             .font(.caption)
                             .foregroundColor(.red)
+                    } else if newUsername.contains(" ") {
+                        Text("Username cannot contain spaces")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    } else if newUsername.trimmingCharacters(in: .whitespaces).lowercased() == "player" {
+                        Text("\"Player\" is not allowed as a username")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     } else if newUsername.trimmingCharacters(in: .whitespaces).count < 8 && !newUsername.isEmpty {
                         Text("Username must be at least 8 characters")
                             .font(.caption)
