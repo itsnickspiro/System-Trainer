@@ -9,12 +9,15 @@ struct RivalBannerView: View {
     @ObservedObject private var leaderboard = LeaderboardService.shared
     @ObservedObject private var dataManager = DataManager.shared
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showingChallengeSheet = false
 
     private var profile: Profile? { dataManager.currentProfile }
     private var rival: LeaderboardEntry? {
         guard let p = profile else { return nil }
         return leaderboard.currentRivalEntry(for: p)
     }
+
+    private var rivalAsEntry: LeaderboardEntry? { rival }
 
     var body: some View {
         if let profile, let rival, !profile.rivalCloudKitUserID.isEmpty {
@@ -69,6 +72,27 @@ struct RivalBannerView: View {
                     leftValue: profile.currentStreak,
                     rightValue: rival.currentStreak ?? 0
                 )
+
+                // Challenge shortcut
+                Button {
+                    showingChallengeSheet = true
+                } label: {
+                    Label("Challenge Your Rival", systemImage: "bolt.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.red.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showingChallengeSheet) {
+                    if let rivalEntry = rivalAsEntry, let rivalID = rivalEntry.playerId {
+                        SendChallengeSheet(
+                            targetCloudKitID: rivalID,
+                            targetDisplayName: rivalEntry.displayName
+                        )
+                    }
+                }
             }
             .padding(14)
             .background(
