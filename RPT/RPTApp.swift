@@ -209,6 +209,9 @@ struct RPTApp: App {
                 await LeaderboardService.shared.refresh()
                 // Step 12: Avatar catalog and current equipped avatar
                 await AvatarService.shared.refresh()
+                // Step 13: Activate Watch connectivity and send initial stats
+                PhoneSessionManager.shared.activate()
+                PhoneSessionManager.shared.sendStats()
             }
         }
         .modelContainer(sharedModelContainer)
