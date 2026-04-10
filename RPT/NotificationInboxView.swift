@@ -49,6 +49,11 @@ final class NotificationInboxManager: ObservableObject {
         saveToDisk()
     }
 
+    func delete(_ id: UUID) {
+        messages.removeAll { $0.id == id }
+        saveToDisk()
+    }
+
     func clearAll() {
         messages.removeAll()
         saveToDisk()
@@ -122,12 +127,23 @@ struct NotificationInboxView: View {
                 } else {
                     List {
                         ForEach(inbox.messages) { msg in
-                            InboxMessageRow(message: msg)
-                                .onAppear {
-                                    if !msg.isRead {
-                                        inbox.markRead(msg.id)
+                            NavigationLink {
+                                NotificationDetailView(message: msg)
+                                    .onAppear {
+                                        if !msg.isRead {
+                                            inbox.markRead(msg.id)
+                                        }
                                     }
+                            } label: {
+                                InboxMessageRow(message: msg)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    inbox.delete(msg.id)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
                                 }
+                            }
                         }
                     }
                 }
@@ -224,5 +240,66 @@ private struct InboxMessageRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Detail View
+
+private struct NotificationDetailView: View {
+    let message: InboxMessage
+
+    private var categoryIcon: String {
+        switch message.category {
+        case "quest": return "scroll.fill"
+        case "streak": return "flame.fill"
+        case "levelUp": return "arrow.up.circle.fill"
+        case "health": return "heart.fill"
+        case "achievement": return "trophy.fill"
+        case "event": return "calendar.badge.exclamationmark"
+        default: return "bell.fill"
+        }
+    }
+
+    private var categoryColor: Color {
+        switch message.category {
+        case "quest": return .green
+        case "streak": return .orange
+        case "levelUp": return .yellow
+        case "health": return .red
+        case "achievement": return .purple
+        case "event": return .cyan
+        default: return .blue
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: categoryIcon)
+                    .font(.system(size: 48))
+                    .foregroundColor(categoryColor)
+                    .padding(.top, 24)
+
+                Text(message.title)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(message.body)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                Text(message.date, format: .dateTime.month(.wide).day().year().hour().minute())
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+        }
+        .navigationTitle("Notification")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

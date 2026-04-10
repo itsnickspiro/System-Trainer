@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var remoteConfig = RemoteConfigService.shared
+    @ObservedObject private var notificationInbox = NotificationInboxManager.shared
     @State private var now = Date()
     @State private var showingSettings = false
     @State private var showingTrainer = false
@@ -167,6 +168,14 @@ struct ContentView: View {
                             Circle()
                                 .fill(Color(.systemGray6))
                         )
+                        .overlay(alignment: .topTrailing) {
+                            if notificationInbox.unreadCount > 0 {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 10, height: 10)
+                                    .offset(x: 2, y: -2)
+                            }
+                        }
                 }
                 .buttonStyle(.plain)
             }
