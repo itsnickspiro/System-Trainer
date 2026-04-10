@@ -76,9 +76,11 @@ final class AvatarService: ObservableObject {
             if let key = response.current_avatar_key,
                let match = response.avatars.first(where: { $0.key == key }) {
                 current = match
-            } else {
-                current = response.avatars.first { $0.isEquipped }
+            } else if let equipped = response.avatars.first(where: { $0.isEquipped }) {
+                current = equipped
             }
+            // else: keep current unchanged — server returned a placeholder
+            // key ("avatar_default") that doesn't match any real avatar.
             try? JSONEncoder().encode(response.avatars).write(to: Self.cacheURL, options: .atomic)
         } catch {
             lastError = error.localizedDescription
@@ -91,7 +93,10 @@ final class AvatarService: ObservableObject {
     /// then syncs to Supabase and refreshes the leaderboard display name entry.
     func setAvatar(key: String) async {
         guard let cloudKitID = LeaderboardService.shared.currentUserID,
-              !cloudKitID.isEmpty else { return }
+              !cloudKitID.isEmpty else {
+            print("[AvatarService] setAvatar(\(key)) skipped — CloudKit user ID not resolved")
+            return
+        }
 
         // Optimistic local update
         catalog = catalog.map { t in

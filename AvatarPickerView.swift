@@ -15,9 +15,9 @@ struct AvatarPickerView: View {
     @State private var showPurchaseError = false
 
     // Category display order and labels
-    private let categoryOrder = ["free", "warrior", "mage", "rogue", "tank", "anime", "event"]
+    private let categoryOrder = ["default", "warrior", "mage", "rogue", "tank", "anime", "event"]
     private let categoryLabels: [String: String] = [
-        "free":    "Free",
+        "default": "Free",
         "warrior": "Warrior",
         "mage":    "Mage",
         "rogue":   "Rogue",
@@ -26,11 +26,18 @@ struct AvatarPickerView: View {
         "event":   "Event"
     ]
 
+    private var genderSuffix: String {
+        switch DataManager.shared.currentProfile?.gender {
+        case .female: return "_f"
+        default:      return "_m"
+        }
+    }
+
     private var groupedCatalog: [(category: String, avatars: [AvatarTemplate])] {
         categoryOrder.compactMap { cat in
             let items = avatarService.catalog.filter {
                 $0.category == cat
-                && $0.key.hasSuffix("_m")
+                && $0.key.hasSuffix(genderSuffix)
                 && $0.isUnlocked
                 && UIImage(named: $0.key) != nil
             }

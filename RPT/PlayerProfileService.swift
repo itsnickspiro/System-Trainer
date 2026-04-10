@@ -506,6 +506,11 @@ final class PlayerProfileService: ObservableObject {
 
         body["onboarding_completed"] = true
 
+        // Reinforce the avatar selection so upsert never nulls avatar_key
+        if let avatarKey = AvatarService.shared.current?.key {
+            body["avatar_key"] = avatarKey
+        }
+
         do {
             let data = try await postToProxy(body: body)
             // The proxy wraps the upserted row in `{ success, profile }` —

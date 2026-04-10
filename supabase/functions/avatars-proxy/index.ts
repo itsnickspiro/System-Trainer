@@ -74,7 +74,7 @@ serve(async (req) => {
     if (action === "set_avatar") {
       const avatarKey = body.avatar_key ?? "";
       if (!cloudkitUserId || !avatarKey) return new Response(JSON.stringify({ error: "Missing params" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      const { error } = await supabase.from("player_profiles").update({ avatar_key: avatarKey, updated_at: new Date().toISOString() }).eq("cloudkit_user_id", cloudkitUserId);
+      const { error } = await supabase.from("player_profiles").upsert({ cloudkit_user_id: cloudkitUserId, avatar_key: avatarKey, updated_at: new Date().toISOString() }, { onConflict: "cloudkit_user_id" });
       if (error) throw error;
       // Also update leaderboard display
       await supabase.from("leaderboard").update({ avatar_key: avatarKey }).eq("cloudkit_user_id", cloudkitUserId);
