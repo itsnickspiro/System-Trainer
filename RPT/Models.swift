@@ -42,6 +42,7 @@ final class Profile {
     var lastMealTime: Date?
     var lastWorkoutTime: Date?
     var sleepHours: Double = 7.0
+    var manualSleepLogDate: Date?
     var lastStatUpdate: Date = Date()
 
     // Diet preference (Phase D1). Stored as raw string for CloudKit compatibility.
@@ -671,6 +672,7 @@ final class Profile {
     
     func recordSleep(hours: Double) {
         sleepHours = hours
+        manualSleepLogDate = Date()
         
         if hours >= 7 && hours <= 9 {
             adjustStat(\.health, by: 5.0)

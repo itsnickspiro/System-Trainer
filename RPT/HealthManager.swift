@@ -222,7 +222,13 @@ class HealthManager: ObservableObject {
             let totalSeconds = samples
                 .filter { asleepValues.contains($0.value) }
                 .reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) }
-            profile.sleepHours = totalSeconds / 3600.0
+            // Don't overwrite manually logged sleep for today
+            if let manualDate = profile.manualSleepLogDate,
+               Calendar.current.isDateInToday(manualDate) {
+                // Manual sleep was logged today — keep it
+            } else {
+                profile.sleepHours = totalSeconds / 3600.0
+            }
         } catch {
             print("Failed to fetch sleep data: \(error)")
         }

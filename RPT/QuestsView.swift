@@ -412,6 +412,8 @@ struct RealWorldDataSummary: View {
     @Environment(\.colorScheme) private var colorScheme
     @Query private var profiles: [Profile]
     private var profile: Profile { profiles.first ?? Profile() }
+    @State private var showSleepLog = false
+    @State private var sleepHoursInput: Double = 7.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -428,7 +430,10 @@ struct RealWorldDataSummary: View {
             HStack(spacing: 12) {
                 miniMetric(title: "Steps", value: "\(profile.dailySteps)", goal: profile.dailyStepsGoal, icon: "figure.walk", color: .blue)
                 miniMetric(title: "Active Cal", value: "\(profile.dailyActiveCalories)", goal: profile.dailyActiveCaloriesGoal, icon: "flame.fill", color: .orange)
-                miniMetric(title: "Sleep", value: String(format: "%.1fh", profile.sleepHours), goal: 8, icon: "bed.double.fill", color: .purple)
+                Button { showSleepLog = true } label: {
+                    miniMetric(title: "Sleep", value: String(format: "%.1fh", profile.sleepHours), goal: 8, icon: "bed.double.fill", color: .purple)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(16)
@@ -441,6 +446,11 @@ struct RealWorldDataSummary: View {
                 )
         )
         .padding(.horizontal)
+        .sheet(isPresented: $showSleepLog) {
+            SleepLogSheet(hours: $sleepHoursInput) { hours in
+                DataManager.shared.recordHealthAction(.recordSleep(hours: hours))
+            }
+        }
     }
 
     private var xpToday: Int {
