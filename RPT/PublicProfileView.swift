@@ -14,6 +14,7 @@ struct PublicProfileView: View {
     @State private var profile: PublicProfile?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var showingChallengeSheet = false
 
     var body: some View {
         ScrollView {
@@ -85,8 +86,9 @@ struct PublicProfileView: View {
             // Activity stats
             activitySection(profile)
 
-            // Rival button
+            // Action buttons
             if entry.isCurrentUser != true {
+                challengeButton
                 rivalButton
             }
 
@@ -233,6 +235,27 @@ struct PublicProfileView: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var challengeButton: some View {
+        Button {
+            showingChallengeSheet = true
+        } label: {
+            Label("Challenge", systemImage: "bolt.fill")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color.cyan.opacity(0.15)))
+                .foregroundColor(.cyan)
+        }
+        .sheet(isPresented: $showingChallengeSheet) {
+            if let profile = profile, let ckID = profile.cloudkitUserId {
+                SendChallengeSheet(
+                    targetCloudKitID: ckID,
+                    targetDisplayName: profile.displayName
+                )
+            }
+        }
     }
 
     private var rivalButton: some View {

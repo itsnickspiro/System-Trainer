@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var showingBugReport = false
     @State private var showingActivityLog = false
     @State private var showingNotificationInbox = false
+    @State private var showingChallenges = false
     @ObservedObject private var notificationInbox = NotificationInboxManager.shared
     @ObservedObject private var avatarService = AvatarService.shared
     @State private var showingSignOutConfirm = false
@@ -321,6 +322,33 @@ struct SettingsView: View {
                     Text("Join a guild to fight weekly raid bosses with up to 11 other adventurers and split the rewards.")
                 }
 
+                // Challenges Section
+                Section {
+                    Button {
+                        showingChallenges = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "bolt.fill")
+                                .foregroundColor(.orange)
+                            Text("1v1 Challenges")
+                            Spacer()
+                            if ChallengeService.shared.pendingIncoming.count > 0 {
+                                Text("\(ChallengeService.shared.pendingIncoming.count)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .foregroundColor(.primary)
+                }
+
                 // Health Integration Section
                 Section("Health Integration") {
                     HStack {
@@ -586,6 +614,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingGuildView) {
                 GuildView()
+            }
+            .sheet(isPresented: $showingChallenges) {
+                ChallengeView()
             }
             .sheet(isPresented: $showingBugReport) {
                 BugReportView()
