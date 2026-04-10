@@ -231,6 +231,24 @@ The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Cont
 - All secrets go through Supabase Edge Function proxies, never in client code.
 - `.entitlements` and `Info.plist` are checked in. `Secrets.xcconfig` is generated at build time and gitignored.
 
+### Secret rotation
+- `Secrets.xcconfig` is gitignored but was historically committed — always check git history after rotation.
+- Supabase Edge Function secrets (`RPT_APP_SECRET`) are set via Dashboard → Edge Functions → Manage Secrets. The MCP and CLI cannot set them.
+- `git-filter-repo` (installed via `pip3 install git-filter-repo`, invoked as `python3 -m git_filter_repo`) is available for scrubbing secrets from history. Use `--replace-text` for string replacement and `--invert-paths --path build/` to remove committed build artifacts.
+- After `git-filter-repo`, the `origin` remote is removed automatically — re-add with `git remote add origin <url>` then `git push --force`.
+
+### HealthKit overwrites
+- HealthKit background observers continuously call `fetchSleepData()` / `fetchTodaysHealthData()` which overwrite Profile properties. Any manually logged value (sleep, etc.) must be protected with a `manualXxxLogDate: Date?` flag on Profile — skip the HealthKit overwrite if the flag is set for today. See `HealthManager.swift` `fetchSleepData()`.
+
+### Profile sync gotcha
+- `PlayerProfileService.applyRemoteProfile()` overwrites local Profile fields with server values. If the server has stale/default data (e.g., `display_name: "Player"`), it will reset the local profile. Guard against overwriting with default values — check for `!= "Player"` or similar before applying remote identity fields.
+
+### Certificate pinning
+- `RPT/PinnedURLSession.swift` pins the intermediate CA (Google Trust Services WE1) and root CA (GTS Root R4) for the Supabase endpoint. All services use `PinnedURLSession.shared` instead of `URLSession.shared`. If API calls start failing with connection errors after a Supabase infrastructure change, re-extract pins with:
+  ```bash
+  openssl s_client -connect erghbsnxtsbnmfuycnyb.supabase.co:443 -servername erghbsnxtsbnmfuycnyb.supabase.co -showcerts < /dev/null 2>/dev/null | awk 'BEGIN{n=0} /BEGIN CERT/{n++} n==2' | openssl x509 -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64
+  ```
+
 ### UI defaults
 - Dark mode is the default (`@AppStorage("colorScheme")` defaults to `"dark"`).
 - `@AppStorage` for user preferences (notifications, gameplay toggles, color scheme).
