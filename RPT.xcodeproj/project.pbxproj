@@ -46,6 +46,7 @@
 		01CB9C8C2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */; };
 		01CB9C8D2F5BA7C3000CF421 /* ItemScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CB9C8A2F5BA7C3000CF421 /* ItemScannerView.swift */; };
 		BAEBEAF42F8980E9007CB211 /* RPT.app in Resources */ = {isa = PBXBuildFile; fileRef = 011D8F8E2EA40A0100609E51 /* RPT.app */; };
+		BAEBED3B2F89BB6E007CB211 /* RPTWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = BAEBEA112F8976EF007CB211 /* RPTWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +63,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 011D8F8D2EA40A0100609E51;
 			remoteInfo = RPT;
+		};
+		BAEBED3C2F89BB6E007CB211 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 011D8F862EA40A0100609E51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BAEBEA102F8976EF007CB211;
+			remoteInfo = RPTWatch;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -83,6 +91,17 @@
 			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)/$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
 			files = (
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAEBED3E2F89BB6E007CB211 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				BAEBED3B2F89BB6E007CB211 /* RPTWatch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -248,10 +267,12 @@
 				011D8F8B2EA40A0100609E51 /* Frameworks */,
 				011D8F8C2EA40A0100609E51 /* Resources */,
 				BAEBEAEF2F8980C4007CB211 /* Embed Watch Content */,
+				BAEBED3E2F89BB6E007CB211 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BAEBED3D2F89BB6E007CB211 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				011D8F902EA40A0100609E51 /* RPT */,
@@ -481,6 +502,11 @@
 			target = 011D8F8D2EA40A0100609E51 /* RPT */;
 			targetProxy = 011D8FA82EA40A0200609E51 /* PBXContainerItemProxy */;
 		};
+		BAEBED3D2F89BB6E007CB211 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BAEBEA102F8976EF007CB211 /* RPTWatch */;
+			targetProxy = BAEBED3C2F89BB6E007CB211 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -646,7 +672,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.6;
+				MARKETING_VERSION = 3.0.7;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -698,7 +724,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.6;
+				MARKETING_VERSION = 3.0.7;
 				PRODUCT_BUNDLE_IDENTIFIER = SpiroTechnologies.RPT;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -839,7 +865,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.6;
+				MARKETING_VERSION = 3.0.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.SpiroTechnologies.RPT.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -876,7 +902,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.6;
+				MARKETING_VERSION = 3.0.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.SpiroTechnologies.RPT.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
