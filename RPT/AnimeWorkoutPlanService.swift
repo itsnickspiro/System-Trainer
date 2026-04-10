@@ -45,10 +45,10 @@ final class AnimeWorkoutPlanService: ObservableObject {
         // load disk cache off-main to keep init() fast on cold launch.
         remotePlans = nil
         Task.detached(priority: .utility) { [weak self] in
-            let url = Self.cacheURL
+            let url = await Self.cacheURL
             guard let data = try? Data(contentsOf: url),
                   let rows = try? JSONDecoder().decode([AnimePlanRow].self, from: data) else { return }
-            let plans = rows.compactMap { $0.toAnimeWorkoutPlan() }
+            let plans = await MainActor.run { rows.compactMap { $0.toAnimeWorkoutPlan() } }
             guard !plans.isEmpty else { return }
             await MainActor.run { [weak self] in
                 self?.remotePlans = plans

@@ -554,7 +554,7 @@ final class PlayerProfileService: ObservableObject {
             "showcase_achievement_keys": keys
         ]
         do {
-            try await postToProxy(body: body)
+            _ = try await postToProxy(body: body)
         } catch {
             print("[PlayerProfileService] syncShowcaseKeys failed: \(error.localizedDescription)")
         }

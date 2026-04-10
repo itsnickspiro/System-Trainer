@@ -229,14 +229,15 @@ extension AppleAuthService: ASAuthorizationControllerDelegate {
 // MARK: - ASAuthorizationControllerPresentationContextProviding
 
 extension AppleAuthService: ASAuthorizationControllerPresentationContextProviding {
-    nonisolated func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        // Find the active foreground window. UIKit lookup; on iOS this is the
-        // standard pattern recommended by Apple's sample code.
-        let scenes = UIApplication.shared.connectedScenes
+    @MainActor
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        let scene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-        let window = scenes.first?.windows.first { $0.isKeyWindow } ?? UIWindow()
-        return window
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first
+        return scene?.keyWindow ?? UIWindow(windowScene: scene!)
     }
 }
 
