@@ -6,6 +6,13 @@ import CoreData
 extension Notification.Name {
     static let rptAddFriendDeepLink = Notification.Name("rptAddFriendDeepLink")
     static let rptNavigateToTab = Notification.Name("rptNavigateToTab")
+    /// F7 content pipeline: posted by RemoteConfigService when a content
+    /// catalog's server version has bumped past the last-known client
+    /// version. userInfo carries "catalog" (String, matches the
+    /// content_version_* key), "previous" (Int), "current" (Int).
+    /// Content services subscribe and force-refresh when their catalog
+    /// key matches.
+    static let rptContentVersionBumped = Notification.Name("rptContentVersionBumped")
 }
 
 @main
@@ -189,7 +196,11 @@ struct RPTApp: App {
                         notificationManager.configureRecurringNotifications()
                     }
                 }
-                // Step 3: Remote config — feature flags / thresholds available ASAP
+                // Step 3: Remote config — feature flags / thresholds available ASAP.
+                // F7: Start the content version listener BEFORE refresh so the
+                // first refresh's content-version bumps get routed to the
+                // matching content services (which then force-refresh).
+                ContentVersionListener.shared.start()
                 await RemoteConfigService.shared.refresh()
                 // Step 4: Cloud player profile (account recovery, overrides)
                 await PlayerProfileService.shared.refresh()
