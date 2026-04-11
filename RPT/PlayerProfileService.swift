@@ -105,9 +105,19 @@ final class PlayerProfileService: ObservableObject {
     }
 
     /// Saves a backup and upserts the profile. Call after level-up, streaks, etc.
+    /// Does NOT touch `onboarding_completed` — that's only set from the explicit
+    /// onboarding completion path via `upsertProfile(onboardingCompleted: true)`.
     func syncProfile() async {
         guard let cloudKitID = LeaderboardService.shared.currentUserID,
-              !cloudKitID.isEmpty else { return }
+              !cloudKitID.isEmpty else {
+            // Visibility: previously this returned silently and the UI had no
+            // indication sync was blocked on CloudKit resolution. That's how
+            // a user could finish onboarding but have level=1 / "Warrior"
+            // persist server-side for 24 hours until the daily gate retried.
+            lastError = "sync_skipped_no_cloudkit_id"
+            print("[PlayerProfileService] syncProfile skipped — CloudKit user ID not yet resolved")
+            return
+        }
         do {
             try await saveBackup(cloudKitUserID: cloudKitID)
             await upsertProfile()
@@ -122,7 +132,9 @@ final class PlayerProfileService: ObservableObject {
         await syncProfile()
     }
 
-    /// Once-per-day sync gate — call on app foreground.
+    /// Legacy once-per-day sync gate. Retained for backwards compat but
+    /// `PlayerSyncManager.syncOnLaunchIfStale(hours: 1)` is the preferred
+    /// entry point — it retries far more aggressively than this gate did.
     func syncIfNewDay() async {
         let today = Calendar.current.startOfDay(for: Date())
         let lastSync = UserDefaults.standard.object(forKey: Self.dailySyncKey) as? Date ?? .distantPast
@@ -454,9 +466,24 @@ final class PlayerProfileService: ObservableObject {
     /// Upserts the full local Profile to the backend using the flat
     /// top-level snake_case contract. Nil/empty fields are skipped so we don't
     /// clobber existing remote data with empty values.
-    func upsertProfile() async {
-        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty,
-              let profile = DataManager.shared.currentProfile else { return }
+    ///
+    /// - Parameter onboardingCompleted: `nil` (default) means DO NOT send the
+    ///   `onboarding_completed` field — the server preserves its existing
+    ///   value. Only the explicit onboarding completion path should pass
+    ///   `true` here. This was the F8 bug: the old code sent `= true` on
+    ///   every upsert, so a daily sync during a half-finished onboarding
+    ///   would flip the server flag prematurely.
+    func upsertProfile(onboardingCompleted: Bool? = nil) async {
+        guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else {
+            lastError = "upsert_skipped_no_cloudkit_id"
+            print("[PlayerProfileService] upsertProfile skipped — CloudKit user ID not yet resolved")
+            return
+        }
+        guard let profile = DataManager.shared.currentProfile else {
+            lastError = "upsert_skipped_no_local_profile"
+            print("[PlayerProfileService] upsertProfile skipped — no local SwiftData profile")
+            return
+        }
 
         var body: [String: Any] = [
             "action": "upsert_profile",
@@ -469,6 +496,18 @@ final class PlayerProfileService: ObservableObject {
         body["total_xp"] = profile.totalXPEarned
         body["current_streak"] = profile.currentStreak
         body["longest_streak"] = profile.bestStreak
+
+        // Character stats — the Profile stores these as Doubles (0–100 game
+        // bar scale), the DB stores as integer columns. Round before sending.
+        // F8 fix: these fields were missing from the body entirely until now,
+        // so player_profiles had default values for all 6 stats regardless of
+        // what the user actually had. Swift `health` maps to DB `vitality`.
+        body["strength"]   = Int(profile.strength.rounded())
+        body["endurance"]  = Int(profile.endurance.rounded())
+        body["focus"]      = Int(profile.focus.rounded())
+        body["discipline"] = Int(profile.discipline.rounded())
+        body["vitality"]   = Int(profile.health.rounded())
+        body["energy"]     = Int(profile.energy.rounded())
 
         // Demographics
         if profile.weight > 0 { body["weight_kg"] = profile.weight }
@@ -504,7 +543,16 @@ final class PlayerProfileService: ObservableObject {
         body["guild_name"] = profile.guildName
         body["guild_role"] = profile.guildRole
 
-        body["onboarding_completed"] = true
+        // F8 FIX: only set onboarding_completed when the caller explicitly
+        // asks for it. The server treats missing fields as "don't change",
+        // so this preserves whatever value is already in the row.
+        if let onboardingCompleted {
+            body["onboarding_completed"] = onboardingCompleted
+        }
+
+        // Client-written timestamp for diagnostics. Used by the launch-time
+        // stale-sync gate to decide whether to force a flush.
+        body["last_synced_at"] = ISO8601DateFormatter().string(from: Date())
 
         // Reinforce the avatar selection so upsert never nulls avatar_key
         if let avatarKey = AvatarService.shared.current?.key {
@@ -540,7 +588,11 @@ final class PlayerProfileService: ObservableObject {
                     UserDefaults.standard.set(credits, forKey: "rpt_system_credits")
                 }
             }
+            // Record successful sync time for the 1-hour launch-stale gate
+            UserDefaults.standard.set(Date(), forKey: "rpt_last_profile_sync_at")
+            lastError = nil
         } catch {
+            lastError = error.localizedDescription
             print("[PlayerProfileService] upsertProfile failed: \(error.localizedDescription)")
         }
     }

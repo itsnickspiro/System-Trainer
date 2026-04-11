@@ -94,7 +94,12 @@ struct ContentView: View {
                 NotificationManager.shared.clearBadge()
             } else if newPhase == .background {
                 dataManager.saveLocalChanges()
-                Task { await PlayerProfileService.shared.syncProfile() }
+                // Immediate flush via PlayerSyncManager — fires profile +
+                // leaderboard upserts in parallel within the scene-phase
+                // budget. Previously this called syncProfile() directly
+                // which meant the leaderboard upsert was a separate
+                // sync-on-level-up path that could fall out of step.
+                PlayerSyncManager.shared.syncOnBackground()
             }
         }
         // Refresh quests when iOS reports a significant time change

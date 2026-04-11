@@ -193,6 +193,12 @@ struct RPTApp: App {
                 await RemoteConfigService.shared.refresh()
                 // Step 4: Cloud player profile (account recovery, overrides)
                 await PlayerProfileService.shared.refresh()
+                // Step 4a: If the last successful profile sync is > 1 hour
+                // ago, force a fresh upsert. This is the retry path for
+                // users whose first-launch sync was blocked on CloudKit ID
+                // resolution — previously the retry window was 24 hours
+                // (see F8 PlayerSyncManager for the full story).
+                await PlayerSyncManager.shared.syncOnLaunchIfStale()
                 // Step 5: Quest templates and arcs
                 await QuestTemplateService.shared.refresh()
                 // Step 6: Achievement definitions

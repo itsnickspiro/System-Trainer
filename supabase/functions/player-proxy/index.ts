@@ -253,6 +253,12 @@ async function appleRevokeSIWA(
 // Whitelist of columns that upsert_profile is allowed to write to
 // player_profiles. Anything not on this list is silently ignored to
 // prevent injection of arbitrary fields from the client.
+//
+// Stat columns (strength, endurance, focus, discipline, vitality, energy)
+// were historically absent from this whitelist, which silently dropped every
+// client-side stat write for months. Added in the F8 PlayerSyncManager fix.
+// Clients round the Swift Double values to Int before sending. vitality
+// mirrors Swift Profile.health; energy is its own column.
 const UPSERT_ALLOWED_COLUMNS = [
   "display_name",
   "level",
@@ -298,6 +304,14 @@ const UPSERT_ALLOWED_COLUMNS = [
   "onboarding_completed",
   "is_profile_public",
   "showcase_achievement_keys",
+  // Character stats + depletable bars (F8 fix)
+  "strength",
+  "endurance",
+  "focus",
+  "discipline",
+  "vitality",
+  "energy",
+  "last_synced_at",
 ];
 
 serve(async (req) => {

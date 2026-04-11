@@ -584,12 +584,21 @@ struct OnboardingView: View {
             Task { await AvatarService.shared.setAvatar(key: key) }
         }
 
-        // Push local profile to the cloud. Use syncProfile() (upsert-only)
-        // instead of refresh() — refresh() fetches the remote profile and
-        // applies it locally, which can overwrite the name the user just
-        // typed with a stale "Player" default that was upserted earlier in
-        // the RPTApp .task chain before onboarding finished.
-        Task { await PlayerProfileService.shared.syncProfile() }
+        // Push local profile to the cloud AND explicitly set the
+        // `onboarding_completed = true` flag. This is the ONLY site in the
+        // codebase that sets this flag — every other upsert path omits the
+        // field so the server preserves its existing value. Previously the
+        // flag was hardcoded `true` on every upsert, which meant any daily
+        // sync firing during a half-finished onboarding would mark the
+        // server row complete prematurely (the F8 bug). See
+        // `PlayerProfileService.upsertProfile(onboardingCompleted:)` for
+        // the full story.
+        Task {
+            await PlayerProfileService.shared.upsertProfile(onboardingCompleted: true)
+            // Leaderboard upsert after the profile upsert so the leaderboard
+            // row is populated with the final name/level/xp the user set.
+            await LeaderboardService.shared.upsertEntry()
+        }
 
         // Final belt-and-suspenders: set the name on DataManager's
         // currentProfile RIGHT BEFORE flipping the onboarding flag.
