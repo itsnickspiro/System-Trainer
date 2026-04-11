@@ -261,14 +261,20 @@ struct RPGStatsBar: View {
         }
         
         func getValue(from profile: Profile) -> Double {
+            // Store audit fix: .discipline previously returned the raw profile
+            // value with NO bonus applied. Three equipment items advertised
+            // discipline bonuses (Discipline Crown +4, System Armor +5,
+            // Warrior's Mantle +2) that silently did nothing because this
+            // switch arm forgot to add the bonus. Now consistent with every
+            // other stat: clamp profile.stat + bonus to 100.
             let bonuses = StoreService.shared.equippedBonuses
             switch self {
-            case .health: return min(100, profile.health + bonuses.health)
-            case .energy: return min(100, profile.energy + bonuses.energy)
-            case .strength: return min(100, profile.strength + bonuses.strength)
-            case .endurance: return min(100, profile.endurance + bonuses.endurance)
-            case .focus: return min(100, profile.focus + bonuses.focus)
-            case .discipline: return profile.discipline
+            case .health:     return min(100, profile.health     + bonuses.health)
+            case .energy:     return min(100, profile.energy     + bonuses.energy)
+            case .strength:   return min(100, profile.strength   + bonuses.strength)
+            case .endurance:  return min(100, profile.endurance  + bonuses.endurance)
+            case .focus:      return min(100, profile.focus      + bonuses.focus)
+            case .discipline: return min(100, profile.discipline + bonuses.discipline)
             }
         }
         

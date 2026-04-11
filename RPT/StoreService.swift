@@ -68,7 +68,7 @@ final class StoreService: ObservableObject {
         // Start empty; load cached catalog off-main so init() returns instantly on cold launch.
         storeItems = []
         Task.detached(priority: .utility) { [weak self] in
-            let url = Self.catalogCacheURL
+            let url = await Self.catalogCacheURL
             guard let data = try? Data(contentsOf: url),
                   let decoded = try? JSONDecoder().decode([StoreItem].self, from: data),
                   !decoded.isEmpty else { return }
@@ -94,11 +94,14 @@ final class StoreService: ObservableObject {
         lastError = nil
         defer { isLoading = false }
 
-        guard let cloudKitID = LeaderboardService.shared.currentUserID,
-              !cloudKitID.isEmpty else { return }
+        // Use CloudKit ID if available; fall back to "anonymous" so the
+        // catalog still loads even when CloudKit resolution hasn't finished.
+        // The server returns an empty inventory for unknown IDs, which is fine.
+        let cloudKitID = LeaderboardService.shared.currentUserID ?? ""
+        let effectiveID = cloudKitID.isEmpty ? "anonymous" : cloudKitID
 
         do {
-            let payload = try await fetchStore(cloudKitUserID: cloudKitID)
+            let payload = try await fetchStore(cloudKitUserID: effectiveID)
 
             if !payload.store.isEmpty {
                 storeItems = payload.store
@@ -132,6 +135,17 @@ final class StoreService: ObservableObject {
 
             recomputeBonuses()
             lastSuccessfulRefreshAt = Date()
+
+            // Run the store item effect audit in DEBUG builds only.
+            // Surfaces mismatches between StoreItemEffectSpec.knownSpecs
+            // and the live catalog — silently-broken items caused the
+            // pre-F7 audit that uncovered Discipline Crown +4 doing
+            // nothing, 14 equipment items with zero effect, etc.
+            // Runs at catalog refresh time so issues show up in the
+            // console the first time after a bad row lands.
+            #if DEBUG
+            StoreItemEffectAudit.auditAndLog()
+            #endif
         } catch {
             lastError = error.localizedDescription
         }
@@ -207,29 +221,49 @@ final class StoreService: ObservableObject {
         var bonuses = StatBonuses()
         var xpMult = 1.0
 
-        for entry in inventory where entry.isEquipped {
+        // Store audit fixes (pre-F7):
+        //   1. Discipline was silently dropped — 3 equipment items advertised
+        //      bonuses that never applied (Discipline Crown +4, System Armor +5,
+        //      Warrior's Mantle +2). The StoreItem decoder now reads
+        //      bonus_discipline from the server, and this loop aggregates it.
+        //   2. Equipment XP multiplier was never applied — the `consumable`
+        //      branch was the only site that read `xpMultiplier`, so equipment
+        //      with bonus_xp_multiplier > 1 (e.g. System Armor 1.1x) did
+        //      nothing. Moved xpMult aggregation out of the switch so it
+        //      applies to all equipped/active items regardless of type.
+        for entry in inventory {
+            let isActiveConsumable = (entry.isActive && (entry.isEquipped == false))
+            let shouldApply = entry.isEquipped || isActiveConsumable || entry.isActive
+            guard shouldApply else { continue }
             guard let item = storeItems.first(where: { $0.key == entry.key }) else { continue }
 
             switch item.itemType {
             case "equipment":
-                bonuses.strength  += item.bonusStrength  ?? 0
-                bonuses.endurance += item.bonusEndurance ?? 0
-                bonuses.energy    += item.bonusEnergy    ?? 0
-                bonuses.focus     += item.bonusFocus     ?? 0
-                bonuses.health    += item.bonusHealth    ?? 0
-            case "consumable" where entry.isActive,
-                 "boost" where entry.isActive:
-                // XP multiplier
-                if let mult = item.xpMultiplier {
+                guard entry.isEquipped else { continue }
+                bonuses.strength   += item.bonusStrength   ?? 0
+                bonuses.endurance  += item.bonusEndurance  ?? 0
+                bonuses.discipline += item.bonusDiscipline ?? 0
+                bonuses.energy     += item.bonusEnergy     ?? 0
+                bonuses.focus      += item.bonusFocus      ?? 0
+                bonuses.health     += item.bonusHealth     ?? 0
+                if let mult = item.xpMultiplier, mult > 1 {
                     xpMult *= mult
                 }
-                // Stat bonuses from active consumables/boosts
-                bonuses.strength  += item.bonusStrength  ?? 0
-                bonuses.endurance += item.bonusEndurance ?? 0
-                bonuses.energy    += item.bonusEnergy    ?? 0
-                bonuses.focus     += item.bonusFocus     ?? 0
-                bonuses.health    += item.bonusHealth    ?? 0
+            case "consumable", "boost":
+                guard entry.isActive else { continue }
+                if let mult = item.xpMultiplier, mult > 1 {
+                    xpMult *= mult
+                }
+                bonuses.strength   += item.bonusStrength   ?? 0
+                bonuses.endurance  += item.bonusEndurance  ?? 0
+                bonuses.discipline += item.bonusDiscipline ?? 0
+                bonuses.energy     += item.bonusEnergy     ?? 0
+                bonuses.focus      += item.bonusFocus      ?? 0
+                bonuses.health     += item.bonusHealth     ?? 0
             default:
+                // avatar_frame, badge, cosmetic, title — no numeric effect to aggregate here.
+                // Their effect is visual and applied elsewhere (avatar picker,
+                // leaderboard row rendering, etc.).
                 break
             }
         }
@@ -292,11 +326,12 @@ struct StoreItem: Codable, Identifiable {
     let effectiveDiscountPct: Int     // 0–100; 0 when no sale
 
     // Stat bonuses (equipment only)
-    let bonusStrength:  Double?
-    let bonusEndurance: Double?
-    let bonusEnergy:    Double?
-    let bonusFocus:     Double?
-    let bonusHealth:    Double?
+    let bonusStrength:   Double?
+    let bonusEndurance:  Double?
+    let bonusDiscipline: Double?   // Store audit fix — was silently dropped
+    let bonusEnergy:     Double?
+    let bonusFocus:      Double?
+    let bonusHealth:     Double?
 
     // Consumable XP boost multiplier
     let xpMultiplier:   Double?
@@ -313,6 +348,7 @@ struct StoreItem: Codable, Identifiable {
         case effectiveDiscountPct = "effective_discount_pct"
         case bonusStrength        = "bonus_strength"
         case bonusEndurance       = "bonus_endurance"
+        case bonusDiscipline      = "bonus_discipline"
         case bonusEnergy          = "bonus_energy"
         case bonusFocus           = "bonus_focus"
         case bonusHealth          = "bonus_health"
@@ -335,12 +371,13 @@ struct StoreItem: Codable, Identifiable {
         finalPriceXP         = (try? c.decode(Int.self, forKey: .finalPriceXP))         ?? price
         finalPriceCredits    = (try? c.decode(Int.self, forKey: .finalPriceCredits))    ?? (creditPrice ?? 0)
         effectiveDiscountPct = (try? c.decode(Int.self, forKey: .effectiveDiscountPct)) ?? 0
-        bonusStrength  = try c.decodeIfPresent(Double.self, forKey: .bonusStrength)
-        bonusEndurance = try c.decodeIfPresent(Double.self, forKey: .bonusEndurance)
-        bonusEnergy    = try c.decodeIfPresent(Double.self, forKey: .bonusEnergy)
-        bonusFocus     = try c.decodeIfPresent(Double.self, forKey: .bonusFocus)
-        bonusHealth    = try c.decodeIfPresent(Double.self, forKey: .bonusHealth)
-        xpMultiplier   = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
+        bonusStrength   = try c.decodeIfPresent(Double.self, forKey: .bonusStrength)
+        bonusEndurance  = try c.decodeIfPresent(Double.self, forKey: .bonusEndurance)
+        bonusDiscipline = try c.decodeIfPresent(Double.self, forKey: .bonusDiscipline)
+        bonusEnergy     = try c.decodeIfPresent(Double.self, forKey: .bonusEnergy)
+        bonusFocus      = try c.decodeIfPresent(Double.self, forKey: .bonusFocus)
+        bonusHealth     = try c.decodeIfPresent(Double.self, forKey: .bonusHealth)
+        xpMultiplier    = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
     }
 
     var rarityColor: Color {
@@ -372,11 +409,12 @@ struct InventoryEntry: Codable, Identifiable {
 }
 
 struct StatBonuses {
-    var strength:  Double = 0
-    var endurance: Double = 0
-    var energy:    Double = 0
-    var focus:     Double = 0
-    var health:    Double = 0
+    var strength:   Double = 0
+    var endurance:  Double = 0
+    var discipline: Double = 0   // Store audit fix — was missing entirely
+    var energy:     Double = 0
+    var focus:      Double = 0
+    var health:     Double = 0
 }
 
 // MARK: - Payment Method

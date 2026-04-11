@@ -144,9 +144,18 @@ async function handleGetStore(supabase: any, cloudKitUserID: string) {
         xpMult = item.effect_value;
       }
 
-      // For consumables with stat effects, populate bonus fields from effect_value
+      // For consumables with stat effects, populate bonus fields from effect_value.
+      // Note on column naming:
+      //   DB `bonus_vitality` → client `bonus_health` (semantic: health bar)
+      //   DB `bonus_discipline` → client `bonus_discipline` (new — was silently
+      //     dropped by the pre-audit version of this proxy; 3 equipment items
+      //     including "Discipline Crown" advertised discipline bonuses that
+      //     never applied)
+      //   `bonus_energy` has no source DB column; consumable recovery_boost
+      //     is the only path that populates it
       let bStrength = nullIfZero(item.bonus_strength);
       let bEndurance = nullIfZero(item.bonus_endurance);
+      let bDiscipline = nullIfZero(item.bonus_discipline);
       let bEnergy: number | null = null;
       let bFocus = nullIfZero(item.bonus_focus);
       let bHealth = nullIfZero(item.bonus_vitality);
@@ -154,9 +163,10 @@ async function handleGetStore(supabase: any, cloudKitUserID: string) {
       if (item.item_type === "consumable" && item.effect_value > 0) {
         const ev = item.effect_value;
         if (item.effect_type === "all_stats_boost") {
-          // Boost all stats equally
+          // Boost all stats equally — NOW includes discipline (previously missed)
           bStrength  = (bStrength  ?? 0) + ev;
           bEndurance = (bEndurance ?? 0) + ev;
+          bDiscipline = (bDiscipline ?? 0) + ev;
           bEnergy    = (bEnergy    ?? 0) + ev;
           bFocus     = (bFocus     ?? 0) + ev;
           bHealth    = (bHealth    ?? 0) + ev;
@@ -164,6 +174,7 @@ async function handleGetStore(supabase: any, cloudKitUserID: string) {
           // Generic stat bonus — apply to all stats
           bStrength  = (bStrength  ?? 0) + ev;
           bEndurance = (bEndurance ?? 0) + ev;
+          bDiscipline = (bDiscipline ?? 0) + ev;
           bFocus     = (bFocus     ?? 0) + ev;
           bHealth    = (bHealth    ?? 0) + ev;
         } else if (item.effect_type === "recovery_boost") {
@@ -189,6 +200,7 @@ async function handleGetStore(supabase: any, cloudKitUserID: string) {
         effective_discount_pct: discountPct,
         bonus_strength: nullIfZero(bStrength),
         bonus_endurance: nullIfZero(bEndurance),
+        bonus_discipline: nullIfZero(bDiscipline),
         bonus_energy: nullIfZero(bEnergy),
         bonus_focus: nullIfZero(bFocus),
         bonus_health: nullIfZero(bHealth),
