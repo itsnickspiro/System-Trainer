@@ -101,6 +101,7 @@
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
 			files = (
+				BAEBED3B2F89BB6E007CB211 /* RPTWatch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -850,7 +851,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = RPTWatch/RPTWatch.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
@@ -859,7 +859,7 @@
 				INFOPLIST_FILE = RPTWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = RPTWatch;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.SpiroTechnologies.RPT.watchkitapp.RPTWatch;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = SpiroTechnologies.RPT;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -887,7 +887,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = RPTWatch/RPTWatch.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WRVY4Q5HA5;
@@ -896,7 +895,7 @@
 				INFOPLIST_FILE = RPTWatch/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = RPTWatch;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.SpiroTechnologies.RPT.watchkitapp.RPTWatch;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = SpiroTechnologies.RPT;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
