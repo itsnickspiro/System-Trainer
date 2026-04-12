@@ -9,6 +9,14 @@ struct ChallengeView: View {
     @ObservedObject private var service = ChallengeService.shared
     @AppStorage("colorScheme") private var savedColorScheme = "dark"
 
+    // Session 2: + toolbar button opens the friends picker, which on
+    // friend-tap immediately presents the SendChallengeSheet prefilled
+    // with that friend's identifiers. Two-state handoff so the picker
+    // sheet fully dismisses before the challenge sheet is presented,
+    // avoiding a SwiftUI double-sheet race.
+    @State private var showingFriendsPicker = false
+    @State private var pendingFriendTarget: FriendChallengeTarget? = nil
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -45,7 +53,7 @@ struct ChallengeView: View {
                         ContentUnavailableView(
                             "No Challenges Yet",
                             systemImage: "figure.boxing",
-                            description: Text("Tap a player's profile on the leaderboard to send a challenge.")
+                            description: Text("Tap a player's profile on the leaderboard to send a challenge, or tap + above to pick a friend.")
                         )
                     }
                 }
@@ -53,9 +61,38 @@ struct ChallengeView: View {
             }
             .navigationTitle("Challenges")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showingFriendsPicker = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.cyan)
+                    }
+                    .accessibilityLabel("Challenge a friend")
+                }
+            }
             .preferredColorScheme(savedColorScheme == "auto" ? nil : (savedColorScheme == "dark" ? .dark : .light))
         }
         .task { await service.refresh() }
+        .sheet(isPresented: $showingFriendsPicker) {
+            FriendsPickerSheet { target in
+                showingFriendsPicker = false
+                // Defer the challenge sheet so the picker finishes
+                // dismissing first — presenting both sheets
+                // simultaneously triggers a SwiftUI glitch.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    pendingFriendTarget = target
+                }
+            }
+        }
+        .sheet(item: $pendingFriendTarget) { target in
+            SendChallengeSheet(
+                targetCloudKitID: target.cloudKitID,
+                targetDisplayName: target.displayName
+            )
+        }
     }
 
     private func sectionHeader(_ title: String, color: Color) -> some View {
@@ -64,6 +101,101 @@ struct ChallengeView: View {
             .foregroundColor(color)
             .tracking(2)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Identifiable payload for the deferred SendChallengeSheet presentation.
+struct FriendChallengeTarget: Identifiable {
+    let cloudKitID: String
+    let displayName: String
+    var id: String { cloudKitID }
+}
+
+// MARK: - Friends Picker Sheet
+
+/// Session 2: Lists the player's friends so they can pick one to challenge
+/// directly from ChallengeView. Reuses `LeaderboardService.friendEntries`
+/// as the data source — populated by `LeaderboardService.fetchFriends()`
+/// on launch and kept in sync with add/remove friend actions.
+struct FriendsPickerSheet: View {
+    let onPick: (FriendChallengeTarget) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var leaderboard = LeaderboardService.shared
+    @State private var isLoading = false
+
+    private var friends: [LeaderboardEntry] {
+        // Filter out the current user if they appear in their own friends
+        // list for any reason — you can't challenge yourself.
+        let myID = LeaderboardService.shared.currentUserID ?? ""
+        return leaderboard.friendEntries.filter { $0.cloudkitUserId != myID }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading && friends.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if friends.isEmpty {
+                    ContentUnavailableView(
+                        "No Friends Yet",
+                        systemImage: "person.2.slash",
+                        description: Text("Add friends from the Leaderboard tab to challenge them directly.")
+                    )
+                } else {
+                    List(friends) { friend in
+                        Button {
+                            // cloudkit_user_id is the stable key the
+                            // challenge-proxy uses. player_id is prone to
+                            // drift (see session 2 player cards bug fix).
+                            guard let ckID = friend.cloudkitUserId, !ckID.isEmpty else { return }
+                            onPick(FriendChallengeTarget(
+                                cloudKitID: ckID,
+                                displayName: friend.displayName
+                            ))
+                        } label: {
+                            HStack(spacing: 12) {
+                                AvatarImageView(key: friend.avatarKey ?? "avatar_default", size: 44)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(friend.displayName)
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    HStack(spacing: 6) {
+                                        Text("Lv \(friend.level ?? 1)")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundColor(.cyan)
+                                        Text("·")
+                                            .foregroundColor(.secondary)
+                                        Text("\(friend.totalXP ?? 0) XP")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "bolt.fill")
+                                    .foregroundColor(.orange)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Pick a Friend")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task {
+            isLoading = true
+            await leaderboard.fetchFriends()
+            isLoading = false
+        }
     }
 }
 
