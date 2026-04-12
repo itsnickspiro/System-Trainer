@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // MARK: - AvatarPickerView
 //
@@ -13,6 +14,7 @@ struct AvatarPickerView: View {
     @State private var purchaseTarget: AvatarTemplate? = nil
     @State private var isPurchasing = false
     @State private var showPurchaseError = false
+    @State private var showAdminAddAvatar = false
 
     // Category display order and labels
     private let categoryOrder = ["free", "warrior", "mage", "rogue", "tank", "anime", "event"]
@@ -74,7 +76,22 @@ struct AvatarPickerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
+                    HStack(spacing: 12) {
+                        if PlayerProfileService.shared.isAdmin {
+                            Button {
+                                showAdminAddAvatar = true
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        Button("Done") { dismiss() }
+                    }
+                }
+            }
+            .sheet(isPresented: $showAdminAddAvatar) {
+                AdminAddAvatarSheet {
+                    Task { await avatarService.refresh() }
                 }
             }
             .alert("Purchase Failed", isPresented: $showPurchaseError) {

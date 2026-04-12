@@ -74,6 +74,51 @@ serve(async (req) => {
         return await handlePurchase(supabase, cloudKitUserID, body.item_key, body.pay_with);
       case "equip":
         return await handleEquip(supabase, cloudKitUserID, body.item_key, body.equip);
+      case "admin_create_item": {
+        // Admin-only: create a new store item
+        const { data: profile } = await supabase
+          .from("player_profiles")
+          .select("is_admin")
+          .eq("cloudkit_user_id", cloudKitUserID)
+          .maybeSingle();
+        if (!profile?.is_admin) return errorResponse(403, "admin_required");
+
+        const key = (body.key ?? "").toString();
+        const name = (body.name ?? "").toString();
+        if (!key || !name) return errorResponse(400, "key and name required");
+
+        const row: Record<string, unknown> = {
+          key,
+          name,
+          description: body.description ?? "",
+          item_type: body.item_type ?? "equipment",
+          gp_price: parseInt(body.gp_price ?? "100", 10) || 100,
+          store_section: body.store_section ?? "permanent",
+          is_enabled: body.is_enabled !== false,
+          effect_type: body.effect_type ?? null,
+          bonus_strength: parseInt(body.bonus_strength ?? "0", 10) || 0,
+          bonus_endurance: parseInt(body.bonus_endurance ?? "0", 10) || 0,
+          bonus_focus: parseInt(body.bonus_focus ?? "0", 10) || 0,
+          bonus_discipline: parseInt(body.bonus_discipline ?? "0", 10) || 0,
+          bonus_vitality: parseInt(body.bonus_vitality ?? "0", 10) || 0,
+          bonus_energy: parseInt(body.bonus_energy ?? "0", 10) || 0,
+        };
+
+        const { data: item, error: insertErr } = await supabase
+          .from("item_store")
+          .insert(row)
+          .select("*")
+          .single();
+        if (insertErr) {
+          console.error("admin_create_item error:", insertErr);
+          return errorResponse(500, insertErr.message ?? "insert_failed");
+        }
+
+        return new Response(JSON.stringify({ success: true, item }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       default:
         return errorResponse(400, `Unknown action: ${action}`);
     }

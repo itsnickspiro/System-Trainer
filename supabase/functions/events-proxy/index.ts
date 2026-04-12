@@ -53,6 +53,41 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // ── ADMIN: Create Event ──────────────────────────────────────────────
+    if (action === "admin_create_event") {
+      // Check admin status
+      const { data: profile } = await supabase
+        .from("player_profiles")
+        .select("is_admin")
+        .eq("cloudkit_user_id", cloudkitUserId)
+        .maybeSingle();
+      if (!profile?.is_admin) {
+        return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const title = (body.title ?? "").toString();
+      if (!title) return new Response(JSON.stringify({ error: "title required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      const { data: event, error: insertErr } = await supabase
+        .from("special_events")
+        .insert({
+          key: `event_${Date.now()}`,
+          title,
+          description: body.description ?? "",
+          event_type: body.event_type ?? "challenge",
+          reward_gp: parseInt(body.reward_gp ?? "0", 10) || 0,
+          reward_xp: parseInt(body.reward_xp ?? "0", 10) || 0,
+          starts_at: body.starts_at ?? new Date().toISOString(),
+          ends_at: body.ends_at ?? new Date(Date.now() + 7 * 86400000).toISOString(),
+          is_active: true,
+        })
+        .select("*")
+        .single();
+      if (insertErr) throw insertErr;
+
+      return new Response(JSON.stringify({ success: true, event }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("events-proxy error:", err);
