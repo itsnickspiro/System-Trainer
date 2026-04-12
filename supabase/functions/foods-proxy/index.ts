@@ -55,6 +55,10 @@ serve(async (req) => {
           return await handleVotePendingFood(supabase, body);
         case "get_my_pending_submissions":
           return await handleGetMyPendingSubmissions(supabase, body);
+        case "admin_insert_food":
+          return await handleAdminInsertFood(supabase, body);
+        case "admin_edit_food":
+          return await handleAdminEditFood(supabase, body);
         default:
           // Unknown action — fall through to legacy dispatch. Don't 404
           // because old clients may send other action strings the server
@@ -358,6 +362,25 @@ async function isBanned(
   }
 }
 
+// Admin check: query player_profiles.is_admin. Fails CLOSED (returns false on error).
+async function isAdmin(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+): Promise<boolean> {
+  if (!cloudkitUserId) return false;
+  try {
+    const { data, error } = await supabase
+      .from("player_profiles")
+      .select("is_admin")
+      .eq("cloudkit_user_id", cloudkitUserId)
+      .maybeSingle();
+    if (error) return false;
+    return data?.is_admin === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function foodsJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -545,4 +568,109 @@ async function handleGetMyPendingSubmissions(
     .limit(50);
   if (error) return foodsJsonResponse({ error: "query_failed" }, 500);
   return foodsJsonResponse({ submissions: data ?? [] });
+}
+
+// ── ADMIN: Direct food insert (bypasses community pipeline) ─────────────
+async function handleAdminInsertFood(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const cloudkitUserId = (body.cloudkit_user_id as string) ?? "";
+  if (!cloudkitUserId) return foodsJsonResponse({ error: "cloudkit_user_id required" }, 400);
+  if (!(await isAdmin(supabase, cloudkitUserId))) {
+    return foodsJsonResponse({ error: "admin_required" }, 403);
+  }
+
+  const name = ((body.name as string) ?? "").trim();
+  if (!name) return foodsJsonResponse({ error: "name required" }, 400);
+
+  const barcode = ((body.barcode as string) ?? "").trim() || null;
+  const brand = ((body.brand as string) ?? "").trim() || null;
+
+  // Check for barcode duplicate
+  if (barcode) {
+    const { data: existing } = await supabase
+      .from("foods")
+      .select("id")
+      .eq("barcode", barcode)
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      return foodsJsonResponse({ error: "barcode_exists", food_id: existing.id }, 400);
+    }
+  }
+
+  const row: Record<string, unknown> = {
+    name,
+    brand,
+    barcode,
+    calories_per_100g: parseFloat(String(body.calories_per_100g ?? "0")) || null,
+    serving_size_g: parseFloat(String(body.serving_size_g ?? "0")) || null,
+    carbohydrates: parseFloat(String(body.carbohydrates ?? "0")) || null,
+    protein: parseFloat(String(body.protein ?? "0")) || null,
+    fat: parseFloat(String(body.fat ?? "0")) || null,
+    fiber: parseFloat(String(body.fiber ?? "0")) || null,
+    sugar: parseFloat(String(body.sugar ?? "0")) || null,
+    sodium_mg: parseFloat(String(body.sodium_mg ?? "0")) || null,
+    category: ((body.category as string) ?? "").trim() || null,
+    data_source: "admin",
+    is_verified: true,
+  };
+
+  const { data: food, error } = await supabase
+    .from("foods")
+    .insert(row)
+    .select("*")
+    .single();
+  if (error) {
+    console.error("admin_insert_food error:", error);
+    return foodsJsonResponse({ error: "insert_failed", detail: error.message }, 500);
+  }
+
+  return foodsJsonResponse({ success: true, food });
+}
+
+// ── ADMIN: Edit an existing food entry ──────────────────────────────────
+async function handleAdminEditFood(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const cloudkitUserId = (body.cloudkit_user_id as string) ?? "";
+  if (!cloudkitUserId) return foodsJsonResponse({ error: "cloudkit_user_id required" }, 400);
+  if (!(await isAdmin(supabase, cloudkitUserId))) {
+    return foodsJsonResponse({ error: "admin_required" }, 403);
+  }
+
+  const foodId = (body.food_id as string) ?? "";
+  if (!foodId) return foodsJsonResponse({ error: "food_id required" }, 400);
+
+  // Whitelist editable fields
+  const allowed = [
+    "name", "brand", "barcode", "calories_per_100g", "serving_size_g",
+    "carbohydrates", "protein", "fat", "fiber", "sugar", "sodium_mg",
+    "category", "is_verified",
+  ];
+  const updates: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (body[key] !== undefined && body[key] !== null) {
+      updates[key] = body[key];
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return foodsJsonResponse({ error: "no_fields_to_update" }, 400);
+  }
+
+  const { data: food, error } = await supabase
+    .from("foods")
+    .update(updates)
+    .eq("id", foodId)
+    .select("*")
+    .single();
+  if (error) {
+    console.error("admin_edit_food error:", error);
+    return foodsJsonResponse({ error: "update_failed", detail: error.message }, 500);
+  }
+
+  return foodsJsonResponse({ success: true, food });
 }

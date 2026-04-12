@@ -547,6 +547,85 @@ extension FoodDatabaseService {
     static func currentDisplayName() -> String {
         DataManager.shared.currentProfile?.name ?? "Anonymous"
     }
+
+    // MARK: - Admin Actions
+
+    /// Admin-only: insert a food directly into the database, bypassing the
+    /// community vote pipeline. Requires `PlayerProfileService.shared.isAdmin`.
+    func adminInsertFood(
+        name: String,
+        brand: String? = nil,
+        barcode: String? = nil,
+        caloriesPer100g: Double? = nil,
+        servingSizeG: Double? = nil,
+        protein: Double? = nil,
+        carbohydrates: Double? = nil,
+        fat: Double? = nil,
+        fiber: Double? = nil,
+        sugar: Double? = nil,
+        sodiumMg: Double? = nil,
+        category: String? = nil
+    ) async throws -> Bool {
+        guard let userID = Self.currentCloudKitUserID() else { return false }
+
+        var body: [String: Any] = [
+            "action": "admin_insert_food",
+            "cloudkit_user_id": userID,
+            "name": name
+        ]
+        if let v = brand { body["brand"] = v }
+        if let v = barcode { body["barcode"] = v }
+        if let v = caloriesPer100g { body["calories_per_100g"] = v }
+        if let v = servingSizeG { body["serving_size_g"] = v }
+        if let v = protein { body["protein"] = v }
+        if let v = carbohydrates { body["carbohydrates"] = v }
+        if let v = fat { body["fat"] = v }
+        if let v = fiber { body["fiber"] = v }
+        if let v = sugar { body["sugar"] = v }
+        if let v = sodiumMg { body["sodium_mg"] = v }
+        if let v = category { body["category"] = v }
+
+        let data = try await postToFoodsProxy(body: body)
+        let result = try JSONDecoder().decode(AdminFoodResponse.self, from: data)
+        return result.success == true
+    }
+
+    /// Admin-only: edit an existing food entry.
+    func adminEditFood(foodID: String, updates: [String: Any]) async throws -> Bool {
+        guard let userID = Self.currentCloudKitUserID() else { return false }
+
+        var body: [String: Any] = [
+            "action": "admin_edit_food",
+            "cloudkit_user_id": userID,
+            "food_id": foodID
+        ]
+        for (key, value) in updates { body[key] = value }
+
+        let data = try await postToFoodsProxy(body: body)
+        let result = try JSONDecoder().decode(AdminFoodResponse.self, from: data)
+        return result.success == true
+    }
+
+    private func postToFoodsProxy(body: [String: Any]) async throws -> Data {
+        guard let url = URL(string: Self.foodsProxyURL) else { throw OFFFoodError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        req.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw OFFFoodError.invalidResponse
+        }
+        return data
+    }
+}
+
+private struct AdminFoodResponse: Decodable {
+    let success: Bool?
+    let error: String?
 }
 
 // MARK: - Community Wire Models

@@ -112,9 +112,13 @@ struct ItemScannerView: View {
                 PendingFoodVoteSheet(pending: pending, barcode: scannedBarcode ?? "")
             }
         }
-        // Truly unknown product — collect details and submit.
+        // Truly unknown product — admin inserts directly, regular users submit for community review.
         .sheet(isPresented: $showSubmitSheet, onDismiss: resetScanner) {
-            SubmitPendingFoodSheet(barcode: scannedBarcode ?? "")
+            if PlayerProfileService.shared.isAdmin {
+                AdminAddFoodSheet(barcode: scannedBarcode ?? "")
+            } else {
+                SubmitPendingFoodSheet(barcode: scannedBarcode ?? "")
+            }
         }
         .onAppear {
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
@@ -1311,6 +1315,179 @@ struct SubmitPendingFoodSheet: View {
             } catch {
                 await MainActor.run {
                     submitError = "Submission failed: \(error.localizedDescription)"
+                    isSubmitting = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Admin Add Food Sheet
+
+struct AdminAddFoodSheet: View {
+    let barcode: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var brand = ""
+    @State private var calories = ""
+    @State private var protein = ""
+    @State private var carbs = ""
+    @State private var fat = ""
+    @State private var servingSize = ""
+    @State private var fiber = ""
+    @State private var sugar = ""
+    @State private var category = ""
+    @State private var isSubmitting = false
+    @State private var submitError: String?
+    @State private var submitSuccess = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shield.fill")
+                            .foregroundColor(.orange)
+                        Text("ADMIN — Direct Insert")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                            .foregroundColor(.orange)
+                    }
+                    Text("This food will go live immediately for all users.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Barcode") {
+                    Text(barcode.isEmpty ? "No barcode" : barcode)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Food Details") {
+                    TextField("Name *", text: $name)
+                    TextField("Brand", text: $brand)
+                    TextField("Category (e.g. snack, dairy)", text: $category)
+                }
+
+                Section("Nutrition (per 100g)") {
+                    HStack {
+                        Text("Calories")
+                        Spacer()
+                        TextField("0", text: $calories)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    HStack {
+                        Text("Protein (g)")
+                        Spacer()
+                        TextField("0", text: $protein)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    HStack {
+                        Text("Carbs (g)")
+                        Spacer()
+                        TextField("0", text: $carbs)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    HStack {
+                        Text("Fat (g)")
+                        Spacer()
+                        TextField("0", text: $fat)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    HStack {
+                        Text("Fiber (g)")
+                        Spacer()
+                        TextField("0", text: $fiber)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    HStack {
+                        Text("Sugar (g)")
+                        Spacer()
+                        TextField("0", text: $sugar)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                }
+
+                Section("Serving Size") {
+                    HStack {
+                        Text("Serving (g)")
+                        Spacer()
+                        TextField("100", text: $servingSize)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                }
+
+                if let error = submitError {
+                    Section {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Add Food")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add to Database") { submit() }
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSubmitting)
+                        .foregroundColor(.orange)
+                }
+            }
+            .alert("Food Added", isPresented: $submitSuccess) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("\(name) is now live in the database for all users.")
+            }
+        }
+    }
+
+    private func submit() {
+        isSubmitting = true
+        submitError = nil
+        Task {
+            do {
+                let success = try await FoodDatabaseService.shared.adminInsertFood(
+                    name: name.trimmingCharacters(in: .whitespaces),
+                    brand: brand.isEmpty ? nil : brand,
+                    barcode: barcode.isEmpty ? nil : barcode,
+                    caloriesPer100g: Double(calories),
+                    servingSizeG: Double(servingSize),
+                    protein: Double(protein),
+                    carbohydrates: Double(carbs),
+                    fat: Double(fat),
+                    fiber: Double(fiber),
+                    sugar: Double(sugar),
+                    category: category.isEmpty ? nil : category
+                )
+                await MainActor.run {
+                    isSubmitting = false
+                    if success {
+                        submitSuccess = true
+                    } else {
+                        submitError = "Insert failed. Check your connection."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    submitError = error.localizedDescription
                     isSubmitting = false
                 }
             }

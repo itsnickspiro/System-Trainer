@@ -44,6 +44,9 @@ final class PlayerProfileService: ObservableObject {
     /// Total GP ever awarded (informational).
     @Published private(set) var lifetimeCreditsEarned: Int = 0
 
+    /// Whether the current player has admin privileges (server-authoritative, session-only).
+    @Published private(set) var isAdmin: Bool = false
+
     /// Set to true briefly when a progress-restore override is applied.
     @Published var showRestoreToast = false
 
@@ -328,6 +331,9 @@ final class PlayerProfileService: ObservableObject {
     // MARK: - Private Helpers
 
     private func applyRemoteProfile(_ remote: PlayerProfilePayload) {
+        // Admin status (session-only, never cached)
+        isAdmin = remote.is_admin ?? false
+
         // Player ID + credits (service-level state)
         if let pid = remote.player_id, !pid.isEmpty {
             playerId = pid
@@ -714,6 +720,7 @@ private struct PlayerProfilePayload: Decodable {
     let total_quests_completed: Int?
     let total_days_active: Int?
     let onboarding_completed: Bool?
+    let is_admin: Bool?
 
     // Admin override (optional top-level)
     var active_override: PlayerOverridePayload?
