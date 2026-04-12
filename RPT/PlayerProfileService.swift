@@ -95,6 +95,9 @@ final class PlayerProfileService: ObservableObject {
 
             if let profile {
                 applyRemoteProfile(profile)
+                // Explicit admin hydration — ensure isAdmin is set even if
+                // applyRemoteProfile has a subtle decode issue
+                if profile.is_admin == true { isAdmin = true }
                 if let override = profile.active_override {
                     applyOverride(override)
                     try? await markOverrideApplied(cloudKitUserID: cloudKitID)
@@ -332,7 +335,11 @@ final class PlayerProfileService: ObservableObject {
 
     private func applyRemoteProfile(_ remote: PlayerProfilePayload) {
         // Admin status (session-only, never cached)
-        isAdmin = remote.is_admin ?? false
+        let adminValue = remote.is_admin
+        isAdmin = adminValue ?? false
+        #if DEBUG
+        print("[PlayerProfileService] applyRemoteProfile: is_admin raw=\(String(describing: adminValue)) → isAdmin=\(isAdmin)")
+        #endif
 
         // Player ID + credits (service-level state)
         if let pid = remote.player_id, !pid.isEmpty {
@@ -474,6 +481,11 @@ final class PlayerProfileService: ObservableObject {
            err.success == false {
             return nil
         }
+        #if DEBUG
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("[PlayerProfileService] fetchProfile raw is_admin = \(json["is_admin"] ?? "nil")")
+        }
+        #endif
         return try? JSONDecoder().decode(PlayerProfilePayload.self, from: data)
     }
 
