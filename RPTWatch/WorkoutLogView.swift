@@ -1,92 +1,52 @@
 import SwiftUI
 
-/// Quick workout logger from the Watch. Pick a type and confirm.
+/// Training tab — minimal. Just a start button.
 struct WorkoutLogView: View {
     @ObservedObject private var session = WatchSessionManager.shared
-    @State private var showingConfirmation = false
-    @State private var selectedType: WorkoutCategory = .strength
+    @State private var didTap = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                Text("LOG WORKOUT")
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .tracking(2)
+        VStack(spacing: 16) {
+            Spacer()
 
-                ForEach(WorkoutCategory.allCases, id: \.self) { type in
-                    Button {
-                        selectedType = type
-                        showingConfirmation = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: type.icon)
-                                .font(.system(size: 14))
-                                .foregroundColor(type.color)
-                                .frame(width: 24)
-
-                            Text(type.displayName)
-                                .font(.system(size: 13, weight: .semibold))
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(type.color.opacity(0.12))
-                        )
-                    }
-                    .buttonStyle(.plain)
+            if didTap {
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.green)
+                    Text("Opening on iPhone")
+                        .font(.system(size: 12, weight: .semibold))
                 }
+                .transition(.opacity)
+            } else {
+                Button {
+                    session.startSession()
+                    withAnimation { didTap = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        withAnimation { didTap = false }
+                    }
+                } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(.cyan)
+                        Text("Start Session")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!session.isConnected)
+                .opacity(session.isConnected ? 1 : 0.4)
             }
-            .padding(.horizontal, 4)
-        }
-        .navigationTitle("Workout")
-        .alert("Log \(selectedType.displayName)?", isPresented: $showingConfirmation) {
-            Button("Log It") {
-                session.completeWorkout(type: selectedType.rawValue)
+
+            Spacer()
+
+            if !session.isConnected {
+                Label("iPhone not connected", systemImage: "iphone.slash")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will auto-complete matching quests on your iPhone.")
         }
-    }
-}
-
-enum WorkoutCategory: String, CaseIterable {
-    case strength
-    case cardio
-    case flexibility
-    case mixed
-
-    var displayName: String {
-        switch self {
-        case .strength: return "Strength"
-        case .cardio: return "Cardio"
-        case .flexibility: return "Flexibility"
-        case .mixed: return "Mixed"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .strength: return "dumbbell.fill"
-        case .cardio: return "heart.fill"
-        case .flexibility: return "figure.flexibility"
-        case .mixed: return "figure.mixed.cardio"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .strength: return .red
-        case .cardio: return .orange
-        case .flexibility: return .green
-        case .mixed: return .purple
-        }
+        .navigationTitle("Training")
     }
 }

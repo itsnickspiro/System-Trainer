@@ -13,6 +13,15 @@
     <key>destination</key>
     <string>upload</string>
     <key>signingStyle</key>
-    <string>automatic</string>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Apple Distribution</string>
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>SpiroTechnologies.RPT</key>
+        <string>RPT App Store</string>
+        <key>SpiroTechnologies.RPT.watchkitapp</key>
+        <string>RPTWatch Distribution</string>
+    </dict>
 </dict>
 </plist>

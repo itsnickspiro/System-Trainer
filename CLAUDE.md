@@ -9,7 +9,7 @@ System Trainer (RPT) is a gamified iOS fitness app — SwiftUI + SwiftData + Clo
 - Bundle ID: `SpiroTechnologies.RPT`
 - iCloud container: `iCloud.com.SpiroTechnologies.RPT`
 - Team ID: `WRVY4Q5HA5`
-- Current version: 2.9 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
+- Current version: 3.2.1 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
 
 ## Quick Start
 
@@ -89,7 +89,7 @@ Used for hot-fix builds when bypassing Xcode Cloud. Bump versions in `RPT.xcodep
 ```bash
 rm -rf build/RPT.xcarchive build/export
 xcodebuild -project RPT.xcodeproj -scheme RPT -configuration Release \
-  -sdk iphoneos -destination 'generic/platform=iOS' \
+  -destination 'generic/platform=iOS' \
   -archivePath build/RPT.xcarchive clean archive
 xcodebuild -exportArchive -archivePath build/RPT.xcarchive \
   -exportOptionsPlist ExportOptions.plist -exportPath build/export
@@ -137,6 +137,17 @@ All `ObservableObject`, all `@MainActor`, all `.shared`. Refreshed in a fixed se
 
 **Order matters.** Anything that needs the CloudKit user ID must run after step 2.
 
+### Watch companion app (RPTWatch)
+- Bundle ID: `SpiroTechnologies.RPT.watchkitapp` — MUST extend the iPhone bundle ID (`SpiroTechnologies.RPT`), no `com.` prefix
+- `RPTWatch/` is a `PBXFileSystemSynchronizedRootGroup` like `RPT/` — add an Info.plist exception to avoid "Multiple commands produce" errors
+- Watch target has `SDKROOT = watchos`. Archive command must NOT pass `-sdk iphoneos` or it overrides the Watch SDK and breaks compilation (e.g., `verticalPage` unavailable, `WCSessionDelegate` mismatch)
+- Correct archive command: `xcodebuild ... -destination 'generic/platform=iOS'` (no `-sdk` flag)
+- Release config uses manual signing: `CODE_SIGN_IDENTITY = "Apple Distribution"`, `PROVISIONING_PROFILE_SPECIFIER = "RPTWatch Distribution"`
+- `ExportOptions.plist` includes both bundle IDs in `provisioningProfiles` dict for manual signing
+- `RPTWatch/WatchHealthManager.swift` reads HealthKit directly on Watch; `RPTWatch/WatchSessionManager.swift` receives game state from iPhone
+- Entitlements: App Groups + HealthKit. Info.plist requires BOTH `NSHealthShareUsageDescription` AND `NSHealthUpdateUsageDescription`
+- The export step does NOT re-sign embedded Watch apps — both targets must use distribution signing at archive time
+
 ### API layer
 Swift API files NEVER call third-party APIs directly. Everything goes through Supabase Edge Function proxies. Each proxy validates the `x-app-secret` header, fetches the real third-party key from Supabase Vault, and returns the result. See `RPT/ExercisesAPI.swift`, `NutritionAPI.swift`, `RecipeAPI.swift`, `WeatherstackAPI.swift`, `FoodDatabaseService.swift`.
 
@@ -168,8 +179,8 @@ Swift API files NEVER call third-party APIs directly. Everything goes through Su
 Edge Functions in `supabase/functions/` (deployed via `supabase functions deploy <name>`):
 
 - **Proxies** (third-party API gateways): `exercises-proxy`, `nutrition-proxy`, `foods-proxy`, `recipe-proxy`, `weather-proxy`, `anime-plans-proxy`, `quest-templates-proxy`, `remote-config-proxy`, `usda-proxy`
-- **App services**: `player-proxy` (profile / SIWA / delete-account / revoke), `avatars-proxy`, `leaderboard-proxy`, `notifications-proxy`
-- **Auth (2.9.0 in progress)**: `_shared/auth.ts`, App Attest verification, JWT minting
+- **App services**: `player-proxy` (profile / SIWA / delete-account / revoke), `avatars-proxy`, `leaderboard-proxy`, `store-proxy`, `achievements-proxy`, `activity-proxy`, `announcements-proxy`, `bug-reports-proxy`, `challenge-proxy`, `coach-proxy`, `events-proxy`, `guild-proxy`
+- **Auth**: `auth-proxy`, `_shared/auth.ts`, App Attest verification, JWT minting
 
 Database scripts in `supabase/scripts/` (Python) seed exercises, foods, anime plans. See `supabase/DEPLOY.md`.
 
@@ -185,6 +196,8 @@ supabase db query --linked "SELECT key, name FROM avatars WHERE key LIKE 'avatar
 ```
 
 Project ref: `erghbsnxtsbnmfuycnyb` (System-Trainer). The CLI is already linked in `supabase/config.toml`.
+
+- **Supabase MCP** (`mcp__plugin_supabase_supabase__*`) is connected and can execute SQL directly via `execute_sql` with `project_id: "erghbsnxtsbnmfuycnyb"`. Use this when the CLI `supabase db query` fails due to missing access token.
 
 ## Conventions & gotchas
 
@@ -212,7 +225,7 @@ Adding an avatar requires BOTH:
 `AvatarPickerView` loads via `UIImage(named: avatar.key)` with no integrity check — reusing an existing key silently swaps the artwork on the existing row. Always run `SELECT key FROM avatars WHERE key IN (...)` before bundling new images.
 
 The `category` column has a CHECK constraint:
-`default | warrior | mage | rogue | tank | anime | seasonal | premium | event` — `free` is NOT a category, it's an `unlock_type`.
+`default | warrior | mage | rogue | tank | anime | seasonal | premium | event | free` — all unlocked-by-default avatars use `category = 'free'`.
 
 The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Contents.json` with `provides-namespace: false` so the imageset name is the bare lookup key (verified via `xcrun --sdk iphonesimulator assetutil --info <Assets.car>`).
 
@@ -222,7 +235,7 @@ The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Cont
 - Username changes tracked client-side via `Profile.usernameChangesUsed` (SwiftData) — 1 free, then 5,000 GP per change.
 
 ### File location quirks
-- `AvatarPickerView.swift` and `AvatarService.swift` are at the **repo root**, not under `RPT/`. They compile fine but sit outside the expected directory.
+- **12 Swift files live at the repo root**, not under `RPT/`: `AchievementManager.swift`, `ActiveWorkoutView.swift`, `ActivitySyncService.swift`, `AnimeWorkouts.swift`, `AvatarPickerView.swift`, `AvatarService.swift`, `CreditHistoryView.swift`, `ImpossibleDayDetector.swift`, `InventoryAndShopView.swift`, `ItemScannerView.swift`, `LeaderboardService.swift`, `PatrolMapView.swift`. They compile fine via the Xcode project but sit outside the `RPT/` auto-discovery group.
 
 ### Notification permission timing
 - In RPTApp.swift `.task`, capture `wasOnboardingCompleteAtLaunch` from UserDefaults BEFORE any `await`. The .task chain takes 10+ seconds; if onboarding completes mid-chain, reading `hasCompletedOnboarding` after an await would fire the notification dialog over the Home screen on first install.
@@ -242,6 +255,14 @@ The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Cont
 
 ### Profile sync gotcha
 - `PlayerProfileService.applyRemoteProfile()` overwrites local Profile fields with server values. If the server has stale/default data (e.g., `display_name: "Player"`), it will reset the local profile. Guard against overwriting with default values — check for `!= "Player"` or similar before applying remote identity fields.
+
+### StoreService CloudKit gate
+- `StoreService.refresh()` gates on `LeaderboardService.shared.currentUserID`. If CloudKit resolution fails (10s timeout), the store never loads and appears empty. The fix (3.2.1): pass `"anonymous"` as fallback so the catalog loads without a user ID.
+
+### iOS 26-only APIs (Foundation Models)
+- `AIManager.swift` and `WeeklyReviewService.swift` use `@Generable`, `@Guide`, `LanguageModelSession` — all iOS 26+ only. Every struct with `@Generable` and every method using `LanguageModelSession` must be wrapped in `@available(iOS 26.0, *)`. Use `#if canImport(FoundationModels)` for the import.
+- For `@Generable` structs used in storage/display (like `WeeklyReview`), create a plain `Codable` version for all-iOS use and a separate `@Generable` wrapper for generation only.
+- Deployment target: iOS 18.0 / watchOS 11.0. AI features degrade gracefully on pre-26 devices.
 
 ### Certificate pinning
 - `RPT/PinnedURLSession.swift` pins the intermediate CA (Google Trust Services WE1) and root CA (GTS Root R4) for the Supabase endpoint. All services use `PinnedURLSession.shared` instead of `URLSession.shared`. If API calls start failing with connection errors after a Supabase infrastructure change, re-extract pins with:

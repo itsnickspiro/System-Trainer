@@ -81,6 +81,14 @@ struct HomeView: View {
                     // and only until the user taps the dismiss button.
                     WeeklyReviewCard()
 
+                    // Weight log card
+                    if let currentProfile = profile {
+                        WeightLogCard(profile: currentProfile)
+                    }
+
+                    // Activity logger
+                    activityLogButton
+
                     questSummaryCard
 
                     Spacer(minLength: 50)
@@ -122,6 +130,35 @@ struct HomeView: View {
             // re-run on every appearance.
             CoachMarkTourManager.shared.startIfNeeded()
             await WeeklyReviewService.shared.refreshIfNeeded(context: context)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .activityLogged)) { notification in
+            guard let info = notification.userInfo,
+                  let activityName = info["activityName"] as? String,
+                  let workoutType = info["workoutType"] as? String,
+                  let durationMinutes = info["durationMinutes"] as? Int,
+                  let xpEarned = info["xpEarned"] as? Int else { return }
+
+            // Create a WorkoutSession for the activity
+            let session = WorkoutSession(routineName: activityName)
+            session.startedAt = Date().addingTimeInterval(-Double(durationMinutes * 60))
+            session.finishedAt = Date()
+            session.durationMinutes = durationMinutes
+            session.xpAwarded = xpEarned
+            context.insert(session)
+
+            // Award XP to the profile
+            if let p = profile {
+                p.xp += xpEarned
+                p.totalXPEarned += xpEarned
+            }
+            context.safeSave()
+
+            // Auto-complete matching workout quests
+            if let wt = WorkoutType(rawValue: workoutType) {
+                _ = dataManager.autoCompleteWorkoutQuests(for: wt)
+            }
+
+            PhoneSessionManager.shared.sendStats()
         }
         .onReceive(timer) { t in
             now = t
@@ -597,6 +634,46 @@ struct HomeView: View {
                             .stroke(accentColor.opacity(0.3), lineWidth: 1)
                     )
             )
+        }
+    }
+
+    // MARK: - Activity Logger Button
+
+    @State private var showActivityLogger = false
+
+    private var activityLogButton: some View {
+        Button {
+            showActivityLogger = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 20))
+                    .foregroundColor(.green)
+                    .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LOG ACTIVITY")
+                        .font(.system(size: 9, weight: .black, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .tracking(2)
+                    Text("Walk, yard work, sports...")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(.green)
+            }
+            .padding(16)
+            .background(Color(.systemGray6).opacity(0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showActivityLogger) {
+            ActivityLoggerView()
         }
     }
 

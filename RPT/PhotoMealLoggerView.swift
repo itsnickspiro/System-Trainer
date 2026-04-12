@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
-import Vision
+@preconcurrency import Vision
 import UIKit
 
 struct PhotoMealLoggerView: View {
@@ -11,7 +11,8 @@ struct PhotoMealLoggerView: View {
     @State private var selectedImage: UIImage? = nil
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var extractedText: String = ""
-    @State private var estimate: MealEstimate? = nil
+    /// Type-erased storage for `MealEstimate` (iOS 26+).
+    @State private var estimate: Any? = nil
     @State private var isProcessing = false
     @State private var errorMessage: String? = nil
     @State private var showingCamera = false
@@ -29,6 +30,12 @@ struct PhotoMealLoggerView: View {
     @State private var editServingGrams: Double = 100
 
     var selectedMeal: MealType = .snacks
+
+    // Helper to extract confidence from type-erased MealEstimate (iOS 26+)
+    private var estimateConfidence: Int? {
+        if #available(iOS 26.0, *), let est = estimate as? MealEstimate { return est.confidence }
+        return nil
+    }
 
     var body: some View {
         NavigationStack {
@@ -163,7 +170,7 @@ struct PhotoMealLoggerView: View {
             macroField("Sugar",    value: $editSugar, unit: "g")
             macroField("Sodium",   value: $editSodium, unit: "mg")
 
-            if let confidence = estimate?.confidence, confidence < 60 {
+            if let confidence = estimateConfidence, confidence < 60 {
                 Label("AI confidence is low — double-check these values before saving.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -220,6 +227,9 @@ struct PhotoMealLoggerView: View {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw AIManagerError.generationFailed("No readable text found in the image.")
             }
+            guard #available(iOS 26.0, *) else {
+                throw AIManagerError.generationFailed("Nutrition label analysis requires iOS 26 or later.")
+            }
             let parsed = try await AIManager.shared.parseNutritionLabel(text: text)
             estimate = parsed
             seedEditFields(from: parsed)
@@ -252,6 +262,7 @@ struct PhotoMealLoggerView: View {
         }
     }
 
+    @available(iOS 26.0, *)
     private func seedEditFields(from est: MealEstimate) {
         editName = est.name
         editBrand = est.brand

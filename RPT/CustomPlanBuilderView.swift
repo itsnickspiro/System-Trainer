@@ -404,6 +404,13 @@ struct GuidedPlanWizard: View {
 
         Task {
             do {
+                guard #available(iOS 26.0, *) else {
+                    await MainActor.run {
+                        isGenerating = false
+                        errorMessage = "AI plan generation requires iOS 26 or later."
+                    }
+                    return
+                }
                 let suggestion = try await AIManager.shared.generatePlan(from: answers)
                 let plan = buildPlan(from: suggestion, answers: answers)
                 await MainActor.run {
@@ -421,6 +428,7 @@ struct GuidedPlanWizard: View {
         }
     }
 
+    @available(iOS 26.0, *)
     private func buildPlan(from s: AIPlanSuggestion, answers: [String: String]) -> CustomWorkoutPlan {
         let plan = CustomWorkoutPlan(name: s.name, description: s.description)
         plan.difficultyRaw = s.difficulty

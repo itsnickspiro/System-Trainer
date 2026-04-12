@@ -554,7 +554,7 @@ final class DataManager: ObservableObject {
 
     func uncompleteQuest(_ quest: Quest) {
         // Only allow un-completing quests from today — past days are locked.
-        guard Calendar.current.isDateInToday(quest.dateTag ?? Date()) else { return }
+        guard Calendar.current.isDateInToday(quest.dateTag) else { return }
 
         quest.isCompleted = false
         quest.completedAt = nil

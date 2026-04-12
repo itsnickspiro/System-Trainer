@@ -15,9 +15,10 @@ struct AvatarPickerView: View {
     @State private var showPurchaseError = false
 
     // Category display order and labels
-    private let categoryOrder = ["default", "warrior", "mage", "rogue", "tank", "anime", "event"]
+    private let categoryOrder = ["free", "warrior", "mage", "rogue", "tank", "anime", "event"]
     private let categoryLabels: [String: String] = [
-        "default": "Free",
+        "free":    "Free Avatars",
+        "default": "Free Avatars",
         "warrior": "Warrior",
         "mage":    "Mage",
         "rogue":   "Rogue",

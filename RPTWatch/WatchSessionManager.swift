@@ -1,8 +1,10 @@
 import Foundation
+import Combine
 import WatchConnectivity
 
 /// Watch-side WatchConnectivity manager. Receives stats from iPhone
-/// and sends workout completion messages back.
+/// and sends session start messages back. Read-only for quests —
+/// quests can only be completed on the iPhone.
 final class WatchSessionManager: NSObject, ObservableObject {
 
     static let shared = WatchSessionManager()
@@ -19,6 +21,13 @@ final class WatchSessionManager: NSObject, ObservableObject {
     @Published var activeQuests: [[String: Any]] = []
     @Published var isConnected: Bool = false
 
+    // MARK: - Health stats (sent from iPhone)
+
+    @Published var steps: Int = 0
+    @Published var caloriesBurned: Int = 0
+    @Published var heartRate: Int = 0
+    @Published var sleepHours: Double = 0
+
     private override init() {
         super.init()
     }
@@ -29,20 +38,11 @@ final class WatchSessionManager: NSObject, ObservableObject {
         WCSession.default.activate()
     }
 
-    /// Send a workout completion message to the iPhone.
-    func completeWorkout(type: String) {
+    /// Tell the iPhone to open the training screen / start a session.
+    func startSession() {
         guard WCSession.default.isReachable else { return }
         WCSession.default.sendMessage(
-            ["action": "complete_workout", "workout_type": type],
-            replyHandler: nil
-        )
-    }
-
-    /// Send a quest completion message to the iPhone.
-    func completeQuest(id: String) {
-        guard WCSession.default.isReachable else { return }
-        WCSession.default.sendMessage(
-            ["action": "complete_quest", "quest_id": id],
+            ["action": "start_session"],
             replyHandler: nil
         )
     }
@@ -67,6 +67,12 @@ final class WatchSessionManager: NSObject, ObservableObject {
             if let best = stats["best_streak"] as? Int { self.bestStreak = best }
             if let count = stats["active_quest_count"] as? Int { self.activeQuestCount = count }
             if let quests = stats["active_quests"] as? [[String: Any]] { self.activeQuests = quests }
+
+            // Health stats
+            if let s = stats["steps"] as? Int { self.steps = s }
+            if let cal = stats["calories_burned"] as? Int { self.caloriesBurned = cal }
+            if let hr = stats["heart_rate"] as? Int { self.heartRate = hr }
+            if let sleep = stats["sleep_hours"] as? Double { self.sleepHours = sleep }
         }
     }
 }

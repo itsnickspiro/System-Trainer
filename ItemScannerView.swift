@@ -12,7 +12,8 @@ struct ItemScannerView: View {
     @State private var scannedBarcode: String? = nil
     @State private var scannerState: ScannerState = .scanning
     @State private var analyzedItem: FoodItem? = nil
-    @State private var aiVerdict: FoodItemFlavorText? = nil
+    /// Type-erased storage for `FoodItemFlavorText` (iOS 26+).
+    @State private var aiVerdict: Any? = nil
     @State private var showResultSheet = false
     @State private var errorMessage: String? = nil
     @State private var torchOn = false
@@ -100,7 +101,7 @@ struct ItemScannerView: View {
             if let item = analyzedItem {
                 ItemResultSheet(
                     foodItem: item,
-                    verdict: aiVerdict,
+                    verdict: aiVerdict as Any?,
                     barcode: scannedBarcode ?? ""
                 )
             }
@@ -208,8 +209,11 @@ struct ItemScannerView: View {
                 foodItem.detectedAdditives = parsed.additives.map { $0.id }
                 foodItem.detectedAllergens = parsed.allergens
 
-                // 2. Request AI analysis
-                let verdict = try? await AIManager.shared.analyzeFood(foodItem)
+                // 2. Request AI analysis (iOS 26+ only — FoundationModels)
+                var verdict: Any? = nil
+                if #available(iOS 26.0, *) {
+                    verdict = try? await AIManager.shared.analyzeFood(foodItem)
+                }
 
                 await MainActor.run {
                     analyzedItem = foodItem
@@ -217,6 +221,12 @@ struct ItemScannerView: View {
                     scannerState = .ready
                     showResultSheet = true
                 }
+            } catch is CancellationError {
+                // Task was cancelled (e.g. view lifecycle) — silently reset
+                await MainActor.run { resetScanner() }
+            } catch let urlError as URLError where urlError.code == .cancelled {
+                // Network request cancelled — silently reset
+                await MainActor.run { resetScanner() }
             } catch {
                 await MainActor.run {
                     scannerState = .error(error.localizedDescription)
@@ -496,7 +506,8 @@ struct ItemResultSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let foodItem: FoodItem
-    let verdict: FoodItemFlavorText?
+    /// Type-erased `FoodItemFlavorText?` (iOS 26+). Cast back with `#available`.
+    let verdict: Any?
     let barcode: String
 
     @State private var servingSize: Double = 100.0
@@ -505,6 +516,24 @@ struct ItemResultSheet: View {
     @State private var showVerdictSheet = false
 
     private let healthStore = HKHealthStore()
+
+    // Helpers to extract FoodItemFlavorText properties from type-erased verdict (iOS 26+)
+    private var verdictItemName: String? {
+        if #available(iOS 26.0, *), let v = verdict as? FoodItemFlavorText { return v.itemName }
+        return nil
+    }
+    private var verdictRarity: String? {
+        if #available(iOS 26.0, *), let v = verdict as? FoodItemFlavorText { return v.rarity }
+        return nil
+    }
+    private var verdictAnalysis: String? {
+        if #available(iOS 26.0, *), let v = verdict as? FoodItemFlavorText { return v.analysis }
+        return nil
+    }
+    private var verdictStatEffect: String? {
+        if #available(iOS 26.0, *), let v = verdict as? FoodItemFlavorText { return v.statEffect }
+        return nil
+    }
 
     var body: some View {
         ZStack {
@@ -526,7 +555,7 @@ struct ItemResultSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(verdict?.itemName ?? foodItem.name)
+                                Text(verdictItemName ?? foodItem.name)
                                     .font(.system(size: 22, weight: .bold, design: .default))
                                     .foregroundStyle(.white)
 
@@ -538,7 +567,7 @@ struct ItemResultSheet: View {
                                 }
                             }
                             Spacer()
-                            if let rarity = verdict?.rarity {
+                            if let rarity = verdictRarity {
                                 RarityBadge(rarity: rarity)
                             }
                         }
@@ -589,8 +618,8 @@ struct ItemResultSheet: View {
                         .padding(.top, 12)
                     }
 
-                    // AI System Verdict
-                    if let verdict = verdict {
+                    // AI System Verdict (iOS 26+ only)
+                    if let analysis = verdictAnalysis {
                         VStack(alignment: .leading, spacing: 10) {
                             Rectangle()
                                 .fill(.white.opacity(0.08))
@@ -604,18 +633,18 @@ struct ItemResultSheet: View {
                                 .tracking(3)
                                 .padding(.horizontal, 24)
 
-                            Text("\"\(verdict.analysis)\"")
+                            Text("\"\(analysis)\"")
                                 .font(.system(size: 14, weight: .regular, design: .default))
                                 .foregroundStyle(.white.opacity(0.85))
                                 .italic()
                                 .padding(.horizontal, 24)
 
-                            if !verdict.statEffect.isEmpty {
+                            if let statEffect = verdictStatEffect, !statEffect.isEmpty {
                                 HStack(spacing: 6) {
                                     Image(systemName: "bolt.fill")
                                         .font(.system(size: 10))
                                         .foregroundStyle(.cyan)
-                                    Text(verdict.statEffect)
+                                    Text(statEffect)
                                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                                         .foregroundStyle(.cyan.opacity(0.8))
                                 }

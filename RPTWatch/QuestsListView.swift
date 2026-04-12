@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shows active quests on the Watch with a complete button.
+/// Shows active quests on the Watch — read-only. Tap to see details.
 struct QuestsListView: View {
     @ObservedObject private var session = WatchSessionManager.shared
 
@@ -34,18 +34,16 @@ struct QuestsListView: View {
 
 private struct QuestRow: View {
     let quest: [String: Any]
-    @ObservedObject private var session = WatchSessionManager.shared
+    @State private var showingDetail = false
 
     private var title: String { quest["title"] as? String ?? "Quest" }
-    private var questID: String { quest["id"] as? String ?? "" }
     private var xpReward: Int { quest["xp_reward"] as? Int ?? 0 }
     private var isCompleted: Bool { quest["is_completed"] as? Bool ?? false }
+    private var questDescription: String { quest["description"] as? String ?? "" }
 
     var body: some View {
         Button {
-            if !isCompleted {
-                session.completeQuest(id: questID)
-            }
+            showingDetail = true
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
@@ -67,6 +65,10 @@ private struct QuestRow: View {
                 }
 
                 Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
             }
             .padding(8)
             .background(
@@ -75,6 +77,62 @@ private struct QuestRow: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(isCompleted)
+        .sheet(isPresented: $showingDetail) {
+            QuestDetailView(
+                title: title,
+                description: questDescription,
+                xpReward: xpReward,
+                isCompleted: isCompleted
+            )
+        }
+    }
+}
+
+private struct QuestDetailView: View {
+    let title: String
+    let description: String
+    let xpReward: Int
+    let isCompleted: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundColor(isCompleted ? .green : .cyan)
+                    Text(isCompleted ? "Completed" : "In Progress")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(isCompleted ? .green : .cyan)
+                }
+
+                Text(title)
+                    .font(.system(size: 15, weight: .bold))
+
+                if !description.isEmpty {
+                    Text(description)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+
+                Divider()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.cyan)
+                    Text("+\(xpReward) XP")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                }
+
+                Text("Complete quests on your iPhone")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 8)
+        }
+        .navigationTitle("Quest")
     }
 }

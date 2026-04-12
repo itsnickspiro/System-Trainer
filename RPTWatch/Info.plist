@@ -4,5 +4,11 @@
 <dict>
 	<key>WKApplication</key>
 	<true/>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>System Trainer reads your steps, heart rate, calories, and sleep to display your daily stats.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>System Trainer may log workout data to Apple Health when you complete training sessions.</string>
 </dict>
 </plist>

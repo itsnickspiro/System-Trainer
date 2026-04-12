@@ -2,7 +2,8 @@ import Foundation
 import WatchConnectivity
 
 /// iPhone-side WatchConnectivity manager. Sends stats to the Watch
-/// and processes workout/quest completion messages from the Watch.
+/// and handles session start requests. Quest completion is NOT
+/// supported from the Watch — quests must be completed on the iPhone.
 @MainActor
 final class PhoneSessionManager: NSObject {
 
@@ -34,12 +35,13 @@ final class PhoneSessionManager: NSObject {
                 [
                     "id": quest.id.uuidString,
                     "title": quest.title,
+                    "description": quest.details,
                     "xp_reward": quest.xpReward,
                     "is_completed": quest.isCompleted,
                 ]
             }
 
-        let stats: [String: Any] = [
+        var stats: [String: Any] = [
             "player_name": profile.name,
             "level": profile.level,
             "xp": profile.xp,
@@ -49,6 +51,12 @@ final class PhoneSessionManager: NSObject {
             "active_quest_count": quests.count,
             "active_quests": Array(quests),
         ]
+
+        // Health stats from profile
+        stats["steps"] = profile.dailySteps
+        stats["calories_burned"] = profile.dailyActiveCalories
+        stats["heart_rate"] = profile.restingHeartRate
+        stats["sleep_hours"] = profile.sleepHours
 
         try? WCSession.default.updateApplicationContext(stats)
     }
@@ -81,14 +89,8 @@ extension PhoneSessionManager: WCSessionDelegate {
 
         Task { @MainActor in
             switch action {
-            case "complete_workout":
-                if let type = message["workout_type"] as? String {
-                    handleWorkoutCompletion(type: type)
-                }
-            case "complete_quest":
-                if let questID = message["quest_id"] as? String {
-                    handleQuestCompletion(questID: questID)
-                }
+            case "start_session":
+                handleStartSession()
             case "request_refresh":
                 sendStats()
             default:
@@ -100,23 +102,13 @@ extension PhoneSessionManager: WCSessionDelegate {
     // MARK: - Handlers
 
     @MainActor
-    private func handleWorkoutCompletion(type: String) {
-        // Auto-complete matching workout quests via DataManager
-        if let workoutType = WorkoutType(rawValue: type) {
-            DataManager.shared.autoCompleteWorkoutQuests(for: workoutType)
-        }
-        // Refresh stats back to Watch
+    private func handleStartSession() {
+        // Post a notification that the training tab can listen for
+        NotificationCenter.default.post(name: .watchRequestedSession, object: nil)
         sendStats()
     }
+}
 
-    @MainActor
-    private func handleQuestCompletion(questID: String) {
-        guard let uuid = UUID(uuidString: questID) else { return }
-        // Find the quest and complete it
-        if let quest = DataManager.shared.todaysQuests.first(where: { $0.id == uuid }) {
-            DataManager.shared.completeQuest(quest)
-        }
-        // Refresh stats back to Watch
-        sendStats()
-    }
+extension Notification.Name {
+    static let watchRequestedSession = Notification.Name("watchRequestedSession")
 }

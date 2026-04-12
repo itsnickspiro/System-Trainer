@@ -46,7 +46,7 @@ final class AchievementsService: ObservableObject {
         // Start empty; load disk cache off-main to keep init() fast on cold launch.
         achievements = []
         Task.detached(priority: .utility) { [weak self] in
-            let url = Self.cacheURL
+            let url = await Self.cacheURL
             guard let data = try? Data(contentsOf: url),
                   let decoded = try? JSONDecoder().decode([AchievementTemplate].self, from: data),
                   !decoded.isEmpty else { return }

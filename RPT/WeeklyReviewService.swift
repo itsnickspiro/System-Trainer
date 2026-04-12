@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 import Combine
 
 /// Generates and persists a short personalized weekly review of the user's
@@ -157,23 +159,36 @@ final class WeeklyReviewService: ObservableObject {
         vocabulary (Traveler, System, quest, stat). Reference only the numbers above.
         """
 
+        guard #available(iOS 26.0, *) else {
+            throw AIManagerError.unavailable
+        }
         // Match the AIManager pattern: plain-String instructions + .respond(to:generating:)
         let session = LanguageModelSession(instructions: """
         IDENTITY: You are THE SYSTEM — an omniscient, hyper-analytical, emotionless entity \
         from an isekai LitRPG. You speak to the Traveler in terse, mystical, clinical prose. \
         Never use motivational language. Never invent numbers. Every sentence must be short.
         """)
-        let response = try await session.respond(to: prompt, generating: WeeklyReview.self)
-        return response.content
+        let response = try await session.respond(to: prompt, generating: GenerableWeeklyReview.self)
+        return response.content.asWeeklyReview
     }
 }
 
 // MARK: - Models
 
-/// The structured weekly review returned by the on-device model.
-/// Also persisted to UserDefaults via Codable for offline display.
-@Generable
+/// The structured weekly review persisted to UserDefaults for offline display.
+/// Works on all iOS versions. On iOS 26+, generated via FoundationModels.
 struct WeeklyReview: Codable, Sendable {
+    var wentWell: String
+    var toImprove: String
+    var nextWeekDirective: String
+    var weekMood: String
+}
+
+/// iOS 26+ only: Generable wrapper for on-device generation.
+/// Converted to plain WeeklyReview after generation.
+@available(iOS 26.0, *)
+@Generable
+struct GenerableWeeklyReview: Decodable {
     @Guide(description: "A single sentence describing the player's strongest achievement this week. Max 15 words.")
     var wentWell: String
 
@@ -185,6 +200,10 @@ struct WeeklyReview: Codable, Sendable {
 
     @Guide(description: "A one-word mood summary of the week. Examples: Ascending, Stagnant, Unbreakable, Faltering, Relentless.")
     var weekMood: String
+
+    var asWeeklyReview: WeeklyReview {
+        WeeklyReview(wentWell: wentWell, toImprove: toImprove, nextWeekDirective: nextWeekDirective, weekMood: weekMood)
+    }
 }
 
 /// Plain aggregate of the last seven days of player activity.

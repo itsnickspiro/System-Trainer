@@ -40,8 +40,8 @@ final class QuestTemplateService: ObservableObject {
         templates = []
         arcs = []
         Task.detached(priority: .utility) { [weak self] in
-            let templatesURL = Self.templatesCacheURL
-            let arcsURL = Self.arcsCacheURL
+            let templatesURL = await Self.templatesCacheURL
+            let arcsURL = await Self.arcsCacheURL
             let decodedTemplates: [QuestTemplate] = {
                 guard let data = try? Data(contentsOf: templatesURL) else { return [] }
                 return (try? JSONDecoder().decode([QuestTemplate].self, from: data)) ?? []

@@ -1,79 +1,112 @@
 import SwiftUI
 
-/// Main Watch face — glanceable stats display.
+/// Main Watch face — clean, glanceable overview.
+/// Health data comes from WatchHealthManager (on-device HealthKit) first,
+/// falling back to WatchSessionManager (iPhone relay) if the local value is zero.
 struct StatsView: View {
     @ObservedObject private var session = WatchSessionManager.shared
+    @ObservedObject private var health = WatchHealthManager.shared
+
+    /// Use local HealthKit value if available, otherwise fall back to iPhone relay.
+    private var displaySteps: Int { health.steps > 0 ? health.steps : session.steps }
+    private var displayCalories: Int { health.caloriesBurned > 0 ? health.caloriesBurned : session.caloriesBurned }
+    private var displayHeartRate: Int { health.heartRate > 0 ? health.heartRate : session.heartRate }
+    private var displaySleepHours: Double { health.sleepHours > 0 ? health.sleepHours : session.sleepHours }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
-                // Player name + level
-                VStack(spacing: 4) {
-                    Text(session.playerName)
-                        .font(.system(size: 16, weight: .bold))
-                        .lineLimit(1)
-
-                    Text("LEVEL \(session.level)")
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
-                        .foregroundColor(.orange)
-                }
-
-                // XP progress ring
+            VStack(spacing: 14) {
+                // XP ring with level inside
                 ZStack {
                     Circle()
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 6)
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 6)
                     Circle()
                         .trim(from: 0, to: xpProgress)
                         .stroke(Color.cyan, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .rotationEffect(.degrees(-90))
+                        .animation(.easeInOut(duration: 0.6), value: xpProgress)
 
-                    VStack(spacing: 1) {
-                        Text("\(session.xp)")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundColor(.cyan)
-                        Text("XP")
-                            .font(.system(size: 9, weight: .medium))
+                    VStack(spacing: 0) {
+                        Text("\(session.level)")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                        Text("LEVEL")
+                            .font(.system(size: 7, weight: .heavy, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
                 }
-                .frame(width: 80, height: 80)
+                .frame(width: 76, height: 76)
 
-                // Streak + Quests
-                HStack(spacing: 16) {
-                    statPill(icon: "flame.fill", value: "\(session.currentStreak)", color: .orange)
-                    statPill(icon: "scroll.fill", value: "\(session.activeQuestCount)", color: .green)
+                // Name + XP text
+                VStack(spacing: 2) {
+                    Text(session.playerName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                    Text("\(session.xp) / \(session.xpToNextLevel) XP")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.cyan)
+                }
+
+                // Streak pill
+                if session.currentStreak > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                        Text("\(session.currentStreak) day streak")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.orange.opacity(0.12), in: Capsule())
+                }
+
+                // Health stats — 2x2 grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    healthTile(icon: "figure.walk", value: formatSteps(displaySteps), label: "Steps", color: .green)
+                    healthTile(icon: "flame.fill", value: "\(displayCalories)", label: "Cal", color: .red)
+                    healthTile(icon: "heart.fill", value: displayHeartRate > 0 ? "\(displayHeartRate)" : "—", label: "BPM", color: .pink)
+                    healthTile(icon: "moon.fill", value: displaySleepHours > 0 ? String(format: "%.1f", displaySleepHours) : "—", label: "Sleep", color: .purple)
                 }
 
                 if !session.isConnected {
-                    HStack(spacing: 4) {
-                        Image(systemName: "iphone.slash")
-                            .font(.system(size: 10))
-                        Text("iPhone not connected")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundColor(.secondary)
+                    Label("iPhone not connected", systemImage: "iphone.slash")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 4)
         }
-        .navigationTitle("System Trainer")
+        .onAppear {
+            WatchHealthManager.shared.refreshHealthData()
+        }
+        .navigationTitle("System")
     }
 
     private var xpProgress: CGFloat {
         guard session.xpToNextLevel > 0 else { return 0 }
-        return CGFloat(session.xp) / CGFloat(session.xpToNextLevel)
+        return min(CGFloat(session.xp) / CGFloat(session.xpToNextLevel), 1.0)
     }
 
-    private func statPill(icon: String, value: String, color: Color) -> some View {
-        HStack(spacing: 4) {
+    private func healthTile(icon: String, value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
             Image(systemName: icon)
-                .font(.system(size: 12))
+                .font(.system(size: 11))
                 .foregroundColor(color)
             Text(value)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 8))
+                .foregroundColor(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(color.opacity(0.15), in: Capsule())
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(Color.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func formatSteps(_ n: Int) -> String {
+        if n >= 10_000 { return String(format: "%.1fk", Double(n) / 1000.0) }
+        return "\(n)"
     }
 }

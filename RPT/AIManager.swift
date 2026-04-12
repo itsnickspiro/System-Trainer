@@ -1,6 +1,8 @@
 import Foundation
 import Combine
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 
 // MARK: - Structured Output Types
 //
@@ -8,6 +10,7 @@ import FoundationModels
 // Decodable is added so call sites can work with the types generically if needed.
 
 /// An RPG-flavored quest generated from a wger exercise.
+@available(iOS 26.0, *)
 @Generable
 struct QuestFlavorText: Decodable {
     /// Short quest title in Solo Leveling style. Max 8 words.
@@ -28,69 +31,54 @@ struct QuestFlavorText: Decodable {
 }
 
 /// A fully structured custom workout plan generated from a user questionnaire.
+@available(iOS 26.0, *)
 @Generable
 struct AIPlanSuggestion: Decodable {
-    /// Plan name. Short, evocative. E.g. "Iron Discipline Protocol" or "Lean Warrior Program".
     @Guide(description: "Short, memorable workout plan name. 3-5 words, RPG-style.")
     var name: String
 
-    /// One-sentence description of the plan's philosophy.
     @Guide(description: "One sentence describing the plan's core philosophy and target outcome.")
     var description: String
 
-    /// Difficulty: Beginner, Intermediate, Advanced, or Elite.
     @Guide(description: "Difficulty tier: exactly one of Beginner, Intermediate, Advanced, Elite")
     var difficulty: String
 
-    /// Daily calorie target as an integer.
     @Guide(description: "Daily calorie target as an integer between 1400 and 5000")
     var dailyCalories: Int
 
-    /// Daily protein target in grams.
     @Guide(description: "Daily protein target in grams as an integer")
     var proteinGrams: Int
 
-    /// Daily carbohydrate target in grams.
     @Guide(description: "Daily carbohydrate target in grams as an integer")
     var carbGrams: Int
 
-    /// Daily fat target in grams.
     @Guide(description: "Daily fat target in grams as an integer")
     var fatGrams: Int
 
-    /// Daily water glasses (8 oz each).
     @Guide(description: "Daily water intake in 8oz glasses, integer between 6 and 16")
     var waterGlasses: Int
 
-    /// Monday focus. E.g. "Push — Chest & Shoulders" or "Rest".
     @Guide(description: "Monday training focus. Can be Rest or a specific muscle group/style.")
     var mondayFocus: String
 
-    /// Tuesday focus.
     @Guide(description: "Tuesday training focus.")
     var tuesdayFocus: String
 
-    /// Wednesday focus.
     @Guide(description: "Wednesday training focus.")
     var wednesdayFocus: String
 
-    /// Thursday focus.
     @Guide(description: "Thursday training focus.")
     var thursdayFocus: String
 
-    /// Friday focus.
     @Guide(description: "Friday training focus.")
     var fridayFocus: String
 
-    /// Saturday focus.
     @Guide(description: "Saturday training focus.")
     var saturdayFocus: String
 
-    /// Sunday focus.
     @Guide(description: "Sunday training focus. Often Rest or Active Recovery.")
     var sundayFocus: String
 
-    /// 3 meal prep tips suited to the plan's goals.
     @Guide(description: "Exactly 3 practical meal prep tips suited to the plan's nutrition targets.")
     var mealPrepTip1: String
 
@@ -100,41 +88,69 @@ struct AIPlanSuggestion: Decodable {
     @Guide(description: "Third meal prep tip.")
     var mealPrepTip3: String
 
-    /// Foods to avoid on this plan (comma-separated, 3-5 items).
     @Guide(description: "3 to 5 foods to avoid on this plan, comma-separated.")
     var avoidFoods: String
 }
 
 /// An RPG-flavored item analysis generated from an Open Food Facts product.
+@available(iOS 26.0, *)
 @Generable
 struct FoodItemFlavorText: Decodable {
-    /// Item name framed as an in-game consumable.
     @Guide(description: "Item name in RPG terminology. Keep the real food name but frame it as an in-game consumable.")
     var itemName: String
 
-    /// 2-sentence analysis referencing actual macros only — no invented facts.
     @Guide(description: "Cold, analytical nutritional assessment referencing the actual calorie, protein, carb, and fat values provided. No invented facts.")
     var analysis: String
 
-    /// One-line stat effect based solely on provided nutrition data.
     @Guide(description: "One-line stat effect summary based solely on the provided nutrition data")
     var statEffect: String
 
-    /// Rarity tier: Common (junk food) → Legendary (nutrient-dense whole foods).
     @Guide(description: "Rarity tier: Common for junk food, Legendary for extremely nutrient-dense whole foods")
     var rarity: String
+}
+
+/// Structured nutrition estimate parsed from a photographed nutrition label.
+@available(iOS 26.0, *)
+@Generable
+struct MealEstimate: Codable, Sendable {
+    @Guide(description: "Best-guess name of the food. Examples: 'Whey Protein Chocolate', 'Greek Yogurt Plain', 'Granola Bar'. 2-6 words, title-case.")
+    let name: String
+
+    @Guide(description: "Brand name if identifiable from the label, otherwise empty string.")
+    let brand: String
+
+    @Guide(description: "Calories per serving in kcal. Integer. Return 0 if genuinely unknown, never fabricate.")
+    let calories: Int
+
+    @Guide(description: "Protein per serving in grams. Return 0 if unknown.")
+    let protein: Double
+
+    @Guide(description: "Carbohydrates per serving in grams. Return 0 if unknown.")
+    let carbohydrates: Double
+
+    @Guide(description: "Total fat per serving in grams. Return 0 if unknown.")
+    let fat: Double
+
+    @Guide(description: "Fiber per serving in grams. Return 0 if unknown.")
+    let fiber: Double
+
+    @Guide(description: "Sugar per serving in grams. Return 0 if unknown.")
+    let sugar: Double
+
+    @Guide(description: "Sodium per serving in milligrams. Return 0 if unknown.")
+    let sodium: Double
+
+    @Guide(description: "Serving size in grams. Return 100 if unknown.")
+    let servingGrams: Double
+
+    @Guide(description: "Confidence 0-100 in the extracted values. Under 50 means the label was unclear and the user should review carefully.")
+    let confidence: Int
 }
 
 // MARK: - AIManager
 
 /// On-device AI presentation layer using Apple's FoundationModels framework.
-///
-/// This manager is a *text formatter*, not a knowledge source.
-/// Callers MUST inject factual data (from wger, Open Food Facts, HealthKit).
-/// The model must never invent nutritional or exercise facts.
-///
-/// Requires Apple Intelligence to be enabled on the device.
-/// Use `isAvailable` to gate UI before calling any generation methods.
+/// Requires iOS 26+ and Apple Intelligence to be enabled on the device.
 @MainActor
 final class AIManager: ObservableObject {
 
@@ -145,23 +161,14 @@ final class AIManager: ObservableObject {
 
     /// Whether on-device Apple Intelligence is ready on this device.
     var isAvailable: Bool {
-        SystemLanguageModel.default.availability == .available
+        guard #available(iOS 26.0, *) else { return false }
+        return _isAvailableIOS26()
     }
 
     /// User-facing description of AI availability, for Settings UI.
     var availabilityStatus: String {
-        switch SystemLanguageModel.default.availability {
-        case .available:
-            return "On-device (Apple Intelligence)"
-        case .unavailable(.deviceNotEligible):
-            return "Unavailable — device not eligible for Apple Intelligence"
-        case .unavailable(.appleIntelligenceNotEnabled):
-            return "Unavailable — enable Apple Intelligence in iOS Settings"
-        case .unavailable(.modelNotReady):
-            return "Downloading on-device model…"
-        case .unavailable:
-            return "Unavailable"
-        }
+        guard #available(iOS 26.0, *) else { return "Requires iOS 26 or later" }
+        return _availabilityStatusIOS26()
     }
 
     /// The System persona injected into every session.
@@ -207,6 +214,7 @@ final class AIManager: ObservableObject {
     // MARK: - Public API
 
     /// Generate RPG-flavored quest text for a wger exercise.
+    @available(iOS 26.0, *)
     func formatQuest(for exercise: ExerciseItem) async throws -> QuestFlavorText {
         let prompt = """
         FACTUAL DATA (use ONLY this — invent nothing):
@@ -218,6 +226,7 @@ final class AIManager: ObservableObject {
     }
 
     /// Generate RPG-flavored item analysis for a food product.
+    @available(iOS 26.0, *)
     func analyzeFood(_ food: FoodItem) async throws -> FoodItemFlavorText {
         let prompt = """
         FACTUAL DATA (use ONLY this — invent nothing):
@@ -230,10 +239,7 @@ final class AIManager: ObservableObject {
     }
 
     /// Generate a custom workout plan from a questionnaire answer set.
-    ///
-    /// - Parameter answers: Dictionary of question keys to user answers.
-    ///   Expected keys: goal, experience, daysPerWeek, sessionLength, equipment, limitations, bodyWeight, targetWeight
-    /// - Returns: An `AIPlanSuggestion` ready to be converted into a `CustomWorkoutPlan`.
+    @available(iOS 26.0, *)
     func generatePlan(from answers: [String: String]) async throws -> AIPlanSuggestion {
         let answerBlock = answers.map { "\($0.key): \($0.value)" }.sorted().joined(separator: "\n")
         let prompt = """
@@ -250,6 +256,7 @@ final class AIManager: ObservableObject {
 
     /// Free-form chat with the System persona, for CoachView.
     func chat(message: String, context: String? = nil) async throws -> String {
+        guard #available(iOS 26.0, *) else { throw AIManagerError.unavailable }
         var prompt = message
         if let ctx = context, !ctx.isEmpty {
             prompt = """
@@ -262,8 +269,36 @@ final class AIManager: ObservableObject {
         return try await generateText(prompt: prompt)
     }
 
-    // MARK: - Core Generation
+    /// Parse raw text extracted from a nutrition label into a structured MealEstimate.
+    @available(iOS 26.0, *)
+    func parseNutritionLabel(text: String) async throws -> MealEstimate {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AIManagerError.generationFailed("Nothing to analyze — point the camera at a nutrition label.")
+        }
+        guard isAvailable else { throw AIManagerError.unavailable }
 
+        let prompt = """
+        Extract the nutrition facts from this raw OCR text scanned from a food label.
+        The text may be noisy, reordered, or missing values. Fill in what you can
+        confidently read; return 0 for any field you cannot determine with certainty.
+
+        --- RAW OCR TEXT ---
+        \(text)
+        --- END ---
+
+        Output a structured MealEstimate with the food's name (best guess from any
+        product title visible), brand (if shown), and per-serving macros + micros
+        as they appear on the label. Do not fabricate values.
+        """
+
+        let session = LanguageModelSession(instructions: "You are a precise nutrition label parser. Extract exactly what the label says. Never invent values.")
+        let response = try await session.respond(to: prompt, generating: MealEstimate.self)
+        return response.content
+    }
+
+    // MARK: - Core Generation (iOS 26+ only)
+
+    @available(iOS 26.0, *)
     private func generate<T: Generable>(_ type: T.Type, prompt: String) async throws -> T {
         guard isAvailable else { throw AIManagerError.unavailable }
         isGenerating = true
@@ -274,6 +309,7 @@ final class AIManager: ObservableObject {
         return response.content
     }
 
+    @available(iOS 26.0, *)
     private func generateText(prompt: String) async throws -> String {
         guard isAvailable else { throw AIManagerError.unavailable }
         isGenerating = true
@@ -282,6 +318,29 @@ final class AIManager: ObservableObject {
         let session = LanguageModelSession(instructions: Self.systemPersona)
         let response = try await session.respond(to: prompt)
         return response.content
+    }
+
+    // MARK: - iOS 26 availability helpers
+
+    @available(iOS 26.0, *)
+    private func _isAvailableIOS26() -> Bool {
+        SystemLanguageModel.default.availability == .available
+    }
+
+    @available(iOS 26.0, *)
+    private func _availabilityStatusIOS26() -> String {
+        switch SystemLanguageModel.default.availability {
+        case .available:
+            return "On-device (Apple Intelligence)"
+        case .unavailable(.deviceNotEligible):
+            return "Unavailable — device not eligible for Apple Intelligence"
+        case .unavailable(.appleIntelligenceNotEnabled):
+            return "Unavailable — enable Apple Intelligence in iOS Settings"
+        case .unavailable(.modelNotReady):
+            return "Downloading on-device model…"
+        case .unavailable:
+            return "Unavailable"
+        }
     }
 
     // MARK: - Fact Serialisation
@@ -316,76 +375,6 @@ final class AIManager: ObservableObject {
         ]
         if let brand = food.brand { dict["brand"] = brand }
         return (try? String(data: JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted), encoding: .utf8)) ?? "{}"
-    }
-}
-
-// MARK: - Nutrition Label Parsing
-
-/// Structured nutrition estimate parsed from a photographed nutrition label
-/// or a user-typed description. Every numeric field is per single serving
-/// (not per 100g) because that's how physical labels are printed.
-@Generable
-struct MealEstimate: Codable, Sendable {
-    @Guide(description: "Best-guess name of the food. Examples: 'Whey Protein Chocolate', 'Greek Yogurt Plain', 'Granola Bar'. 2-6 words, title-case.")
-    let name: String
-
-    @Guide(description: "Brand name if identifiable from the label, otherwise empty string.")
-    let brand: String
-
-    @Guide(description: "Calories per serving in kcal. Integer. Return 0 if genuinely unknown, never fabricate.")
-    let calories: Int
-
-    @Guide(description: "Protein per serving in grams. Return 0 if unknown.")
-    let protein: Double
-
-    @Guide(description: "Carbohydrates per serving in grams. Return 0 if unknown.")
-    let carbohydrates: Double
-
-    @Guide(description: "Total fat per serving in grams. Return 0 if unknown.")
-    let fat: Double
-
-    @Guide(description: "Fiber per serving in grams. Return 0 if unknown.")
-    let fiber: Double
-
-    @Guide(description: "Sugar per serving in grams. Return 0 if unknown.")
-    let sugar: Double
-
-    @Guide(description: "Sodium per serving in milligrams. Return 0 if unknown.")
-    let sodium: Double
-
-    @Guide(description: "Serving size in grams. Return 100 if unknown.")
-    let servingGrams: Double
-
-    @Guide(description: "Confidence 0-100 in the extracted values. Under 50 means the label was unclear and the user should review carefully.")
-    let confidence: Int
-}
-
-extension AIManager {
-    /// Parse raw text extracted from a nutrition label (via Vision) into a
-    /// structured MealEstimate using the on-device Foundation Models.
-    func parseNutritionLabel(text: String) async throws -> MealEstimate {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AIManagerError.generationFailed("Nothing to analyze — point the camera at a nutrition label.")
-        }
-        guard isAvailable else { throw AIManagerError.unavailable }
-
-        let prompt = """
-        Extract the nutrition facts from this raw OCR text scanned from a food label.
-        The text may be noisy, reordered, or missing values. Fill in what you can
-        confidently read; return 0 for any field you cannot determine with certainty.
-
-        --- RAW OCR TEXT ---
-        \(text)
-        --- END ---
-
-        Output a structured MealEstimate with the food's name (best guess from any
-        product title visible), brand (if shown), and per-serving macros + micros
-        as they appear on the label. Do not fabricate values.
-        """
-
-        let session = LanguageModelSession(instructions: "You are a precise nutrition label parser. Extract exactly what the label says. Never invent values.")
-        let response = try await session.respond(to: prompt, generating: MealEstimate.self)
-        return response.content
     }
 }
 

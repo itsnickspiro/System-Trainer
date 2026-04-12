@@ -1068,6 +1068,10 @@ struct AddFoodView: View {
                         barcodeError = "Product not found. Try creating it manually."
                     }
                 }
+            } catch is CancellationError {
+                await MainActor.run { isLoadingBarcode = false }
+            } catch let urlError as URLError where urlError.code == .cancelled {
+                await MainActor.run { isLoadingBarcode = false }
             } catch {
                 await MainActor.run {
                     isLoadingBarcode = false
