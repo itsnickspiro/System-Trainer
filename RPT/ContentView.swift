@@ -12,6 +12,7 @@ struct ContentView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var remoteConfig = RemoteConfigService.shared
     @ObservedObject private var notificationInbox = NotificationInboxManager.shared
+    @ObservedObject private var profileService = PlayerProfileService.shared
     @State private var now = Date()
     @State private var showingSettings = false
     @State private var showingAdminHub = false
@@ -168,7 +169,7 @@ struct ContentView: View {
                 }
 
                 // Admin panel — visible only for admin users
-                if PlayerProfileService.shared.isAdmin {
+                if profileService.isAdmin {
                     Button(action: { showingAdminHub = true }) {
                         Image(systemName: "shield.fill")
                             .font(.system(size: 16, weight: .semibold))

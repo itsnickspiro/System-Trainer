@@ -9,7 +9,7 @@ System Trainer (RPT) is a gamified iOS fitness app — SwiftUI + SwiftData + Clo
 - Bundle ID: `SpiroTechnologies.RPT`
 - iCloud container: `iCloud.com.SpiroTechnologies.RPT`
 - Team ID: `WRVY4Q5HA5`
-- Current version: 3.2.1 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
+- Current version: 3.2.9 (build 1) — see `RPT.xcodeproj/project.pbxproj` for the source of truth
 
 ## Quick Start
 
@@ -217,12 +217,8 @@ Project ref: `erghbsnxtsbnmfuycnyb` (System-Trainer). The CLI is already linked 
 - Singleton pattern with a `shared` static property. All services are `@MainActor`.
 - Services use `do/catch` around their network calls and set `lastError` / `lastErrorMessage` published properties. **Catch blocks should populate user-visible state**, not just `print()` — TestFlight users can't read console logs. The HealthManager catch was print-only for months and silently masked a real bug.
 
-### Avatars are two-part
-Adding an avatar requires BOTH:
-1. Bundling the PNG in `RPT/Assets.xcassets/Avatars/{Male,Female}/<key>.imageset/` with a `Contents.json` that names it
-2. Inserting a row in the Supabase `avatars` table with the matching `key`
-
-`AvatarPickerView` loads via `UIImage(named: avatar.key)` with no integrity check — reusing an existing key silently swaps the artwork on the existing row. Always run `SELECT key FROM avatars WHERE key IN (...)` before bundling new images.
+### Avatars
+As of 3.2.7, avatars load from Supabase Storage URLs (see "Remote avatar images" below). Legacy bundled PNGs in `RPT/Assets.xcassets/Avatars/` still work as fallback. New avatars should be added via `avatar-upload-proxy` (upload PNG + insert DB row), NOT by bundling images in the asset catalog.
 
 The `category` column has a CHECK constraint:
 `default | warrior | mage | rogue | tank | anime | seasonal | premium | event | free` — all unlocked-by-default avatars use `category = 'free'`.
@@ -265,7 +261,8 @@ The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Cont
 - Deployment target: iOS 18.0 / watchOS 11.0. AI features degrade gracefully on pre-26 devices.
 
 ### Certificate pinning
-- `RPT/PinnedURLSession.swift` pins the intermediate CA (Google Trust Services WE1) and root CA (GTS Root R4) for the Supabase endpoint. All services use `PinnedURLSession.shared` instead of `URLSession.shared`. If API calls start failing with connection errors after a Supabase infrastructure change, re-extract pins with:
+- `RPT/PinnedURLSession.swift` pins the intermediate CA (Google Trust Services WE1) and root CA (GTS Root R4) for the Supabase endpoint. However, `StoreService` and newer services use `URLSession.shared` instead — the pinned session caused "cancelled" errors on some networks due to cert chain differences at different CDN edges. Prefer `URLSession.shared` for new services unless there's a specific reason to pin.
+- If re-enabling pinning, re-extract pins with:
   ```bash
   openssl s_client -connect erghbsnxtsbnmfuycnyb.supabase.co:443 -servername erghbsnxtsbnmfuycnyb.supabase.co -showcerts < /dev/null 2>/dev/null | awk 'BEGIN{n=0} /BEGIN CERT/{n++} n==2' | openssl x509 -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64
   ```
@@ -274,6 +271,28 @@ The `Avatars/`, `Avatars/Male/`, and `Avatars/Female/` folders each have a `Cont
 - Dark mode is the default (`@AppStorage("colorScheme")` defaults to `"dark"`).
 - `@AppStorage` for user preferences (notifications, gameplay toggles, color scheme).
 - The onboarding flow uses `Color.black` backgrounds with cyan accent everywhere — match this when adding new onboarding steps.
+
+### RPTWatch asset catalog error (pre-existing)
+- `xcodebuild -scheme RPT` fails on `RPTWatch/Assets.xcassets: AppIcon did not have any applicable content`. This is a pre-existing Watch target issue, NOT a Swift compilation error. To check Swift compiles cleanly, grep build output: `grep "error:" | grep -v "AppIcon" | grep -v "assetcatalog"`. Empty output = clean Swift compilation.
+
+### Admin privileges
+- `player_profiles.is_admin boolean DEFAULT false` — set via Supabase dashboard only, NOT in `UPSERT_ALLOWED_COLUMNS`
+- `PlayerProfileService.shared.isAdmin` — session-only published property, never cached in UserDefaults or SwiftData. Revoking admin in Supabase takes effect on next app launch.
+- Admin UI (AdminHubView, admin food/avatar/store/event/moderation sheets in `RPT/AdminViews.swift`) is gated on `isAdmin` and invisible to regular users. Orange shield icon in ContentView header.
+- Server-side admin actions use `isAdmin(supabase, cloudkitUserId)` DB lookup — same pattern as `isBanned()` but fails CLOSED (returns false on error)
+- Nick's cloudkit_user_id: `0C8A84EA-11F8-43BC-A6DB-5FA366F9F6C5`
+
+### Remote avatar images
+- Avatar PNGs are stored in Supabase Storage bucket `avatars` (public). `AvatarImageView` loads from `image_url` first (async download + disk cache in `cachesDirectory/avatar_images/`), falls back to bundle, then placeholder.
+- New avatars: upload PNG to storage + insert row in `avatars` table with `image_url`. No app update needed. `avatar-upload-proxy` edge function handles upload + DB row creation in one call via `add_avatar` action.
+
+### Edge function deployment
+- Use the Supabase MCP `deploy_edge_function` tool with `verify_jwt: false` (all proxies use custom `x-app-secret` header auth, not JWT).
+- The `_shared/` import pattern doesn't work well with MCP deploys (which take individual files). Helpers like `isBanned()` and `isAdmin()` are inlined in each proxy.
+
+### SwiftUI release-mode gotchas
+- Use `Spacer(minLength:)` not `Spacer(minHeight:)` — `minHeight` doesn't exist and only fails in Release builds.
+- Nested ternaries inside `.background()` or `.fill()` modifiers can cause "unable to type-check this expression in reasonable time" in Release but not Debug. Break complex ternary backgrounds into a separate `@ViewBuilder` function.
 
 ## Removed in 2.8.11 — do not revive without context
 
