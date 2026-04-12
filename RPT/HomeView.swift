@@ -81,13 +81,10 @@ struct HomeView: View {
                     // and only until the user taps the dismiss button.
                     WeeklyReviewCard()
 
-                    // Weight log card
-                    if let currentProfile = profile {
-                        WeightLogCard(profile: currentProfile)
-                    }
-
-                    // Activity logger
-                    activityLogButton
+                    // Session 2 UX move: WeightLogCard moved to WorkoutView
+                    // (Training tab) — it's more contextually relevant there.
+                    // activityLogButton moved to CoachView quick actions — it
+                    // lives inside The System sheet now.
 
                     questSummaryCard
 
@@ -637,45 +634,9 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Activity Logger Button
-
-    @State private var showActivityLogger = false
-
-    private var activityLogButton: some View {
-        Button {
-            showActivityLogger = true
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "figure.walk")
-                    .font(.system(size: 20))
-                    .foregroundColor(.green)
-                    .frame(width: 36)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("LOG ACTIVITY")
-                        .font(.system(size: 9, weight: .black, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .tracking(2)
-                    Text("Walk, yard work, sports...")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(.green)
-            }
-            .padding(16)
-            .background(Color(.systemGray6).opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
-        .sheet(isPresented: $showActivityLogger) {
-            ActivityLoggerView()
-        }
-    }
+    // Session 2 UX move: activityLogButton (Log Activity) moved to CoachView
+    // quick-action chips. HomeView no longer presents the log activity flow;
+    // tap SYSTEM in the header → CoachView → Log Activity chip.
 
     private var questSummaryCard: some View {
         let todays = todaysQuests

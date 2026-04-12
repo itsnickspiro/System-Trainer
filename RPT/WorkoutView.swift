@@ -190,6 +190,13 @@ struct WorkoutView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
+                        // Session 2 UX move: WeightLogCard relocated from
+                        // HomeView to the top of Training. Body metrics are
+                        // fitness metrics — they belong in the Training tab.
+                        if let currentProfile = profile {
+                            WeightLogCard(profile: currentProfile)
+                        }
+
                         let isPastDay = isDayLocked && !Calendar.current.isDateInFuture(selectedDay)
 
                         if isPastDay {

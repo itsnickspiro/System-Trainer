@@ -11,6 +11,8 @@ struct CoachView: View {
     @State private var isTyping = false
     @State private var showingSleepPicker = false
     @State private var sleepHoursInput: Double = 7.5
+    // Session 2: Log Activity moved from HomeView into The System sheet.
+    @State private var showingActivityLogger = false
 
     private static let historyKey = "coach_chat_history_v1"
     private static let maxStoredMessages = 50
@@ -92,6 +94,9 @@ struct CoachView: View {
                             ActionChip(icon: "bed.double.fill", label: "Log Sleep", color: .indigo) {
                                 showingSleepPicker = true
                             }
+                            ActionChip(icon: "figure.walk", label: "Log Activity", color: .green) {
+                                showingActivityLogger = true
+                            }
                             ActionChip(icon: "dumbbell.fill", label: "Analyze Stats", color: .orange) {
                                 userInput = "Analyze my stats and tell me what to prioritize today."
                                 sendMessage()
@@ -160,6 +165,9 @@ struct CoachView: View {
                 SleepLogSheet(hours: $sleepHoursInput) { hours in
                     logSleep(hours: hours)
                 }
+            }
+            .sheet(isPresented: $showingActivityLogger) {
+                ActivityLoggerView()
             }
         }
     }
