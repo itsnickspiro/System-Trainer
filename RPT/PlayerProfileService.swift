@@ -347,6 +347,14 @@ final class PlayerProfileService: ObservableObject {
         if let name = remote.display_name, !name.isEmpty, name != "Player" {
             profile.name = name
         }
+        // F6: hydrate friend_code from server. Server generates this on
+        // first insert; client is read-only. The local Profile.friendCode
+        // field has existed since early builds but was never populated
+        // — this closes that gap so QR share + rpt://addfriend/{CODE}
+        // deep links can resolve on the local device.
+        if let code = remote.friend_code, !code.isEmpty {
+            profile.friendCode = code
+        }
 
         // Demographics
         if let w = remote.weight_kg, w > 0 { profile.weight = w }
@@ -657,6 +665,7 @@ private struct PlayerProfilePayload: Decodable {
     // Identity
     let cloudkit_user_id: String?
     let player_id: String?
+    let friend_code: String?
     let display_name: String?
     let avatar_key: String?
 
