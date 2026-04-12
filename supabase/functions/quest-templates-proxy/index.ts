@@ -115,6 +115,41 @@ serve(async (req) => {
       isEnabled:   row.is_enabled,
     }));
 
+    // Default: return templates + arcs (backwards compatible)
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action ?? "";
+
+    if (action === "admin_create_quest_template") {
+      const cloudkitUserId = body.cloudkit_user_id ?? "";
+      const { data: me } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!me?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      const key = (body.key ?? "").toString();
+      const title = (body.title ?? "").toString();
+      if (!key || !title) return new Response(JSON.stringify({ error: "key and title required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      const { data: quest, error: insErr } = await supabase.from("quest_templates").insert({
+        key,
+        title,
+        subtitle: body.subtitle ?? null,
+        quest_type: body.quest_type ?? "daily",
+        category: body.category ?? null,
+        condition_type: body.condition_type ?? "manual",
+        condition_target: body.condition_target ?? null,
+        xp_reward: parseInt(body.xp_reward ?? "50", 10) || 50,
+        credit_reward: parseInt(body.credit_reward ?? "0", 10) || 0,
+        difficulty: body.difficulty ?? "normal",
+        sort_order: parseInt(body.sort_order ?? "100", 10) || 100,
+        is_active: true,
+        requires_arc: body.requires_arc ?? null,
+      }).select("*").single();
+      if (insErr) {
+        console.error("admin_create_quest_template error:", insErr);
+        return new Response(JSON.stringify({ error: insErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ success: true, quest }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ templates, arcs }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

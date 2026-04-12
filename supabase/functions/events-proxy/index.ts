@@ -88,6 +88,36 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, event }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    if (action === "admin_edit_event") {
+      const { data: profile } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!profile?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const eventId = (body.event_id ?? "").toString();
+      if (!eventId) return new Response(JSON.stringify({ error: "event_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const allowed = ["title", "description", "event_type", "reward_gp", "reward_xp", "starts_at", "ends_at", "is_active"];
+      const updates: Record<string, unknown> = {};
+      for (const k of allowed) { if (body[k] !== undefined) updates[k] = body[k]; }
+      const { data, error } = await supabase.from("special_events").update(updates).eq("id", eventId).select("*").single();
+      if (error) throw error;
+      return new Response(JSON.stringify({ success: true, event: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "admin_delete_event") {
+      const { data: profile } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!profile?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const eventId = (body.event_id ?? "").toString();
+      if (!eventId) return new Response(JSON.stringify({ error: "event_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      await supabase.from("special_events").update({ is_active: false }).eq("id", eventId);
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (action === "admin_list_events") {
+      const { data: profile } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!profile?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { data, error } = await supabase.from("special_events").select("*").order("created_at", { ascending: false }).limit(50);
+      if (error) throw error;
+      return new Response(JSON.stringify({ events: data ?? [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("events-proxy error:", err);

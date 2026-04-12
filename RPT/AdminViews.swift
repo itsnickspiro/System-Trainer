@@ -732,6 +732,10 @@ struct AdminHubView: View {
     @State private var showModeration = false
     @State private var showCreateEvent = false
     @State private var showCreateStoreItem = false
+    @State private var showCreateQuest = false
+    @State private var showCreateTournament = false
+    @State private var showPlayerManager = false
+    @State private var showSeasonManager = false
 
     var body: some View {
         NavigationStack {
@@ -744,7 +748,7 @@ struct AdminHubView: View {
                         VStack(alignment: .leading) {
                             Text("Admin Panel")
                                 .font(.headline)
-                            Text("Manage content and moderation")
+                            Text("Manage content, players, and moderation")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -753,40 +757,45 @@ struct AdminHubView: View {
                 }
 
                 Section("Content Management") {
-                    Button {
-                        showCreateEvent = true
-                    } label: {
-                        Label("Create Event", systemImage: "calendar.badge.plus")
+                    Button { showCreateEvent = true } label: {
+                        Label("Events", systemImage: "calendar.badge.plus")
                     }
-
-                    Button {
-                        showCreateStoreItem = true
-                    } label: {
-                        Label("Create Store Item", systemImage: "bag.badge.plus")
+                    Button { showCreateStoreItem = true } label: {
+                        Label("Store Items", systemImage: "bag.badge.plus")
                     }
-
+                    Button { showCreateQuest = true } label: {
+                        Label("Quest Templates", systemImage: "scroll")
+                    }
                     NavigationLink {
-                        Text("Avatar management is available in the Avatar Picker (+ button)")
-                            .foregroundColor(.secondary)
-                            .padding()
+                        AdminAddAvatarSheet()
                     } label: {
-                        Label("Manage Avatars", systemImage: "person.crop.circle.badge.plus")
+                        Label("Upload Avatar", systemImage: "person.crop.circle.badge.plus")
                     }
-
                     NavigationLink {
-                        Text("Food management is available when scanning barcodes")
-                            .foregroundColor(.secondary)
-                            .padding()
+                        AdminAddFoodSheet(barcode: "")
                     } label: {
-                        Label("Manage Foods", systemImage: "fork.knife")
+                        Label("Add Food", systemImage: "fork.knife")
+                    }
+                }
+
+                Section("Competitive") {
+                    Button { showCreateTournament = true } label: {
+                        Label("Tournaments", systemImage: "trophy")
+                    }
+                    Button { showSeasonManager = true } label: {
+                        Label("Seasons", systemImage: "leaf")
+                    }
+                }
+
+                Section("Player Management") {
+                    Button { showPlayerManager = true } label: {
+                        Label("Search & Edit Players", systemImage: "person.text.rectangle")
                     }
                 }
 
                 Section("Moderation") {
-                    Button {
-                        showModeration = true
-                    } label: {
-                        Label("Review Reports & Flags", systemImage: "exclamationmark.shield")
+                    Button { showModeration = true } label: {
+                        Label("Reports & Flags", systemImage: "exclamationmark.shield")
                     }
                 }
             }
@@ -797,15 +806,506 @@ struct AdminHubView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showModeration) {
-                AdminModerationView()
+            .sheet(isPresented: $showModeration) { AdminModerationView() }
+            .sheet(isPresented: $showCreateEvent) { AdminCreateEventSheet() }
+            .sheet(isPresented: $showCreateStoreItem) { AdminCreateStoreItemSheet() }
+            .sheet(isPresented: $showCreateQuest) { AdminCreateQuestSheet() }
+            .sheet(isPresented: $showCreateTournament) { AdminTournamentManagerSheet() }
+            .sheet(isPresented: $showPlayerManager) { AdminPlayerManagerView() }
+            .sheet(isPresented: $showSeasonManager) { AdminSeasonManagerSheet() }
+        }
+    }
+}
+
+// MARK: - Admin Quest Template Creator
+
+struct AdminCreateQuestSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var questKey = ""
+    @State private var title = ""
+    @State private var subtitle = ""
+    @State private var questType = "daily"
+    @State private var conditionType = "manual"
+    @State private var conditionTarget = ""
+    @State private var xpReward = "50"
+    @State private var creditReward = "0"
+    @State private var isCreating = false
+    @State private var createError: String?
+    @State private var createSuccess = false
+
+    private let questTypes = ["daily", "weekly", "special"]
+    private let conditionTypes = ["manual", "steps", "calories_burned", "workout_logged", "food_logged", "water_logged", "sleep_hours", "streak_days"]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                adminHeader("Create Quest Template")
+                Section("Quest Details") {
+                    TextField("Key (e.g. quest_daily_cardio) *", text: $questKey)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Title *", text: $title)
+                    TextField("Subtitle", text: $subtitle)
+                    Picker("Type", selection: $questType) {
+                        ForEach(questTypes, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                }
+                Section("Completion") {
+                    Picker("Condition", selection: $conditionType) {
+                        ForEach(conditionTypes, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) }
+                    }
+                    if conditionType != "manual" {
+                        TextField("Target (e.g. 10000 for steps)", text: $conditionTarget)
+                            .keyboardType(.numberPad)
+                    }
+                }
+                Section("Rewards") {
+                    numField("XP Reward", text: $xpReward)
+                    numField("GP Reward", text: $creditReward)
+                }
+                errorSection(createError)
             }
-            .sheet(isPresented: $showCreateEvent) {
-                AdminCreateEventSheet()
+            .navigationTitle("Create Quest")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") { create() }.disabled(questKey.isEmpty || title.isEmpty || isCreating).foregroundColor(.orange)
+                }
             }
-            .sheet(isPresented: $showCreateStoreItem) {
-                AdminCreateStoreItemSheet()
+            .alert("Quest Created", isPresented: $createSuccess) { Button("OK") { dismiss() } }
+        }
+    }
+
+    private func create() {
+        isCreating = true; createError = nil
+        Task {
+            let body: [String: Any] = [
+                "action": "admin_create_quest_template",
+                "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
+                "key": questKey, "title": title, "subtitle": subtitle,
+                "quest_type": questType, "condition_type": conditionType,
+                "condition_target": conditionTarget.isEmpty ? NSNull() : conditionTarget,
+                "xp_reward": Int(xpReward) ?? 50, "credit_reward": Int(creditReward) ?? 0
+            ]
+            let result = await adminPost(proxy: "quest-templates-proxy", body: body)
+            await MainActor.run {
+                isCreating = false
+                if result { createSuccess = true } else { createError = "Creation failed" }
             }
         }
     }
 }
+
+// MARK: - Admin Tournament Manager
+
+struct AdminTournamentManagerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var tournamentDescription = ""
+    @State private var bracketSize = 8
+    @State private var entryGPCost = "0"
+    @State private var prizePoolGP = "1000"
+    @State private var minLevel = "5"
+    @State private var isCreating = false
+    @State private var createError: String?
+    @State private var createSuccess = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                adminHeader("Tournaments")
+                Section("Create Tournament") {
+                    TextField("Title *", text: $title)
+                    TextField("Description", text: $tournamentDescription, axis: .vertical).lineLimit(2...4)
+                    Picker("Bracket Size", selection: $bracketSize) {
+                        Text("8 Players").tag(8); Text("16 Players").tag(16)
+                    }
+                    numField("Entry Fee (GP)", text: $entryGPCost)
+                    numField("Prize Pool (GP)", text: $prizePoolGP)
+                    numField("Min Level", text: $minLevel)
+                }
+                errorSection(createError)
+            }
+            .navigationTitle("Tournaments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") { create() }.disabled(title.isEmpty || isCreating).foregroundColor(.orange)
+                }
+            }
+            .alert("Tournament Created", isPresented: $createSuccess) { Button("OK") { dismiss() } }
+        }
+    }
+
+    private func create() {
+        isCreating = true; createError = nil
+        Task {
+            let body: [String: Any] = [
+                "action": "admin_create_tournament",
+                "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
+                "title": title, "description": tournamentDescription,
+                "bracket_size": bracketSize, "entry_gp_cost": Int(entryGPCost) ?? 0,
+                "prize_pool_gp": Int(prizePoolGP) ?? 1000, "min_level": Int(minLevel) ?? 5,
+                "starts_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(7 * 86400))
+            ]
+            let result = await adminPost(proxy: "tournament-proxy", body: body)
+            await MainActor.run {
+                isCreating = false
+                if result { createSuccess = true } else { createError = "Creation failed" }
+            }
+        }
+    }
+}
+
+// MARK: - Admin Season Manager
+
+struct AdminSeasonManagerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var seasonService = SeasonService.shared
+    @State private var isFinalizing = false
+    @State private var finalizeResult: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                adminHeader("Season Management")
+                if let season = seasonService.activeSeason {
+                    Section("Active Season") {
+                        LabeledContent("Name", value: season.label)
+                        LabeledContent("Season #", value: "\(season.seasonNumber)")
+                        LabeledContent("Status", value: season.status)
+                        LabeledContent("Remaining", value: "\(seasonService.remainingDays) days")
+                    }
+                    Section {
+                        Button(role: .destructive) {
+                            finalize(seasonId: season.id)
+                        } label: {
+                            Label("Finalize Season Now", systemImage: "checkmark.seal")
+                        }
+                        .disabled(isFinalizing)
+                    }
+                } else {
+                    Section { Text("No active season").foregroundColor(.secondary) }
+                }
+                if let result = finalizeResult {
+                    Section { Text(result).font(.caption).foregroundColor(.green) }
+                }
+            }
+            .navigationTitle("Seasons")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .task { await seasonService.refresh() }
+    }
+
+    private func finalize(seasonId: String) {
+        isFinalizing = true
+        Task {
+            let body: [String: Any] = [
+                "action": "finalize_season",
+                "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
+                "season_id": seasonId
+            ]
+            let ok = await adminPost(proxy: "season-proxy", body: body)
+            await MainActor.run {
+                isFinalizing = false
+                finalizeResult = ok ? "Season finalized. Next season created." : "Finalize failed"
+                Task { await seasonService.refresh() }
+            }
+        }
+    }
+}
+
+// MARK: - Admin Player Manager
+
+struct AdminPlayerManagerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchQuery = ""
+    @State private var players: [AdminPlayerResult] = []
+    @State private var isSearching = false
+    @State private var selectedPlayer: AdminPlayerResult?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                    TextField("Search by username...", text: $searchQuery)
+                        .textInputAutocapitalization(.never)
+                        .onSubmit { search() }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray6)))
+                .padding()
+
+                if isSearching {
+                    ProgressView("Searching...").padding()
+                }
+
+                List(players) { player in
+                    Button {
+                        selectedPlayer = player
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(player.displayName ?? "Unknown")
+                                        .font(.subheadline.weight(.semibold))
+                                    if player.isAdmin == true {
+                                        Text("ADMIN").font(.system(size: 8, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.orange).padding(.horizontal, 4).padding(.vertical, 1)
+                                            .background(Capsule().fill(Color.orange.opacity(0.2)))
+                                    }
+                                    if player.isBanned == true {
+                                        Text("BANNED").font(.system(size: 8, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.red).padding(.horizontal, 4).padding(.vertical, 1)
+                                            .background(Capsule().fill(Color.red.opacity(0.2)))
+                                    }
+                                }
+                                Text("Lv.\(player.level ?? 1) | \(player.systemCredits ?? 0) GP")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Player Manager")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+            }
+            .sheet(item: $selectedPlayer) { player in
+                AdminPlayerEditorSheet(player: player)
+            }
+        }
+    }
+
+    private func search() {
+        guard searchQuery.count >= 2 else { return }
+        isSearching = true
+        Task {
+            let body: [String: Any] = [
+                "action": "admin_search_players",
+                "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
+                "query": searchQuery
+            ]
+            if let data = try? await adminPostRaw(proxy: "player-proxy", body: body),
+               let resp = try? JSONDecoder().decode(AdminPlayersResponse.self, from: data) {
+                await MainActor.run { players = resp.players ?? [] }
+            }
+            await MainActor.run { isSearching = false }
+        }
+    }
+}
+
+// MARK: - Admin Player Editor
+
+struct AdminPlayerEditorSheet: View {
+    let player: AdminPlayerResult
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String = ""
+    @State private var level: String = ""
+    @State private var totalXP: String = ""
+    @State private var credits: String = ""
+    @State private var isAdminToggle = false
+    @State private var isBannedToggle = false
+    @State private var isSaving = false
+    @State private var saveResult: String?
+    @State private var creditHistory: [AdminCreditTxn] = []
+    @State private var showCreditHistory = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Identity") {
+                    TextField("Display Name", text: $displayName)
+                    LabeledContent("CloudKit ID") {
+                        Text(player.cloudkitUserId ?? "").font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary)
+                    }
+                }
+                Section("Progression") {
+                    numField("Level", text: $level)
+                    numField("Total XP", text: $totalXP)
+                    numField("GP Balance", text: $credits)
+                }
+                Section("Flags") {
+                    Toggle("Admin", isOn: $isAdminToggle)
+                    Toggle("Banned", isOn: $isBannedToggle)
+                }
+                Section("Credit History") {
+                    Button { loadCreditHistory() } label: {
+                        Label("View Credit History", systemImage: "clock.arrow.circlepath")
+                    }
+                    ForEach(creditHistory) { txn in
+                        HStack {
+                            Text(txn.transactionType ?? "unknown").font(.caption)
+                            Spacer()
+                            Text("\(txn.amount > 0 ? "+" : "")\(txn.amount)").font(.caption.monospacedDigit())
+                                .foregroundColor(txn.amount >= 0 ? .green : .red)
+                        }
+                    }
+                }
+                if let result = saveResult {
+                    Section { Text(result).font(.caption).foregroundColor(result.contains("Saved") ? .green : .red) }
+                }
+            }
+            .navigationTitle("Edit Player")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }.disabled(isSaving).foregroundColor(.orange)
+                }
+            }
+        }
+        .onAppear {
+            displayName = player.displayName ?? ""
+            level = "\(player.level ?? 1)"
+            totalXP = "\(player.totalXP ?? 0)"
+            credits = "\(player.systemCredits ?? 0)"
+            isAdminToggle = player.isAdmin ?? false
+            isBannedToggle = player.isBanned ?? false
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            let body: [String: Any] = [
+                "action": "admin_edit_player",
+                "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
+                "target_cloudkit_user_id": player.cloudkitUserId ?? "",
+                "display_name": displayName,
+                "level": Int(level) ?? 1,
+                "total_xp": Int(totalXP) ?? 0,
+                "system_credits": Int(credits) ?? 0,
+                "is_admin": isAdminToggle,
+                "is_banned": isBannedToggle
+            ]
+            let ok = await adminPost(proxy: "player-proxy", body: body)
+            await MainActor.run {
+                isSaving = false
+                saveResult = ok ? "Saved" : "Save failed"
+            }
+        }
+    }
+
+    private func loadCreditHistory() {
+        Task {
+            let body: [String: Any] = [
+                "action": "admin_get_credit_history",
+                "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
+                "target_cloudkit_user_id": player.cloudkitUserId ?? ""
+            ]
+            if let data = try? await adminPostRaw(proxy: "player-proxy", body: body),
+               let resp = try? JSONDecoder().decode(AdminCreditHistoryResponse.self, from: data) {
+                await MainActor.run { creditHistory = resp.transactions ?? [] }
+            }
+        }
+    }
+}
+
+// MARK: - Admin Helper Functions
+
+private func adminPost(proxy: String, body: [String: Any]) async -> Bool {
+    guard let data = try? await adminPostRaw(proxy: proxy, body: body) else { return false }
+    let resp = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    return resp?["success"] as? Bool == true
+}
+
+private func adminPostRaw(proxy: String, body: [String: Any]) async throws -> Data {
+    guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/\(proxy)") else { throw URLError(.badURL) }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue("Bearer \(Secrets.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+    req.setValue(Secrets.appSecret, forHTTPHeaderField: "X-App-Secret")
+    req.httpBody = try JSONSerialization.data(withJSONObject: body)
+    req.timeoutInterval = 15
+    let (data, _) = try await URLSession.shared.data(for: req)
+    return data
+}
+
+@ViewBuilder
+private func adminHeader(_ title: String) -> some View {
+    Section {
+        HStack(spacing: 8) {
+            Image(systemName: "shield.fill").foregroundColor(.orange)
+            Text("ADMIN — \(title)")
+                .font(.system(size: 12, weight: .black, design: .monospaced))
+                .foregroundColor(.orange)
+        }
+    }
+}
+
+@ViewBuilder
+private func numField(_ label: String, text: Binding<String>) -> some View {
+    HStack {
+        Text(label)
+        Spacer()
+        TextField("0", text: text)
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 80)
+    }
+}
+
+@ViewBuilder
+private func errorSection(_ error: String?) -> some View {
+    if let error = error {
+        Section { Text(error).foregroundColor(.red).font(.caption) }
+    }
+}
+
+// MARK: - Admin Models
+
+struct AdminPlayerResult: Codable, Identifiable {
+    let cloudkitUserId: String?
+    let playerId: String?
+    let displayName: String?
+    let level: Int?
+    let totalXP: Int?
+    let isAdmin: Bool?
+    let isBanned: Bool?
+    let systemCredits: Int?
+    let lifetimeCreditsEarned: Int?
+
+    var id: String { cloudkitUserId ?? UUID().uuidString }
+
+    enum CodingKeys: String, CodingKey {
+        case cloudkitUserId = "cloudkit_user_id"
+        case playerId = "player_id"
+        case displayName = "display_name"
+        case level
+        case totalXP = "total_xp"
+        case isAdmin = "is_admin"
+        case isBanned = "is_banned"
+        case systemCredits = "system_credits"
+        case lifetimeCreditsEarned = "lifetime_credits_earned"
+    }
+}
+
+struct AdminCreditTxn: Codable, Identifiable {
+    let id: String?
+    let amount: Int
+    let balanceAfter: Int?
+    let transactionType: String?
+    let referenceKey: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, amount
+        case balanceAfter = "balance_after"
+        case transactionType = "transaction_type"
+        case referenceKey = "reference_key"
+        case createdAt = "created_at"
+    }
+}
+
+private struct AdminPlayersResponse: Decodable { let players: [AdminPlayerResult]? }
+private struct AdminCreditHistoryResponse: Decodable { let transactions: [AdminCreditTxn]? }

@@ -119,6 +119,25 @@ serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      case "admin_edit_item": {
+        const { data: profile } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudKitUserID).maybeSingle();
+        if (!profile?.is_admin) return errorResponse(403, "admin_required");
+        const itemId = (body.item_id ?? "").toString();
+        if (!itemId) return errorResponse(400, "item_id required");
+        const allowed = ["name", "description", "gp_price", "store_section", "is_enabled", "effect_type", "bonus_strength", "bonus_endurance", "bonus_focus", "bonus_discipline", "bonus_vitality", "bonus_energy", "xp_multiplier"];
+        const updates: Record<string, unknown> = {};
+        for (const k of allowed) { if (body[k] !== undefined) updates[k] = body[k]; }
+        const { data: item, error: upErr } = await supabase.from("item_store").update(updates).eq("id", itemId).select("*").single();
+        if (upErr) return errorResponse(500, upErr.message ?? "update_failed");
+        return new Response(JSON.stringify({ success: true, item }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      case "admin_list_items": {
+        const { data: profile } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudKitUserID).maybeSingle();
+        if (!profile?.is_admin) return errorResponse(403, "admin_required");
+        const { data, error: listErr } = await supabase.from("item_store").select("*").order("created_at", { ascending: false }).limit(100);
+        if (listErr) return errorResponse(500, listErr.message);
+        return new Response(JSON.stringify({ items: data ?? [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
       default:
         return errorResponse(400, `Unknown action: ${action}`);
     }

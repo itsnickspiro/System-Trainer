@@ -439,6 +439,20 @@ serve(async (req) => {
       return jsonResponse({ success: true, prize_gp: prizeGp });
     }
 
+    // ── ADMIN: Force resolve or cancel a war ─────────────────────────
+    if (action === "admin_resolve_war" || action === "admin_cancel_war") {
+      const { data: me } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!me?.is_admin) return jsonResponse({ error: "admin_required" }, 403);
+      const warId = (body.war_id ?? "").toString();
+      if (!warId) return jsonResponse({ error: "war_id required" }, 400);
+      if (action === "admin_cancel_war") {
+        await supabase.from("guild_wars").update({ status: "cancelled" }).eq("id", warId);
+        return jsonResponse({ success: true, status: "cancelled" });
+      }
+      const result = await supabase.rpc("resolve_guild_war", { p_war_id: warId });
+      return jsonResponse(result.data ?? { success: true });
+    }
+
     return jsonResponse({ error: "Unknown action" }, 400);
   } catch (err) {
     console.error("guild-war-proxy error:", err);

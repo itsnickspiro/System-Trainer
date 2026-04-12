@@ -822,6 +822,45 @@ serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // ── ADMIN: Search players ──────────────────────────────────────────
+    if (action === "admin_search_players") {
+      const { data: me } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!me?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const query = (body.query ?? "").toString();
+      if (!query || query.length < 2) return new Response(JSON.stringify({ players: [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { data } = await supabase.from("player_profiles")
+        .select("cloudkit_user_id, player_id, display_name, level, total_xp, is_admin, is_banned, system_credits, lifetime_credits_earned")
+        .ilike("display_name", `%${query}%`).limit(20);
+      return new Response(JSON.stringify({ players: data ?? [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── ADMIN: Edit player profile ──────────────────────────────────────
+    if (action === "admin_edit_player") {
+      const { data: me } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!me?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const targetId = (body.target_cloudkit_user_id ?? "").toString();
+      if (!targetId) return new Response(JSON.stringify({ error: "target required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const allowed = ["display_name", "level", "total_xp", "system_credits", "lifetime_credits_earned", "is_admin", "is_banned", "ban_reason", "current_streak", "longest_streak"];
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      for (const k of allowed) { if (body[k] !== undefined) updates[k] = body[k]; }
+      if (body.is_banned === true && !body.banned_at) updates.banned_at = new Date().toISOString();
+      if (body.is_banned === false) { updates.banned_at = null; updates.ban_reason = null; }
+      const { data, error } = await supabase.from("player_profiles").update(updates).eq("cloudkit_user_id", targetId).select("*").single();
+      if (error) throw error;
+      return new Response(JSON.stringify({ success: true, profile: data }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── ADMIN: Get any player's credit history ──────────────────────────
+    if (action === "admin_get_credit_history") {
+      const { data: me } = await supabase.from("player_profiles").select("is_admin").eq("cloudkit_user_id", cloudkitUserId).maybeSingle();
+      if (!me?.is_admin) return new Response(JSON.stringify({ error: "admin_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const targetId = (body.target_cloudkit_user_id ?? "").toString();
+      if (!targetId) return new Response(JSON.stringify({ error: "target required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { data, error } = await supabase.from("credit_transactions").select("*").eq("cloudkit_user_id", targetId).order("created_at", { ascending: false }).limit(50);
+      if (error) throw error;
+      return new Response(JSON.stringify({ transactions: data ?? [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (err) {
