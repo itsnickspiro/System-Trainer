@@ -392,10 +392,24 @@ struct SendChallengeSheet: View {
     let targetDisplayName: String
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var service = ChallengeService.shared
+    @ObservedObject private var store = StoreService.shared
+    @ObservedObject private var remoteConfig = RemoteConfigService.shared
     @State private var selectedType: ChallengeType = .xpRace
     @State private var targetValue = "500"
     @State private var durationDays = 7
+    @State private var wagerGP: Int = 0
     @State private var isSending = false
+
+    // F2 v1: server-side ceiling pulled from remote_config.
+    private var maxWager: Int {
+        max(0, RemoteConfigService.shared.int("pvp_max_wager_gp", default: 1000))
+    }
+
+    private var wagerStep: Int { max(10, maxWager / 100) }
+
+    private var hasEnoughGP: Bool {
+        store.playerCredits >= wagerGP
+    }
 
     var body: some View {
         NavigationStack {
@@ -425,6 +439,50 @@ struct SendChallengeSheet: View {
                     .pickerStyle(.segmented)
                 }
 
+                // F2 v1: optional GP wager. Winner gets 2x; refunded if
+                // challenge is declined or the opponent never accepts.
+                Section {
+                    Stepper(value: $wagerGP, in: 0...maxWager, step: wagerStep) {
+                        HStack {
+                            Image(systemName: "centsign.circle.fill")
+                                .foregroundColor(.orange)
+                            Text("Wager")
+                                .font(.body)
+                            Spacer()
+                            Text("\(wagerGP) GP")
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(wagerGP > 0 ? .orange : .secondary)
+                        }
+                    }
+                    if wagerGP > 0 {
+                        HStack {
+                            Text("Winner gets")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(wagerGP * 2) GP")
+                                .foregroundColor(.green)
+                                .font(.body.weight(.semibold))
+                        }
+                        HStack {
+                            Text("Your balance")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(store.playerCredits) GP")
+                                .foregroundColor(hasEnoughGP ? .primary : .red)
+                                .font(.body.weight(.semibold))
+                        }
+                    }
+                } header: {
+                    Text("Wager (Optional)")
+                } footer: {
+                    if wagerGP > 0 && !hasEnoughGP {
+                        Text("You don't have enough GP to cover this wager.")
+                            .foregroundColor(.red)
+                    } else if wagerGP > 0 {
+                        Text("Your GP is held in escrow until the challenge resolves. Refunded if declined.")
+                    }
+                }
+
                 Section {
                     Button {
                         isSending = true
@@ -435,7 +493,8 @@ struct SendChallengeSheet: View {
                                 targetDisplayName: targetDisplayName,
                                 type: selectedType,
                                 targetValue: target,
-                                durationDays: durationDays
+                                durationDays: durationDays,
+                                wagerGP: wagerGP
                             )
                             isSending = false
                             if success { dismiss() }
@@ -452,7 +511,7 @@ struct SendChallengeSheet: View {
                             Spacer()
                         }
                     }
-                    .disabled(isSending)
+                    .disabled(isSending || (wagerGP > 0 && !hasEnoughGP))
                 }
             }
             .navigationTitle("Challenge \(targetDisplayName)")

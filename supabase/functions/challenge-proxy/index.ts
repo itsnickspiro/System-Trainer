@@ -37,6 +37,106 @@ function bannedResponse() {
   return jsonResponse({ success: false, error: "service_unavailable" }, 503);
 }
 
+// F2 v1: GP wager escrow helpers. Debit on challenge send (held),
+// credit to winner on settle (paid_winner), or refund to sender on
+// decline/expire/cancel (refunded). Uses the same credit_transactions
+// ledger the store uses so the audit trail is consistent.
+async function debitEscrow(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+  amount: number,
+  challengeId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (amount <= 0) return { ok: true };
+  const { data: profile, error: pErr } = await supabase
+    .from("player_profiles")
+    .select("system_credits")
+    .eq("cloudkit_user_id", cloudkitUserId)
+    .single();
+  if (pErr) return { ok: false, error: "profile_lookup_failed" };
+  const balance = profile?.system_credits ?? 0;
+  if (balance < amount) return { ok: false, error: "insufficient_gp" };
+  const { error: uErr } = await supabase
+    .from("player_profiles")
+    .update({ system_credits: balance - amount, updated_at: new Date().toISOString() })
+    .eq("cloudkit_user_id", cloudkitUserId);
+  if (uErr) return { ok: false, error: "debit_failed" };
+  await supabase.from("credit_transactions").insert({
+    cloudkit_user_id: cloudkitUserId,
+    amount: -amount,
+    balance_after: balance - amount,
+    transaction_type: "challenge_escrow_debit",
+    reference_key: challengeId,
+  });
+  return { ok: true };
+}
+
+async function creditEscrow(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+  amount: number,
+  transactionType: string,
+  challengeId: string,
+): Promise<void> {
+  if (amount <= 0) return;
+  const { data: profile } = await supabase
+    .from("player_profiles")
+    .select("system_credits, lifetime_credits_earned")
+    .eq("cloudkit_user_id", cloudkitUserId)
+    .single();
+  const balance = profile?.system_credits ?? 0;
+  const lifetime = profile?.lifetime_credits_earned ?? 0;
+  const newBalance = balance + amount;
+  const newLifetime = lifetime + amount;
+  await supabase
+    .from("player_profiles")
+    .update({
+      system_credits: newBalance,
+      lifetime_credits_earned: newLifetime,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("cloudkit_user_id", cloudkitUserId);
+  await supabase.from("credit_transactions").insert({
+    cloudkit_user_id: cloudkitUserId,
+    amount,
+    balance_after: newBalance,
+    transaction_type: transactionType,
+    reference_key: challengeId,
+  });
+}
+
+/// Settles a challenge's escrow. Idempotent on escrow_status:
+/// if already paid_winner or refunded, does nothing.
+async function settleChallengeEscrow(
+  supabase: ReturnType<typeof createClient>,
+  challenge: Record<string, unknown>,
+  outcome: "winner" | "refund",
+): Promise<void> {
+  const status = (challenge.escrow_status as string) ?? "none";
+  if (status !== "held") return; // already settled or nothing to settle
+  const wager = (challenge.wager_gp as number) ?? 0;
+  if (wager <= 0) return;
+  const challengerId = challenge.challenger_cloudkit_user_id as string;
+  const challengeId = challenge.id as string;
+  if (outcome === "winner") {
+    const winnerId = (challenge.winner_cloudkit_user_id as string) ?? challengerId;
+    // Winner gets 2x wager (their own back + sender's stake). Note the
+    // challenger already pre-paid wager_gp; we credit 2*wager to the
+    // winner which nets out to +wager for them if they are the challenger.
+    await creditEscrow(supabase, winnerId, wager * 2, "challenge_escrow_payout", challengeId);
+    await supabase
+      .from("challenges")
+      .update({ escrow_status: "paid_winner" })
+      .eq("id", challengeId);
+  } else {
+    await creditEscrow(supabase, challengerId, wager, "challenge_escrow_refund", challengeId);
+    await supabase
+      .from("challenges")
+      .update({ escrow_status: "refunded" })
+      .eq("id", challengeId);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -72,6 +172,9 @@ serve(async (req) => {
       const challengeType = (body.challenge_type ?? "").toString();
       const targetValue = parseInt(body.target_value ?? "0", 10) || null;
       const durationDays = Math.min(Math.max(parseInt(body.duration_days ?? "7", 10), 1), 30);
+      // F2 v1: optional GP wager. Clamped server-side to pvp_max_wager_gp.
+      const rawWager = parseInt(body.wager_gp ?? "0", 10) || 0;
+      const metricType = (body.metric_type ?? "").toString() || null;
 
       if (!cloudkitUserId || !targetId || !challengeType) {
         return jsonResponse({ error: "Missing required fields" }, 400);
@@ -79,6 +182,20 @@ serve(async (req) => {
       if (cloudkitUserId === targetId) {
         return jsonResponse({ error: "Cannot challenge yourself" }, 400);
       }
+
+      // Clamp the wager to the server-side ceiling from remote_config.
+      let maxWager = 1000;
+      try {
+        const { data: cfg } = await supabase
+          .from("remote_config")
+          .select("value")
+          .eq("key", "pvp_max_wager_gp")
+          .eq("is_active", true)
+          .maybeSingle();
+        const parsed = cfg?.value ? parseInt(String(cfg.value), 10) : NaN;
+        if (Number.isFinite(parsed) && parsed > 0) maxWager = parsed;
+      } catch (_) { /* use default */ }
+      const wager = Math.max(0, Math.min(rawWager, maxWager));
 
       // Check for existing active/pending challenge between these players
       const { data: existing } = await supabase
@@ -95,6 +212,10 @@ serve(async (req) => {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + durationDays);
 
+      // F2 v1: insert the challenge row FIRST (so we have an id for the
+      // credit_transactions reference), then attempt the escrow debit.
+      // If the debit fails (insufficient GP), roll back by deleting the
+      // newly-inserted row so the user sees a clean failure state.
       const { data: challenge, error } = await supabase
         .from("challenges")
         .insert({
@@ -107,10 +228,23 @@ serve(async (req) => {
           duration_days: durationDays,
           status: "pending",
           expires_at: expiresAt.toISOString(),
+          wager_gp: wager,
+          escrow_status: wager > 0 ? "held" : "none",
+          metric_type: metricType,
         })
         .select("*")
         .single();
       if (error) throw error;
+
+      if (wager > 0) {
+        const debit = await debitEscrow(supabase, cloudkitUserId, wager, challenge.id);
+        if (!debit.ok) {
+          // Roll back the challenge insert so we don't leave a phantom
+          // held-escrow row with no actual debit.
+          await supabase.from("challenges").delete().eq("id", challenge.id);
+          return jsonResponse({ success: false, error: debit.error ?? "debit_failed" }, 400);
+        }
+      }
 
       return jsonResponse({ success: true, challenge });
     }
@@ -166,6 +300,9 @@ serve(async (req) => {
           .eq("id", challengeId);
         if (upErr) throw upErr;
 
+        // F2 v1: refund the sender's wager when the challenged player declines.
+        await settleChallengeEscrow(supabase, challenge, "refund");
+
         return jsonResponse({ success: true, status: "declined" });
       }
     }
@@ -174,12 +311,32 @@ serve(async (req) => {
     if (action === "get_my_challenges") {
       if (!cloudkitUserId) return jsonResponse({ error: "Missing cloudkit_user_id" }, 400);
 
+      // F2 v1: BEFORE flipping to expired, fetch the rows so we can
+      // refund any escrow that was held on pending challenges the
+      // challenged player never accepted. Only pending (not active)
+      // rows are refunded — if the challenge was accepted and went
+      // active, the wager stays in play and the expiry draw is a
+      // forfeit for both sides (server keeps the escrow as a sink
+      // for v1; v2 could split it). Active expired rows therefore
+      // do NOT refund — wager is forfeited.
+      const nowIso = new Date().toISOString();
+      const { data: expiringPending } = await supabase
+        .from("challenges")
+        .select("*")
+        .eq("status", "pending")
+        .gt("wager_gp", 0)
+        .eq("escrow_status", "held")
+        .lt("expires_at", nowIso);
+      for (const row of (expiringPending ?? [])) {
+        await settleChallengeEscrow(supabase, row, "refund");
+      }
+
       // Expire any pending/active challenges past their expiry
       await supabase
         .from("challenges")
         .update({ status: "expired" })
         .in("status", ["pending", "active"])
-        .lt("expires_at", new Date().toISOString());
+        .lt("expires_at", nowIso);
 
       const { data, error } = await supabase
         .from("challenges")
@@ -221,13 +378,24 @@ serve(async (req) => {
         const updates: Record<string, unknown> = { [progressField]: newProgress };
 
         // Check if target reached (if target_value is set)
+        let justCompleted = false;
         if (c.target_value && newProgress >= c.target_value) {
           updates.status = "completed";
           updates.winner_cloudkit_user_id = cloudkitUserId;
           updates.completed_at = new Date().toISOString();
+          justCompleted = true;
         }
 
         await supabase.from("challenges").update(updates).eq("id", c.id);
+
+        // F2 v1: pay out the winner's escrow inline when the challenge
+        // transitions from active → completed. Reload the row with the
+        // winner field set so settleChallengeEscrow has the full state.
+        if (justCompleted) {
+          const merged = { ...c, ...updates };
+          await settleChallengeEscrow(supabase, merged, "winner");
+        }
+
         updated++;
       }
 

@@ -69,7 +69,8 @@ final class ChallengeService: ObservableObject {
         targetDisplayName: String,
         type: ChallengeType,
         targetValue: Int?,
-        durationDays: Int = 7
+        durationDays: Int = 7,
+        wagerGP: Int = 0
     ) async -> Bool {
         guard let cloudKitID = LeaderboardService.shared.currentUserID, !cloudKitID.isEmpty else { return false }
         let myName = DataManager.shared.currentProfile?.name ?? "Player"
@@ -84,10 +85,17 @@ final class ChallengeService: ObservableObject {
             "duration_days": durationDays
         ]
         if let target = targetValue { body["target_value"] = target }
+        // F2 v1: optional GP wager. Server clamps to pvp_max_wager_gp and
+        // debits the sender's system_credits via credit_transactions.
+        if wagerGP > 0 { body["wager_gp"] = wagerGP }
 
         do {
             _ = try await postToProxy(body: body)
             await refresh()
+            if wagerGP > 0 {
+                // Pull the post-debit GP balance from the server.
+                await StoreService.shared.refresh(force: true)
+            }
             return true
         } catch {
             lastError = error.localizedDescription
