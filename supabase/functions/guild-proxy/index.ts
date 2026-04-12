@@ -577,7 +577,25 @@ serve(async (req) => {
         .eq("raid_id", raid.id)
         .eq("cloudkit_user_id", userId);
 
-      return jsonResponse({ success: true, gp_award: 200 });
+      // F4 polish: raid reward amount pulled from remote_config instead of
+      // being hardcoded at 200 GP. Admins tune the reward via the Supabase
+      // dashboard without an app update. Falls back to 200 if the key is
+      // missing or malformed.
+      let gpAward = 200;
+      try {
+        const { data: cfg } = await supabase
+          .from("remote_config")
+          .select("value")
+          .eq("key", "guild_raid_reward_gp")
+          .eq("is_active", true)
+          .maybeSingle();
+        const parsed = cfg?.value ? parseInt(String(cfg.value), 10) : NaN;
+        if (Number.isFinite(parsed) && parsed > 0) gpAward = parsed;
+      } catch (_) {
+        // Swallow and use the default — reward config is not load-bearing.
+      }
+
+      return jsonResponse({ success: true, gp_award: gpAward });
     }
 
     // ----- DISMANTLE GUILD -----
