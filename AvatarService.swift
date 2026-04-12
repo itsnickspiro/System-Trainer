@@ -191,11 +191,13 @@ struct AvatarTemplate: Codable, Identifiable {
     let description:            String
     let category:               String   // "free" | "warrior" | "mage" | "rogue" | "tank" | "anime" | "event"
     let rarity:                 String   // "common" | "rare" | "epic" | "legendary"
-    let unlockType:             String   // "free" | "level" | "achievement" | "gp" | "event"
+    let unlockType:             String   // "free" | "level" | "achievement" | "gp" | "gp_purchase" | "event"
     let unlockLevel:            Int?     // required player level (unlockType == "level")
     let unlockAchievementKey:   String?  // achievement key required (unlockType == "achievement")
-    let gpPrice:                Int?     // GP cost (unlockType == "gp")
+    let gpPrice:                Int?     // GP cost (unlockType == "gp") — legacy field
+    let gpCost:                 Int?     // GP cost for purchasing (unlock_type == "gp_purchase")
     let accentColor:            String   // hex string e.g. "#00FFFF"
+    let imageUrl:               String?  // Supabase Storage URL — if set, loaded remotely instead of from bundle
     var isUnlocked:             Bool
     var isEquipped:             Bool
 
@@ -233,10 +235,9 @@ struct AvatarTemplate: Codable, Identifiable {
             return "Achievement"
         case "gp":
             return "\(gpPrice ?? 0) GP"
+        case "gp_purchase":
+            return "\(gpCost ?? 0) GP"
         case "item_purchase":
-            // These avatars unlock by buying a tied item from the Store tab.
-            // Until F6 v2 wires a direct "Unlock" button inside the picker,
-            // the label just tells the user where to go.
             return "Unlock via Store"
         case "event":
             return "Event Exclusive"

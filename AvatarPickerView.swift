@@ -311,10 +311,23 @@ private struct PurchaseAvatarSheet: View {
 struct AvatarImageView: View {
     let key: String
     let size: CGFloat
+    var imageUrl: String? = nil
+
+    @State private var remoteImage: UIImage?
+
+    /// Resolve the image URL from the avatar catalog if not provided directly.
+    private var resolvedUrl: String? {
+        if let url = imageUrl, !url.isEmpty { return url }
+        return AvatarService.shared.catalog.first { $0.key == key }?.imageUrl
+    }
 
     var body: some View {
         Group {
-            if let img = UIImage(named: key) {
+            if let img = remoteImage {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else if let img = UIImage(named: key) {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
@@ -328,5 +341,46 @@ struct AvatarImageView: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityLabel("Player avatar")
+        .task(id: key) {
+            guard let urlString = resolvedUrl,
+                  let url = URL(string: urlString) else { return }
+            // Check disk cache first
+            if let cached = AvatarImageCache.load(key: key) {
+                remoteImage = cached
+                return
+            }
+            // Download
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let img = UIImage(data: data) {
+                    remoteImage = img
+                    AvatarImageCache.save(key: key, data: data)
+                }
+            } catch {
+                // Fall through to bundle or placeholder
+            }
+        }
+    }
+}
+
+// MARK: - Avatar Image Cache
+
+enum AvatarImageCache {
+    private static var cacheDir: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("avatar_images", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func load(key: String) -> UIImage? {
+        let file = cacheDir.appendingPathComponent("\(key).png")
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return UIImage(data: data)
+    }
+
+    static func save(key: String, data: Data) {
+        let file = cacheDir.appendingPathComponent("\(key).png")
+        try? data.write(to: file, options: .atomic)
     }
 }
