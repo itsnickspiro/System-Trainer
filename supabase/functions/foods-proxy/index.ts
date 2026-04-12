@@ -36,6 +36,33 @@ serve(async (req) => {
     const body = await req.json();
 
     // ── Dispatch ────────────────────────────────────────────────────────────
+    // F10: community food submissions. These actions come before the
+    // legacy dispatch checks below. If `action` is set, route to the
+    // corresponding handler; otherwise fall through to the legacy
+    // off_barcode / off_search / Supabase search flow.
+    if (typeof body.action === "string" && body.action.length > 0) {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("DB_SERVICE_ROLE_KEY")!,
+        { auth: { persistSession: false } },
+      );
+      switch (body.action) {
+        case "submit_pending_food":
+          return await handleSubmitPendingFood(supabase, body);
+        case "get_pending_food_by_barcode":
+          return await handleGetPendingByBarcode(supabase, body);
+        case "vote_pending_food":
+          return await handleVotePendingFood(supabase, body);
+        case "get_my_pending_submissions":
+          return await handleGetMyPendingSubmissions(supabase, body);
+        default:
+          // Unknown action — fall through to legacy dispatch. Don't 404
+          // because old clients may send other action strings the server
+          // hasn't learned about yet.
+          break;
+      }
+    }
+
     // off_barcode: barcode lookup via Open Food Facts product API
     if (body.off_barcode) {
       return await handleOFFBarcode(body.off_barcode.trim());
@@ -301,4 +328,221 @@ function computeAdditiveRisk(tags: string[]): number {
   if (count <= 2)  return 1;
   if (count <= 5)  return 2;
   return 3;
+}
+
+// ── F10: Community food submission handlers ───────────────────────────────────
+//
+// The server-side auto-promotion pipeline is already in place:
+//   - trg_update_vote_count on food_votes: recomputes foods_pending.vote_count
+//     as (confirms - disputes) on every vote insert/update
+//   - trg_auto_promote_food on foods_pending UPDATE: when vote_count crosses
+//     threshold (3), checks for barcode/name duplicates and inserts into
+//     public.foods with data_source='community' + is_verified=true
+//
+// These 4 handlers expose the CRUD surface the iOS client needs.
+
+// F9 phase 1: banned players can't submit or vote.
+async function isBanned(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+): Promise<boolean> {
+  if (!cloudkitUserId) return false;
+  try {
+    const { data, error } = await supabase.rpc("is_player_banned", {
+      p_cloudkit_user_id: cloudkitUserId,
+    });
+    if (error) return false;
+    return data === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function foodsJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function handleSubmitPendingFood(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const cloudkitUserId = (body.cloudkit_user_id as string) ?? "";
+  if (!cloudkitUserId) return foodsJsonResponse({ error: "cloudkit_user_id required" }, 400);
+  if (await isBanned(supabase, cloudkitUserId)) {
+    return foodsJsonResponse({ success: false, error: "service_unavailable" }, 503);
+  }
+
+  const name = ((body.name as string) ?? "").trim();
+  const brand = ((body.brand as string) ?? "").trim() || null;
+  const barcode = ((body.barcode as string) ?? "").trim() || null;
+  if (!name) return foodsJsonResponse({ error: "name required" }, 400);
+
+  // If the barcode already exists in foods or foods_pending, return the
+  // existing record so the client can route to "vote on this" instead of
+  // creating a duplicate.
+  if (barcode) {
+    const { data: existing } = await supabase
+      .from("foods")
+      .select("id, name, brand, data_source")
+      .eq("barcode", barcode)
+      .maybeSingle();
+    if (existing) {
+      return foodsJsonResponse({
+        success: false,
+        error: "already_in_catalog",
+        existing_food: existing,
+      }, 200);
+    }
+    const { data: existingPending } = await supabase
+      .from("foods_pending")
+      .select("id, name, brand, vote_count, status")
+      .eq("barcode", barcode)
+      .eq("status", "pending")
+      .maybeSingle();
+    if (existingPending) {
+      return foodsJsonResponse({
+        success: false,
+        error: "already_pending",
+        existing_pending: existingPending,
+      }, 200);
+    }
+  }
+
+  // Rate limit: at most N pending submissions per user per 24h
+  const rateLimit = 10;
+  const { count: recentCount } = await supabase
+    .from("foods_pending")
+    .select("*", { count: "exact", head: true })
+    .eq("submitted_by", cloudkitUserId)
+    .gt("created_at", new Date(Date.now() - 86400000).toISOString());
+  if ((recentCount ?? 0) >= rateLimit) {
+    return foodsJsonResponse({
+      success: false,
+      error: "rate_limit_exceeded",
+      message: `You can submit at most ${rateLimit} foods per day.`,
+    }, 429);
+  }
+
+  const insertRow: Record<string, unknown> = {
+    name,
+    brand,
+    barcode,
+    calories_per_100g:  (body.calories_per_100g as number) ?? 0,
+    serving_size_g:     (body.serving_size_g as number) ?? 100,
+    carbohydrates:      (body.carbohydrates as number) ?? 0,
+    protein:            (body.protein as number) ?? 0,
+    fat:                (body.fat as number) ?? 0,
+    fiber:              (body.fiber as number) ?? 0,
+    sugar:              (body.sugar as number) ?? 0,
+    sodium_mg:          (body.sodium_mg as number) ?? 0,
+    category:           (body.category as string) ?? "other",
+    notes:              (body.notes as string) ?? null,
+    submitted_by:       cloudkitUserId,
+    submitted_by_display_name: (body.submitted_by_display_name as string) ?? null,
+    source_type:        "barcode_miss",
+    status:             "pending",
+    vote_count:         0,
+  };
+
+  const { data, error } = await supabase
+    .from("foods_pending")
+    .insert(insertRow)
+    .select("*")
+    .single();
+  if (error) {
+    console.error("submit_pending_food error:", error);
+    return foodsJsonResponse({ error: "insert_failed" }, 500);
+  }
+  return foodsJsonResponse({ success: true, pending: data });
+}
+
+async function handleGetPendingByBarcode(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const barcode = ((body.barcode as string) ?? "").trim();
+  if (!barcode) return foodsJsonResponse({ error: "barcode required" }, 400);
+  const { data, error } = await supabase
+    .from("foods_pending")
+    .select("*")
+    .eq("barcode", barcode)
+    .eq("status", "pending")
+    .maybeSingle();
+  if (error) return foodsJsonResponse({ error: "query_failed" }, 500);
+  return foodsJsonResponse({ found: data !== null, pending: data });
+}
+
+async function handleVotePendingFood(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const cloudkitUserId = (body.cloudkit_user_id as string) ?? "";
+  if (!cloudkitUserId) return foodsJsonResponse({ error: "cloudkit_user_id required" }, 400);
+  if (await isBanned(supabase, cloudkitUserId)) {
+    return foodsJsonResponse({ success: false, error: "service_unavailable" }, 503);
+  }
+
+  const pendingFoodId = (body.pending_food_id as string) ?? "";
+  const voteType = ((body.vote_type as string) ?? "").toLowerCase();
+  if (!pendingFoodId) return foodsJsonResponse({ error: "pending_food_id required" }, 400);
+  if (voteType !== "confirm" && voteType !== "dispute") {
+    return foodsJsonResponse({ error: "vote_type must be 'confirm' or 'dispute'" }, 400);
+  }
+
+  // Prevent self-voting. A submitter shouldn't boost their own submission.
+  const { data: pending } = await supabase
+    .from("foods_pending")
+    .select("submitted_by, status")
+    .eq("id", pendingFoodId)
+    .maybeSingle();
+  if (!pending) return foodsJsonResponse({ error: "not_found" }, 404);
+  if (pending.status !== "pending") {
+    return foodsJsonResponse({ error: "already_resolved", status: pending.status }, 400);
+  }
+  if (pending.submitted_by === cloudkitUserId) {
+    return foodsJsonResponse({ error: "cannot_vote_on_own_submission" }, 403);
+  }
+
+  // Upsert the vote. Users can change their vote. The trigger recomputes
+  // vote_count from scratch on every insert/update.
+  const { error: voteErr } = await supabase
+    .from("food_votes")
+    .upsert({
+      pending_food_id: pendingFoodId,
+      cloudkit_user_id: cloudkitUserId,
+      vote_type: voteType,
+      notes: (body.notes as string) ?? null,
+    }, { onConflict: "pending_food_id,cloudkit_user_id" });
+  if (voteErr) {
+    console.error("vote_pending_food upsert error:", voteErr);
+    return foodsJsonResponse({ error: "vote_failed" }, 500);
+  }
+
+  // Return the (now recomputed) pending row so the client UI can
+  // immediately reflect the new vote_count.
+  const { data: updated } = await supabase
+    .from("foods_pending")
+    .select("*")
+    .eq("id", pendingFoodId)
+    .maybeSingle();
+  return foodsJsonResponse({ success: true, pending: updated });
+}
+
+async function handleGetMyPendingSubmissions(
+  supabase: ReturnType<typeof createClient>,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const cloudkitUserId = (body.cloudkit_user_id as string) ?? "";
+  if (!cloudkitUserId) return foodsJsonResponse({ error: "cloudkit_user_id required" }, 400);
+  const { data, error } = await supabase
+    .from("foods_pending")
+    .select("*")
+    .eq("submitted_by", cloudkitUserId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return foodsJsonResponse({ error: "query_failed" }, 500);
+  return foodsJsonResponse({ submissions: data ?? [] });
 }
