@@ -280,8 +280,22 @@ final class StoreService: ObservableObject {
             "cloudkit_user_id": cloudKitUserID
         ]
         let data = try await postToProxy(body: body)
-        return (try? JSONDecoder().decode(StorePayload.self, from: data))
-            ?? StorePayload(store: [], inventory: [], currency: nil, sale: nil, playerCredits: nil)
+
+        // Session 2 bug fix: the previous version used `try?` here which
+        // silently swallowed any decode failure and returned an empty
+        // StorePayload. That's exactly what made "items aren't in the item
+        // shop" impossible to diagnose — the store appeared empty with no
+        // error signal. Now we throw the decode error upward so refresh()'s
+        // catch block populates `lastError` and logs the real reason.
+        do {
+            return try JSONDecoder().decode(StorePayload.self, from: data)
+        } catch {
+            #if DEBUG
+            let preview = String(data: data, encoding: .utf8)?.prefix(500) ?? "<non-utf8>"
+            print("[StoreService] DECODE FAILURE: \(error)\nraw response preview (first 500 chars):\n\(preview)")
+            #endif
+            throw error
+        }
     }
 
     @discardableResult
@@ -355,29 +369,36 @@ struct StoreItem: Codable, Identifiable {
         case xpMultiplier         = "xp_multiplier"
     }
 
-    /// Custom init so we can fall back to `price` when server omits final_price_xp.
+    /// Custom init. Session 2 bug fix: every string/number field now uses
+    /// `try?` with a sensible fallback so a single missing/null field can't
+    /// blow up the whole array decode. Previously any item row with a null
+    /// `description` or `icon_symbol` in the DB would silently break the
+    /// entire store catalog and the user would see "No items in this
+    /// section" with no signal of the underlying cause.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // `key` is the unique identifier — still throw if it's genuinely
+        // missing, so a malformed row doesn't become a ghost entry.
         key          = try c.decode(String.self, forKey: .key)
-        name         = try c.decode(String.self, forKey: .name)
-        description  = try c.decode(String.self, forKey: .description)
-        iconSymbol   = try c.decode(String.self, forKey: .iconSymbol)
-        itemType     = try c.decode(String.self, forKey: .itemType)
-        rarity       = try c.decode(String.self, forKey: .rarity)
-        price        = try c.decode(Int.self, forKey: .price)
-        creditPrice  = try c.decodeIfPresent(Int.self, forKey: .creditPrice)
-        storeSection = try c.decode(String.self, forKey: .storeSection)
-        isEnabled    = try c.decode(Bool.self, forKey: .isEnabled)
+        name         = (try? c.decode(String.self, forKey: .name))          ?? key
+        description  = (try? c.decode(String.self, forKey: .description))   ?? ""
+        iconSymbol   = (try? c.decode(String.self, forKey: .iconSymbol))    ?? "questionmark.square"
+        itemType     = (try? c.decode(String.self, forKey: .itemType))      ?? "cosmetic"
+        rarity       = (try? c.decode(String.self, forKey: .rarity))        ?? "common"
+        price        = (try? c.decode(Int.self,    forKey: .price))         ?? 0
+        creditPrice  = try? c.decodeIfPresent(Int.self, forKey: .creditPrice) ?? nil
+        storeSection = (try? c.decode(String.self, forKey: .storeSection))  ?? "permanent"
+        isEnabled    = (try? c.decode(Bool.self,   forKey: .isEnabled))     ?? true
         finalPriceXP         = (try? c.decode(Int.self, forKey: .finalPriceXP))         ?? price
         finalPriceCredits    = (try? c.decode(Int.self, forKey: .finalPriceCredits))    ?? (creditPrice ?? 0)
         effectiveDiscountPct = (try? c.decode(Int.self, forKey: .effectiveDiscountPct)) ?? 0
-        bonusStrength   = try c.decodeIfPresent(Double.self, forKey: .bonusStrength)
-        bonusEndurance  = try c.decodeIfPresent(Double.self, forKey: .bonusEndurance)
-        bonusDiscipline = try c.decodeIfPresent(Double.self, forKey: .bonusDiscipline)
-        bonusEnergy     = try c.decodeIfPresent(Double.self, forKey: .bonusEnergy)
-        bonusFocus      = try c.decodeIfPresent(Double.self, forKey: .bonusFocus)
-        bonusHealth     = try c.decodeIfPresent(Double.self, forKey: .bonusHealth)
-        xpMultiplier    = try c.decodeIfPresent(Double.self, forKey: .xpMultiplier)
+        bonusStrength   = try? c.decodeIfPresent(Double.self, forKey: .bonusStrength)   ?? nil
+        bonusEndurance  = try? c.decodeIfPresent(Double.self, forKey: .bonusEndurance)  ?? nil
+        bonusDiscipline = try? c.decodeIfPresent(Double.self, forKey: .bonusDiscipline) ?? nil
+        bonusEnergy     = try? c.decodeIfPresent(Double.self, forKey: .bonusEnergy)     ?? nil
+        bonusFocus      = try? c.decodeIfPresent(Double.self, forKey: .bonusFocus)      ?? nil
+        bonusHealth     = try? c.decodeIfPresent(Double.self, forKey: .bonusHealth)     ?? nil
+        xpMultiplier    = try? c.decodeIfPresent(Double.self, forKey: .xpMultiplier)    ?? nil
     }
 
     var rarityColor: Color {

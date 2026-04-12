@@ -366,9 +366,16 @@ final class LeaderboardService: ObservableObject {
 // MARK: - Public Models
 
 struct LeaderboardEntry: Codable, Identifiable {
-    // id uses playerId when available; falls back to displayName+rank to avoid collisions
-    var id: String { playerId ?? "\(displayName)-\(rank ?? 0)" }
+    // id uses cloudkitUserId when available (stable across player_id drift),
+    // then playerId, then displayName+rank as last-resort.
+    var id: String { cloudkitUserId ?? playerId ?? "\(displayName)-\(rank ?? 0)" }
 
+    /// CloudKit record name — added in session 2 as the defensive lookup
+    /// key for public profile fetches. player_id is prone to drift between
+    /// leaderboard and player_profiles tables when client-generated local
+    /// ids get overwritten by server-side defaults; cloudkit_user_id is
+    /// the stable universal key so PublicProfileView uses it first.
+    let cloudkitUserId:  String?
     let playerId:        String?
     let displayName:     String
     let level:           Int?
@@ -381,6 +388,7 @@ struct LeaderboardEntry: Codable, Identifiable {
     let isCurrentUser:   Bool?
 
     enum CodingKeys: String, CodingKey {
+        case cloudkitUserId = "cloudkit_user_id"
         case playerId       = "player_id"
         case displayName    = "display_name"
         case level
@@ -396,7 +404,8 @@ struct LeaderboardEntry: Codable, Identifiable {
     // Memberwise init for constructing placeholder entries in code.
     init(playerId: String?, displayName: String, level: Int?, totalXP: Int?,
          weeklyXP: Int?, weeklyWorkouts: Int?, rank: Int?, currentStreak: Int?,
-         avatarKey: String?, isCurrentUser: Bool?) {
+         avatarKey: String?, isCurrentUser: Bool?, cloudkitUserId: String? = nil) {
+        self.cloudkitUserId = cloudkitUserId
         self.playerId       = playerId
         self.displayName    = displayName
         self.level          = level
@@ -412,6 +421,7 @@ struct LeaderboardEntry: Codable, Identifiable {
     // Custom decoder: every field is optional so no response shape can cause a missing-key crash.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        cloudkitUserId = try? c.decodeIfPresent(String.self, forKey: .cloudkitUserId)
         playerId       = try? c.decodeIfPresent(String.self, forKey: .playerId)
         displayName    = (try? c.decodeIfPresent(String.self, forKey: .displayName)) ?? "Unknown"
         level          = try? c.decodeIfPresent(Int.self,    forKey: .level)

@@ -35,11 +35,18 @@ struct AvatarPickerView: View {
     }
 
     private var groupedCatalog: [(category: String, avatars: [AvatarTemplate])] {
+        // Bug fix: previously `$0.isUnlocked` was part of this filter, which
+        // removed locked avatars from the grid entirely. As of session 2,
+        // locked avatars (including the 3-male / 3-female `item_purchase`
+        // set — Shadow Assassin, Storm Sorcerer, Iron Villain, and their
+        // female counterparts) render with the existing AvatarCell lock
+        // overlay so the user sees them dimmed instead of missing.
+        // We still gate on UIImage(named:) so avatars whose PNG isn't
+        // bundled don't render as blank cells.
         categoryOrder.compactMap { cat in
             let items = avatarService.catalog.filter {
                 $0.category == cat
                 && $0.key.hasSuffix(genderSuffix)
-                && $0.isUnlocked
                 && UIImage(named: $0.key) != nil
             }
             return items.isEmpty ? nil : (cat, items)

@@ -285,8 +285,22 @@ struct PublicProfileView: View {
             "cloudkit_user_id": LeaderboardService.shared.currentUserID ?? "",
         ]
 
-        // Use player_id if available, otherwise fall back to constructing from entry
-        if let playerId = entry.playerId, !playerId.isEmpty {
+        // Session 2 bug fix: prefer target_cloudkit_user_id over target_player_id.
+        //
+        // Early builds let the iOS client generate a local `player_id` on first
+        // launch (before the server had authoritative IDs), and leaderboard rows
+        // stored that local ID. When player_profiles later got a row inserted
+        // via a different code path, the DB generated a fresh player_id. The
+        // two tables ended up pointing at the same cloudkit_user_id with
+        // different player_ids, and tapping a leaderboard row returned
+        // "Player not found" because the proxy looked up by player_id.
+        //
+        // cloudkit_user_id is the stable universal key. Use it first; fall
+        // back to player_id only when we don't have a CloudKit id (e.g.,
+        // deep-link handoffs from rpt://addfriend/{CODE}).
+        if let cloudkitUserId = entry.cloudkitUserId, !cloudkitUserId.isEmpty {
+            body["target_cloudkit_user_id"] = cloudkitUserId
+        } else if let playerId = entry.playerId, !playerId.isEmpty {
             body["target_player_id"] = playerId
         }
 

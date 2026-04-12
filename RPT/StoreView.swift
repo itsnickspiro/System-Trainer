@@ -55,6 +55,36 @@ struct StoreContentView: View {
                 Spacer()
                 ProgressView()
                 Spacer()
+            } else if store.storeItems.isEmpty, store.lastError != nil {
+                // Session 2 bug fix: surface load failures instead of
+                // showing the misleading "No items in this section" empty
+                // state. Previously the store silently showed empty when
+                // StoreService.fetchStore's decode failed.
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 44))
+                        .foregroundColor(.orange)
+                    Text("Couldn't load the store")
+                        .foregroundColor(.primary)
+                    Text(store.lastError ?? "")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Button {
+                        Task { await store.refresh(force: true) }
+                    } label: {
+                        Text("Try Again")
+                            .font(.headline)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 10)
+                            .background(Color.orange, in: Capsule())
+                            .foregroundColor(.white)
+                    }
+                    .padding(.top, 8)
+                }
+                Spacer()
             } else if filteredItems.isEmpty {
                 Spacer()
                 VStack(spacing: 12) {

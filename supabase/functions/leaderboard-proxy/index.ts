@@ -117,7 +117,7 @@ serve(async (req) => {
     if (action === "get_global") {
       const { data, error, count } = await supabase
         .from("leaderboard")
-        .select("player_id, display_name, level, total_xp, rank, current_streak, avatar_key, last_active_at", { count: "exact" })
+        .select("cloudkit_user_id, player_id, display_name, level, total_xp, rank, current_streak, avatar_key, last_active_at", { count: "exact" })
         .eq("is_banned", false)
         .order("total_xp", { ascending: false })
         .order("level", { ascending: false })
@@ -150,7 +150,7 @@ serve(async (req) => {
 
     // GET WEEKLY LEADERBOARD
     if (action === "get_weekly") {
-      const { data, error } = await supabase.from("leaderboard").select("player_id, display_name, level, weekly_xp, weekly_workouts, rank, avatar_key").eq("is_banned", false).order("weekly_xp", { ascending: false }).range(offset, offset + pageSize - 1);
+      const { data, error } = await supabase.from("leaderboard").select("cloudkit_user_id, player_id, display_name, level, weekly_xp, weekly_workouts, rank, avatar_key").eq("is_banned", false).order("weekly_xp", { ascending: false }).range(offset, offset + pageSize - 1);
       if (error) throw error;
       (data ?? []).forEach((entry: Record<string, unknown>, i: number) => { entry.rank = offset + i + 1; });
       return new Response(JSON.stringify({ entries: data ?? [], page }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -162,7 +162,7 @@ serve(async (req) => {
       const { data: friends } = await supabase.from("friend_connections").select("friend_cloudkit_user_id").eq("cloudkit_user_id", cloudkitUserId).eq("status", "accepted");
       const friendIds = (friends ?? []).map((f: Record<string, unknown>) => f.friend_cloudkit_user_id).filter(Boolean);
       friendIds.push(cloudkitUserId); // include self
-      const { data, error } = await supabase.from("leaderboard").select("player_id, display_name, level, total_xp, rank, current_streak, avatar_key").in("cloudkit_user_id", friendIds).eq("is_banned", false).order("total_xp", { ascending: false });
+      const { data, error } = await supabase.from("leaderboard").select("cloudkit_user_id, player_id, display_name, level, total_xp, rank, current_streak, avatar_key").in("cloudkit_user_id", friendIds).eq("is_banned", false).order("total_xp", { ascending: false });
       if (error) throw error;
       (data ?? []).forEach((entry: Record<string, unknown>, i: number) => { entry.rank = i + 1; });
       return new Response(JSON.stringify({ entries: data ?? [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });

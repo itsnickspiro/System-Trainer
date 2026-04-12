@@ -233,6 +233,11 @@ struct AvatarTemplate: Codable, Identifiable {
             return "Achievement"
         case "gp":
             return "\(gpPrice ?? 0) GP"
+        case "item_purchase":
+            // These avatars unlock by buying a tied item from the Store tab.
+            // Until F6 v2 wires a direct "Unlock" button inside the picker,
+            // the label just tells the user where to go.
+            return "Unlock via Store"
         case "event":
             return "Event Exclusive"
         default:
