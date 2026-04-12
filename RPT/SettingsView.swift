@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var showingDietInfo = false
     @State private var showingGuildView = false
     @State private var showingBugReport = false
+    @State private var showingAdminHub = false
     @State private var showingActivityLog = false
     @State private var showingNotificationInbox = false
     @State private var showingChallenges = false
@@ -514,6 +515,25 @@ struct SettingsView: View {
                     Text("Reports go straight to the System Trainer team and are reviewed automatically every few hours.")
                 }
 
+                // Admin Section — only visible to admin users
+                if playerProfile.isAdmin {
+                    Section("Admin") {
+                        Button {
+                            showingAdminHub = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "shield.checkered")
+                                    .foregroundColor(.orange)
+                                Text("Admin Panel")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 // About Section
                 Section("About") {
                     HStack {
@@ -629,6 +649,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingNotificationInbox) {
                 NotificationInboxView()
+            }
+            .sheet(isPresented: $showingAdminHub) {
+                AdminHubView()
             }
             .alert("Sign out of Apple?", isPresented: $showingSignOutConfirm) {
                 Button("Cancel", role: .cancel) { }

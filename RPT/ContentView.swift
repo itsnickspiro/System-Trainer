@@ -12,10 +12,8 @@ struct ContentView: View {
     @ObservedObject private var dataManager = DataManager.shared
     @ObservedObject private var remoteConfig = RemoteConfigService.shared
     @ObservedObject private var notificationInbox = NotificationInboxManager.shared
-    @ObservedObject private var profileService = PlayerProfileService.shared
     @State private var now = Date()
     @State private var showingSettings = false
-    @State private var showingAdminHub = false
     @State private var showingTrainer = false
     private var timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -132,9 +130,6 @@ struct ContentView: View {
         .sheet(isPresented: $showingTrainer) {
             CoachView()
         }
-        .sheet(isPresented: $showingAdminHub) {
-            AdminHubView()
-        }
     }
 
     // MARK: - Countdown Timer View
@@ -166,20 +161,6 @@ struct ContentView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                }
-
-                // Admin panel — visible only for admin users
-                if profileService.isAdmin {
-                    Button(action: { showingAdminHub = true }) {
-                        Image(systemName: "shield.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.orange)
-                            .padding(6)
-                            .background(
-                                Circle()
-                                    .fill(Color.orange.opacity(0.15))
-                            )
-                    }
                 }
 
                 // Settings quick-access button

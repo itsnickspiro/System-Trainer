@@ -64,7 +64,9 @@ struct HomeView: View {
                         recoveryRecommendationCard(for: currentProfile)
                     }
 
-                    // Quests to complete
+                    // Weekly AI review briefing — collapsible, above raids
+                    WeeklyReviewCard()
+
                     // Active weekly raid boss — renders if a boss is alive
                     // for the current week.
                     BossRaidCard()
@@ -76,10 +78,6 @@ struct HomeView: View {
                     // Rival head-to-head — only renders when the player
                     // has set a rival from the leaderboard.
                     RivalBannerView()
-
-                    // Weekly AI review briefing — renders only on Mondays
-                    // and only until the user taps the dismiss button.
-                    WeeklyReviewCard()
 
                     // Session 2 UX move: WeightLogCard moved to WorkoutView
                     // (Training tab) — it's more contextually relevant there.
