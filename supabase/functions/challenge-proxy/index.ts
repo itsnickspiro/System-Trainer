@@ -12,6 +12,31 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// F9 phase 1: write-path shadowban gate.
+async function isBanned(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+): Promise<boolean> {
+  if (!cloudkitUserId) return false;
+  try {
+    const { data, error } = await supabase.rpc("is_player_banned", {
+      p_cloudkit_user_id: cloudkitUserId,
+    });
+    if (error) {
+      console.error("is_player_banned RPC failed — failing open:", error);
+      return false;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("is_player_banned threw — failing open:", e);
+    return false;
+  }
+}
+
+function bannedResponse() {
+  return jsonResponse({ success: false, error: "service_unavailable" }, 503);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -34,6 +59,13 @@ serve(async (req) => {
 
     // ----- SEND CHALLENGE -----
     if (action === "send_challenge") {
+      // F9 phase 1: banned players can't send challenges.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
+      // Also block challenges directed AT a banned player — prevents
+      // exploiting the challenge system as a harassment vector after
+      // the target gets banned.
+      const preTargetId = (body.target_cloudkit_user_id ?? "").toString();
+      if (preTargetId && await isBanned(supabase, preTargetId)) return bannedResponse();
       const targetId = (body.target_cloudkit_user_id ?? "").toString();
       const challengerName = (body.challenger_display_name ?? "").toString();
       const challengedName = (body.challenged_display_name ?? "").toString();
@@ -85,6 +117,9 @@ serve(async (req) => {
 
     // ----- RESPOND TO CHALLENGE -----
     if (action === "respond_challenge") {
+      // F9 phase 1: banned players can't accept or decline challenges,
+      // which effectively freezes pending challenges targeting them.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
       const challengeId = (body.challenge_id ?? "").toString();
       const response = (body.response ?? "").toString(); // "accept" or "decline"
 
@@ -161,6 +196,10 @@ serve(async (req) => {
     // ----- UPDATE PROGRESS -----
     if (action === "update_progress") {
       if (!cloudkitUserId) return jsonResponse({ error: "Missing cloudkit_user_id" }, 400);
+      // F9 phase 1: banned players' challenge progress is frozen at
+      // pre-ban value. DataManager still calls this on XP gain, so the
+      // gate prevents the banned user from winning active challenges.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
       const progressDelta = Math.max(0, parseInt(body.progress_delta ?? "0", 10));
       if (progressDelta <= 0) return jsonResponse({ success: true, updated: 0 });
 

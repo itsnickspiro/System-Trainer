@@ -6,6 +6,34 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-app-secret",
 };
 
+// F9 phase 1: write-path shadowban gate.
+async function isBanned(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+): Promise<boolean> {
+  if (!cloudkitUserId) return false;
+  try {
+    const { data, error } = await supabase.rpc("is_player_banned", {
+      p_cloudkit_user_id: cloudkitUserId,
+    });
+    if (error) {
+      console.error("is_player_banned RPC failed — failing open:", error);
+      return false;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("is_player_banned threw — failing open:", e);
+    return false;
+  }
+}
+
+function bannedResponse() {
+  return new Response(
+    JSON.stringify({ error: "service_unavailable" }),
+    { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -251,6 +279,9 @@ async function handlePurchase(
 ) {
   if (!itemKey) return errorResponse(400, "Missing item_key");
 
+  // F9 phase 1: banned players can't buy items.
+  if (await isBanned(supabase, cloudKitUserID)) return bannedResponse();
+
   // Fetch item definition
   const { data: item, error: itemErr } = await supabase
     .from("items")
@@ -362,6 +393,9 @@ async function handleEquip(
   equip: boolean
 ) {
   if (!itemKey) return errorResponse(400, "Missing item_key");
+
+  // F9 phase 1: banned players can't equip items either.
+  if (await isBanned(supabase, cloudKitUserID)) return bannedResponse();
 
   const { data: item } = await supabase
     .from("items")

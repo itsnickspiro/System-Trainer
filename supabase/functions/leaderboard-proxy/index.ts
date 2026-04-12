@@ -58,6 +58,37 @@ function rateLimitedResponse(action: string) {
   );
 }
 
+// F9 phase 1: write-path shadowban gate. Every mutating action calls this
+// before doing any work. Banned players get a generic 503 so the client
+// shows "Something went wrong" rather than "You are banned" — the client
+// should not surface the ban state directly.
+async function isBanned(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+): Promise<boolean> {
+  if (!cloudkitUserId) return false;
+  try {
+    const { data, error } = await supabase.rpc("is_player_banned", {
+      p_cloudkit_user_id: cloudkitUserId,
+    });
+    if (error) {
+      console.error("is_player_banned RPC failed — failing open:", error);
+      return false;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("is_player_banned threw — failing open:", e);
+    return false;
+  }
+}
+
+function bannedResponse() {
+  return new Response(
+    JSON.stringify({ success: false, error: "service_unavailable" }),
+    { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const appSecret = Deno.env.get("RPT_APP_SECRET");
@@ -155,6 +186,10 @@ serve(async (req) => {
     if (action === "upsert_entry") {
       if (!cloudkitUserId) return new Response(JSON.stringify({ error: "cloudkit_user_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+      // F9 phase 1: shadowban gate. Banned players' leaderboard rows stay
+      // frozen at their pre-ban state and never get new data pushed.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
+
       // Build the entry from either shape. Whitelist columns to avoid letting
       // a malicious client write to forbidden fields like is_banned/is_flagged
       // or the server-computed weekly_xp / weekly_workouts / week_start_date.
@@ -241,6 +276,8 @@ serve(async (req) => {
     if (action === "add_friend") {
       const friendPlayerId = body.friend_player_id ?? "";
       if (!cloudkitUserId || !friendPlayerId) return new Response(JSON.stringify({ error: "Missing params" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      // F9 phase 1: banned players can't send friend requests.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
       // Resolve friend's cloudkit ID from player_id
       const { data: friendProfile } = await supabase.from("player_profiles").select("cloudkit_user_id").eq("player_id", friendPlayerId).maybeSingle();
       const { error } = await supabase.from("friend_connections").upsert({ cloudkit_user_id: cloudkitUserId, friend_player_id: friendPlayerId, friend_cloudkit_user_id: friendProfile?.cloudkit_user_id ?? null, status: "accepted" }, { onConflict: "cloudkit_user_id,friend_player_id" });

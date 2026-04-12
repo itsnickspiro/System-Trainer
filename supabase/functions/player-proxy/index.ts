@@ -85,6 +85,34 @@ function rateLimitedResponse(action: string) {
   );
 }
 
+// F9 phase 1: write-path shadowban gate.
+async function isBanned(
+  supabase: ReturnType<typeof createClient>,
+  cloudkitUserId: string,
+): Promise<boolean> {
+  if (!cloudkitUserId) return false;
+  try {
+    const { data, error } = await supabase.rpc("is_player_banned", {
+      p_cloudkit_user_id: cloudkitUserId,
+    });
+    if (error) {
+      console.error("is_player_banned RPC failed — failing open:", error);
+      return false;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("is_player_banned threw — failing open:", e);
+    return false;
+  }
+}
+
+function bannedResponse() {
+  return new Response(
+    JSON.stringify({ success: false, error: "service_unavailable" }),
+    { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
 // ── Sign in with Apple server-side REST revocation ────────────────────────
 // Apple Guideline 5.1.1(v) compliance. When a user taps Delete Account we
 // should not only wipe our own database — we should also invalidate their
@@ -436,6 +464,9 @@ serve(async (req) => {
     // Only whitelisted columns are written, and undefined/null values are
     // skipped so the client can do partial updates without nuking existing data.
     if (action === "upsert_profile") {
+      // F9 phase 1: banned players can't push profile updates (e.g. to change
+      // display_name repeatedly). Their last-known state stays frozen.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
       const upsertPayload: Record<string, unknown> = {
         cloudkit_user_id: cloudkitUserId,
         updated_at: new Date().toISOString(),
@@ -491,6 +522,8 @@ serve(async (req) => {
 
     // ADD CREDITS — atomic credit transaction
     if (action === "add_credits") {
+      // F9 phase 1: banned players can't earn/spend credits.
+      if (await isBanned(supabase, cloudkitUserId)) return bannedResponse();
       const amount: number = body.amount ?? 0;
       const txType: string = body.transaction_type ?? "quest_reward";
       const refKey: string = body.reference_key ?? "";
