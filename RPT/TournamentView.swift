@@ -125,7 +125,7 @@ struct TournamentView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                Spacer(minHeight: 100)
+                Spacer(minLength: 100)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -161,7 +161,7 @@ struct TournamentView: View {
                         }
                     }
                 }
-                Spacer(minHeight: 100)
+                Spacer(minLength: 100)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -300,7 +300,7 @@ struct TournamentDetailView: View {
                         participantsSection(detail.participants)
                     }
 
-                    Spacer(minHeight: 40)
+                    Spacer(minLength: 40)
                 }
                 .padding()
             } else {

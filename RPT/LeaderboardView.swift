@@ -733,7 +733,7 @@ private struct SeasonLeaderboardView: View {
                     rewardsBanner
                 }
 
-                Spacer(minHeight: 100)
+                Spacer(minLength: 100)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -880,14 +880,17 @@ private struct SeasonLeaderboardView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isMe ?
-                      (colorScheme == .dark ? Color.cyan.opacity(0.1) : Color.cyan.opacity(0.05)) :
-                      (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.8)))
-                .overlay(RoundedRectangle(cornerRadius: 12)
-                    .stroke(isMe ? Color.cyan.opacity(0.5) : Color.gray.opacity(0.2), lineWidth: 1))
-        )
+        .background(seasonRowBackground(isMe: isMe))
+    }
+
+    private func seasonRowBackground(isMe: Bool) -> some View {
+        let fillColor: Color = isMe
+            ? (colorScheme == .dark ? Color.cyan.opacity(0.1) : Color.cyan.opacity(0.05))
+            : (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.8))
+        let strokeColor: Color = isMe ? Color.cyan.opacity(0.5) : Color.gray.opacity(0.2)
+        return RoundedRectangle(cornerRadius: 12)
+            .fill(fillColor)
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(strokeColor, lineWidth: 1))
     }
 
     private func rankColor(_ rank: Int) -> Color {
