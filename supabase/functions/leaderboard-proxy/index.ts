@@ -203,7 +203,7 @@ serve(async (req) => {
       // Fetch existing row so we can compute deltas + anti-cheat.
       const { data: existing } = await supabase
         .from("leaderboard")
-        .select("total_xp, total_workouts, weekly_xp, weekly_workouts, week_start_date, updated_at")
+        .select("total_xp, total_workouts, weekly_xp, weekly_workouts, week_start_date, season_xp, updated_at")
         .eq("cloudkit_user_id", cloudkitUserId)
         .maybeSingle();
 
@@ -251,12 +251,21 @@ serve(async (req) => {
         ? Math.min(computedWeeklyXp, (existing?.weekly_xp ?? 0))
         : computedWeeklyXp;
 
+      // F5: Season XP — accumulates across the entire active season.
+      // Unlike weekly_xp, season_xp never resets on Monday — it only
+      // resets when finalize_season() runs at season end.
+      const existingSeasonXp = existing?.season_xp ?? 0;
+      const safeSeasonXp = isFlagged
+        ? existingSeasonXp
+        : existingSeasonXp + xpDelta;
+
       const { error } = await supabase.from("leaderboard").upsert({
         ...entry,
         cloudkit_user_id: cloudkitUserId,
         weekly_xp: safeWeeklyXp,
         weekly_workouts: computedWeeklyWorkouts,
         week_start_date: currentMondayISO,
+        season_xp: safeSeasonXp,
         is_flagged: isFlagged,
         last_active_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

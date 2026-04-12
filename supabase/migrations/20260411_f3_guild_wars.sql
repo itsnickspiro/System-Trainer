@@ -1,0 +1,4 @@
+-- F3: Guild Wars — see apply_migration for full version applied to DB.
+-- Tables: guild_wars, guild_war_participants
+-- Functions: resolve_guild_war
+-- Remote config: guild_wars_enabled, guild_war_max_duration_days, guild_war_min_guild_level, guild_war_prize_gp_per_member

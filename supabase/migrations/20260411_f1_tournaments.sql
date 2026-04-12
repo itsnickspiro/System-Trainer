@@ -1,0 +1,4 @@
+-- F1: Tournaments — see apply_migration for full version applied to DB.
+-- Tables: tournaments, tournament_participants, tournament_brackets
+-- Functions: admin_create_tournament, generate_tournament_bracket
+-- Remote config: tournaments_enabled, tournament_min_level_floor, tournament_polling_interval_sec

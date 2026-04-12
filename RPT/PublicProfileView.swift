@@ -15,6 +15,8 @@ struct PublicProfileView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showingChallengeSheet = false
+    @State private var showingReportSheet = false
+    @State private var reportSubmitted = false
 
     var body: some View {
         ScrollView {
@@ -34,6 +36,35 @@ struct PublicProfileView: View {
         .background(colorScheme == .dark ? Color.black : Color(.systemGroupedBackground))
         .navigationTitle(entry.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if entry.isCurrentUser != true {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button(role: .destructive) {
+                            showingReportSheet = true
+                        } label: {
+                            Label("Report Player", systemImage: "flag")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingReportSheet) {
+            ReportPlayerSheet(
+                targetCloudKitID: entry.cloudkitUserId ?? entry.playerId ?? "",
+                targetPlayerID: entry.playerId,
+                targetDisplayName: entry.displayName,
+                onSubmitted: { reportSubmitted = true }
+            )
+        }
+        .alert("Report Submitted", isPresented: $reportSubmitted) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Thank you for your report. Our team will review it.")
+        }
         .task { await fetchProfile() }
     }
 
@@ -397,5 +428,101 @@ struct PublicProfile: Decodable {
         totalWorkoutsLogged  = try? c.decodeIfPresent(Int.self, forKey: .totalWorkoutsLogged)
         totalQuestsCompleted = try? c.decodeIfPresent(Int.self, forKey: .totalQuestsCompleted)
         totalDaysActive      = try? c.decodeIfPresent(Int.self, forKey: .totalDaysActive)
+    }
+}
+
+// MARK: - Report Player Sheet
+
+struct ReportPlayerSheet: View {
+    let targetCloudKitID: String
+    let targetPlayerID: String?
+    let targetDisplayName: String
+    var onSubmitted: () -> Void = {}
+
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var moderation = ModerationService.shared
+    @State private var selectedReason: ReportReason?
+    @State private var description = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Report \(targetDisplayName)")
+                        .font(.headline)
+                    Text("Select a reason for your report. False reports may result in action against your account.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section("Reason") {
+                    ForEach(ReportReason.allCases) { reason in
+                        Button {
+                            selectedReason = reason
+                        } label: {
+                            HStack {
+                                Image(systemName: reason.icon)
+                                    .frame(width: 24)
+                                    .foregroundColor(selectedReason == reason ? .red : .secondary)
+                                Text(reason.displayName)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if selectedReason == reason {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.red)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Details (optional)") {
+                    TextField("Describe the issue...", text: $description, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+
+                if let error = errorMessage {
+                    Section {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Report Player")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit") {
+                        Task { await submitReport() }
+                    }
+                    .disabled(selectedReason == nil || moderation.isSubmitting)
+                    .foregroundColor(.red)
+                }
+            }
+        }
+    }
+
+    private func submitReport() async {
+        guard let reason = selectedReason else { return }
+        let result = await ModerationService.shared.reportPlayer(
+            reportedCloudKitID: targetCloudKitID,
+            reportedPlayerID: targetPlayerID,
+            reason: reason,
+            description: description.isEmpty ? nil : description
+        )
+        switch result {
+        case .success:
+            dismiss()
+            onSubmitted()
+        case .alreadyReported:
+            errorMessage = "You already reported this player today."
+        case .error(let msg):
+            errorMessage = msg
+        }
     }
 }

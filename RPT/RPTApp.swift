@@ -226,6 +226,12 @@ struct RPTApp: App {
                 await LeaderboardService.shared.refresh()
                 // Step 12: Avatar catalog and current equipped avatar
                 await AvatarService.shared.refresh()
+                // Step 12b: Season data (non-blocking, after leaderboard)
+                await SeasonService.shared.refresh()
+                // Step 12c: Tournaments (non-blocking)
+                await TournamentService.shared.refresh()
+                // Step 12d: Guild wars (non-blocking, after guild data)
+                await GuildWarService.shared.refresh()
                 // Step 13: Activate Watch connectivity and send initial stats
                 PhoneSessionManager.shared.activate()
                 PhoneSessionManager.shared.sendStats()

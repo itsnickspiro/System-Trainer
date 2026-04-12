@@ -17,12 +17,14 @@ struct LeaderboardView: View {
 
     enum LeaderboardTab: String, CaseIterable {
         case global  = "Global"
+        case season  = "Season"
         case weekly  = "Weekly"
         case friends = "Friends"
 
         var icon: String {
             switch self {
             case .global:  return "globe"
+            case .season:  return "trophy.fill"
             case .weekly:  return "calendar.badge.clock"
             case .friends: return "person.2.fill"
             }
@@ -37,6 +39,8 @@ struct LeaderboardView: View {
                 TabView(selection: $selectedTab) {
                     GlobalLeaderboardView()
                         .tag(LeaderboardTab.global)
+                    SeasonLeaderboardView()
+                        .tag(LeaderboardTab.season)
                     WeeklyLeaderboardView()
                         .tag(LeaderboardTab.weekly)
                     FriendsLeaderboardView()
@@ -696,6 +700,233 @@ struct LeaderboardRow: View {
                             lineWidth: isRival ? 1.5 : 1))
         )
         .shadow(color: isRival ? .red.opacity(0.25) : (entry.isCurrentUser == true ? .cyan.opacity(0.2) : .clear), radius: 4, x: 0, y: 2)
+    }
+}
+
+// MARK: - Season Leaderboard
+
+private struct SeasonLeaderboardView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var season = SeasonService.shared
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                if let activeSeason = season.activeSeason {
+                    seasonHeader(activeSeason)
+                }
+
+                if season.isLoading {
+                    ProgressView("Loading Season...")
+                        .foregroundColor(.cyan)
+                        .padding()
+                } else if season.activeSeason == nil {
+                    noSeasonView
+                } else if season.topPlayers.isEmpty {
+                    emptySeasonView
+                } else {
+                    seasonRankings
+                }
+
+                // Unclaimed rewards banner
+                if season.hasUnclaimedRewards {
+                    rewardsBanner
+                }
+
+                Spacer(minHeight: 100)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+        }
+        .background(colorScheme == .dark ? Color.black.opacity(0.95) : Color.white)
+        .task { await season.refresh() }
+    }
+
+    private func seasonHeader(_ s: Season) -> some View {
+        VStack(spacing: 8) {
+            Text(s.label)
+                .font(.title3.weight(.bold))
+                .foregroundColor(.orange)
+
+            HStack(spacing: 16) {
+                VStack {
+                    Text("\(season.mySeasonXP)")
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                    Text("My Season XP")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                if let rank = season.myRank {
+                    VStack {
+                        Text("#\(rank)")
+                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                            .foregroundColor(.yellow)
+                        Text("My Rank")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                VStack {
+                    Text("\(season.remainingDays)d")
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundColor(.orange)
+                    Text("Remaining")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // Prize preview
+            HStack(spacing: 12) {
+                prizeChip("1st", gp: s.rewardGpFirst ?? 0, color: .yellow)
+                prizeChip("Top 10", gp: s.rewardGpTop10 ?? 0, color: .gray)
+                prizeChip("Top 50", gp: s.rewardGpTop50 ?? 0, color: .orange)
+            }
+            .padding(.top, 4)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.systemGray6))
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.orange.opacity(0.3), lineWidth: 1))
+        )
+    }
+
+    private func prizeChip(_ label: String, gp: Int, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(color)
+            Text("\(gp) GP")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(color.opacity(0.1)))
+    }
+
+    private var noSeasonView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "trophy.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.orange.opacity(0.5))
+            Text("No Active Season")
+                .font(.headline)
+            Text("Check back soon for the next competitive season!")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+
+    private var emptySeasonView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "figure.run")
+                .font(.system(size: 48))
+                .foregroundColor(.cyan.opacity(0.5))
+            Text("Season Just Started")
+                .font(.headline)
+            Text("Earn XP to climb the season leaderboard!")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+    }
+
+    private var seasonRankings: some View {
+        ForEach(season.topPlayers) { entry in
+            seasonRow(entry)
+        }
+    }
+
+    private func seasonRow(_ entry: SeasonLeaderboardEntry) -> some View {
+        let isMe = entry.cloudkitUserId == LeaderboardService.shared.currentUserID
+
+        return HStack(spacing: 12) {
+            // Rank
+            Text("\(entry.rank ?? 0)")
+                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                .foregroundColor(rankColor(entry.rank ?? 0))
+                .frame(width: 32)
+
+            // Avatar
+            AvatarImageView(key: entry.avatarKey ?? "avatar_default", size: 40)
+
+            // Name + Level
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                if let level = entry.level {
+                    Text("Lv. \(level)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Season XP
+            Text("\(entry.seasonXp ?? 0) XP")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyan)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isMe ?
+                      (colorScheme == .dark ? Color.cyan.opacity(0.1) : Color.cyan.opacity(0.05)) :
+                      (colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.8)))
+                .overlay(RoundedRectangle(cornerRadius: 12)
+                    .stroke(isMe ? Color.cyan.opacity(0.5) : Color.gray.opacity(0.2), lineWidth: 1))
+        )
+    }
+
+    private func rankColor(_ rank: Int) -> Color {
+        switch rank {
+        case 1: return .yellow
+        case 2: return .gray
+        case 3: return .orange
+        default: return .secondary
+        }
+    }
+
+    private var rewardsBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "gift.fill")
+                .foregroundColor(.yellow)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Season Rewards Available!")
+                    .font(.subheadline.weight(.bold))
+                Text("Tap to claim your rewards")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.yellow.opacity(0.1))
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.yellow.opacity(0.3), lineWidth: 1))
+        )
+        .onTapGesture {
+            Task {
+                for reward in season.myRewards where reward.claimedAt == nil {
+                    _ = await season.claimReward(reward.id)
+                }
+            }
+        }
     }
 }
 

@@ -197,6 +197,8 @@ struct GuildView: View {
                 if let raid = service.currentRaid {
                     raidCard(raid)
                 }
+                // Guild Wars section
+                GuildWarsSection()
                 if !guild.weeklyFocus.isEmpty || canEditFocus {
                     focusBanner(guild)
                 }
