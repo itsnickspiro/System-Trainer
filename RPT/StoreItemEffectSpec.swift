@@ -289,10 +289,17 @@ enum StoreItemEffectAudit {
                 }
             case .equipmentXPMultiplier:
                 if item.xpMultiplier == nil || (item.xpMultiplier ?? 1) <= 1 {
+                    // Explicit local binding — previously used
+                    // `item.xpMultiplier.map(String.init) ?? "nil"` which
+                    // tripped the Release-mode Swift type-checker because
+                    // String.init has dozens of overloads and the combined
+                    // Optional<Double?>.map → String? ?? String expression
+                    // blows up constraint solving. Explicit format avoids it.
+                    let xpStr: String = item.xpMultiplier.map { String(format: "%.2f", $0) } ?? "nil"
                     issues.append(AuditIssue(
                         itemKey: item.key,
                         severity: .missingBonus,
-                        reason: "Spec expects xp_multiplier > 1 for equipment, catalog reports \(item.xpMultiplier.map(String.init) ?? "nil")"
+                        reason: "Spec expects xp_multiplier > 1 for equipment, catalog reports \(xpStr)"
                     ))
                 }
             case .consumableAllStatsBoost, .consumableStatBonus:
@@ -316,10 +323,13 @@ enum StoreItemEffectAudit {
                 }
             case .consumableXPMultiplier:
                 if item.xpMultiplier == nil || (item.xpMultiplier ?? 1) <= 1 {
+                    // See equipmentXPMultiplier case above for why this uses
+                    // an explicit local binding instead of .map(String.init).
+                    let xpStr: String = item.xpMultiplier.map { String(format: "%.2f", $0) } ?? "nil"
                     issues.append(AuditIssue(
                         itemKey: item.key,
                         severity: .missingBonus,
-                        reason: "Spec expects consumable xp_multiplier > 1, catalog reports \(item.xpMultiplier.map(String.init) ?? "nil")"
+                        reason: "Spec expects consumable xp_multiplier > 1, catalog reports \(xpStr)"
                     ))
                 }
             case .cosmeticOnly:
