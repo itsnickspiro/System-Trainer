@@ -1097,7 +1097,7 @@ final class DataManager: ObservableObject {
         if profile.sleepHours < 6.5 {
             quests.append(Quest(
                 title: "Sleep Debt Recovery",
-                details: "Last night: \(String(format: "%.1f", profile.sleepHours))h. Sleep deficit detected. Achieve 8h tonight to restore Energy and Focus stats.",
+                details: "Last night: \(Int(profile.sleepHours))h. Sleep deficit detected. Achieve 8h tonight to restore Energy and Focus stats.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
                 xpReward: rc.int("xp_sleep_debt", default: 100), statTarget: "energy",
                 completionCondition: "sleep:8", dateTag: date
@@ -1105,7 +1105,7 @@ final class DataManager: ObservableObject {
         } else if profile.sleepHours < 7.5 {
             quests.append(Quest(
                 title: "Rest Optimization",
-                details: "Sleep logged: \(String(format: "%.1f", profile.sleepHours))h. Target 8h for maximum stat recovery.",
+                details: "Sleep logged: \(Int(profile.sleepHours))h. Target 8h for maximum stat recovery.",
                 type: .daily, createdAt: Date(), dueDate: tomorrow,
                 xpReward: rc.int("xp_sleep_normal", default: 60), statTarget: "energy",
                 completionCondition: "sleep:8", dateTag: date

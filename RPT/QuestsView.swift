@@ -431,7 +431,7 @@ struct RealWorldDataSummary: View {
                 miniMetric(title: "Steps", value: "\(profile.dailySteps)", goal: profile.dailyStepsGoal, icon: "figure.walk", color: .blue)
                 miniMetric(title: "Active Cal", value: "\(profile.dailyActiveCalories)", goal: profile.dailyActiveCaloriesGoal, icon: "flame.fill", color: .orange)
                 Button { showSleepLog = true } label: {
-                    miniMetric(title: "Sleep", value: String(format: "%.1fh", profile.sleepHours), goal: 8, icon: "bed.double.fill", color: .purple)
+                    miniMetric(title: "Sleep", value: "\(Int(profile.sleepHours))h", goal: 8, icon: "bed.double.fill", color: .purple)
                 }
                 .buttonStyle(.plain)
             }

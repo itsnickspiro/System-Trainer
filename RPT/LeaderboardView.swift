@@ -66,37 +66,40 @@ struct LeaderboardView: View {
     }
 
     private var tabSelector: some View {
-        HStack(spacing: 0) {
-            ForEach(LeaderboardTab.allCases, id: \.self) { tab in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.3)) { selectedTab = tab }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.icon).font(.system(size: 14, weight: .semibold))
-                        Text(tab.rawValue).font(.system(size: 14, weight: .semibold))
+        VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                ForEach(LeaderboardTab.allCases, id: \.self) { tab in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.3)) { selectedTab = tab }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 18, weight: .semibold))
+                            Text(tab.rawValue)
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundColor(selectedTab == tab ? .white : .secondary)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(selectedTab == tab ?
+                                      AnyShapeStyle(LinearGradient(colors: [.cyan, .blue], startPoint: .leading, endPoint: .trailing)) :
+                                      AnyShapeStyle(Color.clear))
+                        )
                     }
-                    .foregroundColor(selectedTab == tab ? .white : .secondary)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(selectedTab == tab ?
-                                  AnyShapeStyle(LinearGradient(colors: [.cyan, .blue], startPoint: .leading, endPoint: .trailing)) :
-                                  AnyShapeStyle(Color.clear))
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(colorScheme == .dark ? .black.opacity(0.2) : .gray.opacity(0.1))
+                    .overlay(RoundedRectangle(cornerRadius: 16)
+                        .stroke(colorScheme == .dark ? .gray.opacity(0.3) : .gray.opacity(0.2), lineWidth: 1))
+            )
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(colorScheme == .dark ? .black.opacity(0.2) : .gray.opacity(0.1))
-                .overlay(RoundedRectangle(cornerRadius: 16)
-                    .stroke(colorScheme == .dark ? .gray.opacity(0.3) : .gray.opacity(0.2), lineWidth: 1))
-        )
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -561,10 +564,6 @@ struct PodiumCard: View {
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundColor(positionColor)
 
-                Text("\(entry.totalXP ?? 0) XP")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
-
                 HStack(spacing: 2) {
                     Image(systemName: "flame.fill").font(.system(size: 8)).foregroundColor(.orange)
                     Text("\(entry.currentStreak ?? 0)").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundColor(.orange)
@@ -681,12 +680,12 @@ struct LeaderboardRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(showWeeklyXP ? (entry.weeklyXP ?? 0) : (entry.totalXP ?? 0))")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(entry.isCurrentUser == true ? .cyan : (colorScheme == .dark ? .white : .black))
-                Text(showWeeklyXP ? "WK XP" : "XP")
+                Text("LVL")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(.secondary)
+                Text("\(entry.level ?? 1)")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(entry.isCurrentUser == true ? .cyan : .orange)
             }
         }
         .padding(16)
